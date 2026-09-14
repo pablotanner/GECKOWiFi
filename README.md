@@ -169,6 +169,39 @@ hardware** - see below.
   is actually cryptographically verified, regardless of which flow
   triggered it.
 
+### Current State: What App can do
+
+Tapping a real network does **not** mean the app
+detected or verified anything about it. The app has no captive-portal
+awareness at all - no `NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL`
+check, no connectivity-check probe, nothing. It doesn't even know which
+scanned networks are captive portals versus open internet. Selecting one
+from the list just sets it as a cache key for the check that follows. The
+actual sequence, today, is:
+
+1. You join the network yourself, through Android's own system WiFi
+   settings, the app never initiates a connection.
+2. The captive portal opens in your browser, via the OS's own detection -
+   independent of this app.
+3. You read the redirect domain with your own eyes.
+4. You come back to this app and **type that domain in manually**, then
+   press Verify.
+5. *Only now* does anything real happen: `CertProbe.fetchCertificate()`
+   does a genuine TLS handshake against that host (reachable only because
+   you're already on that network through some other means) and the real
+   comparison logic runs against the real fetched key.
+
+So the one genuinely "real" thing the real-network path adds over a fake
+demo entry is step 5 - an actual TLS probe against an actual host, instead
+of a hardcoded SPKI hash. Everything upstream of that (knowing a captive
+portal exists, knowing its domain, timing the check to the redirect) is
+you, standing in for detection - exactly the role the hardcoded string
+plays in `FakeDemoNetworks.kt`. Closing this gap is `PcapTrafficObserver`/
+`VpnTrafficObserver`'s job: watch traffic during the "just associated,
+portal not yet resolved" window, extract the SNI hostname from the
+ClientHello automatically, and feed it into `verifyPresentedDomain()` the
+moment it's observed - no human reading a browser redirect required.
+
 ## Emulator vs. physical device
 
 | | Emulator | Physical (rooted) device |
