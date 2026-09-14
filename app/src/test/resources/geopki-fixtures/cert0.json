@@ -1,0 +1,1 @@
+{"certificate_id":"test-benign-ap-001","domain":"wifi.test.local","areas":[{"coordinates":[[[[8.5407,47.3759],[8.5427,47.3759],[8.5427,47.3779],[8.5407,47.3779],[8.5407,47.3759]]],[]],"type":"MultiPolygon"}],"areas_altitude":[[-10,50]],"not_valid_after":"2027-01-01T00:00:00Z"}

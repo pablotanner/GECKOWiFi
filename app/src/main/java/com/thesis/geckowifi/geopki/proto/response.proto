@@ -1,0 +1,55 @@
+syntax = "proto3";
+package geopki;
+
+option go_package = "pkg/comm";
+
+message CTLogServer {
+  bytes LogId = 1;
+  bytes SignedTreeHead = 2;
+}
+
+message SignedConsistencyHead {
+  bytes RootHash = 1;
+  uint64 Timestamp = 2;
+  uint64 Size = 3;
+
+  bytes Signature = 4;
+}
+
+message SignedMapHead {
+  bytes RootHash = 1;
+  uint64 Timestamp = 2;
+  repeated CTLogServer CoveredCTLogServers = 3;
+
+  bytes Signature = 4;
+}
+
+// a node corresponds to a database row
+message Node {
+  // the 51 bits of the xy bit string
+  uint64 XYBitString = 1;
+  uint32 XYBitStringLen = 2;
+
+  // the 15 bits of the z bit string
+  uint32 ZBitString = 3;
+  uint32 ZBitStringLen = 4;
+
+  // optional hash values of all children
+  optional bytes XYLeftChildHash = 5;
+  optional bytes XYRightChildHash = 6;
+  optional bytes ZLeftChildHash = 7;
+  optional bytes ZRightChildHash = 8;
+
+  // (optional) a list of certificate hashes
+  repeated bytes CertificateHashes = 9;
+}
+
+message Response {
+  optional SignedConsistencyHead SignedConsistencyHead = 1;
+  optional SignedMapHead SignedMapHead = 2;
+  optional bytes InclusionProof = 3;
+
+  repeated Node Nodes = 4;
+
+  repeated bytes Certificates = 5;
+}

@@ -1,0 +1,88 @@
+package com.thesis.geckowifi.data.local
+
+import androidx.room.*
+import androidx.room3.Entity
+import kotlinx.coroutines.flow.Flow
+
+@Entity(tableName = "verification_history")
+data class VerificationRecord(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val networkKey: String,
+    val ssid: String?,
+    val host: String,
+    val state: String,
+    val matchedCertificateId: String?,
+    val reason: String?,
+    val latitude: Double?,
+    val longitude: Double?,
+    val locationAccuracy: Float?,
+    val timestamp: Long
+)
+
+@Dao
+interface VerificationHistoryDao {
+    @Insert suspend fun insert(record: VerificationRecord): Long
+
+    @Query("SELECT * FROM verification_history ORDER BY timestamp DESC LIMIT :limit")
+    fun recent(limit: Int = 100): Flow<List<VerificationRecord>>
+
+    @Query("""SELECT * FROM verification_history
+              WHERE host = :host AND state = 'VERIFIED'
+              ORDER BY timestamp DESC LIMIT 1""")
+    suspend fun lastVerifiedFor(host: String): VerificationRecord?
+
+    @Query("DELETE FROM verification_history") suspend fun clear()
+}
+
+@Database(entities = [VerificationRecord::class], version = 1, exportSchema = false)
+abstract class GeckoDatabase : RoomDatabase() {
+    abstract fun historyDao(): VerificationHistoryDao
+}
+
+class HistoryStore(private val dao: VerificationHistoryDao) {
+
+    suspend fun record(
+        networkKey: String, ssid: String?, result: VerificationResultSnapshot
+    ) = dao.insert(
+        VerificationRecord(
+            networkKey = networkKey, ssid = ssid, host = result.host,
+            state = result.state, matchedCertificateId = result.matchedCertificateId,
+            reason = result.reason, latitude = result.latitude, longitude = result.longitude,
+            locationAccuracy = result.accuracy, timestamp = result.timestamp
+        )
+    )
+
+    fun recent(limit: Int = 100): Flow<List<VerificationRecord>> = dao.recent(limit)
+
+    /**
+     * Impossible-travel check backing the Case B.1 mitigation: an identity previously
+     * verified far away, too recently to have travelled here, is a stronger signal
+     * than an identity with no history at all.
+     */
+    suspend fun impossibleTravel(
+        host: String, lat: Double, lng: Double, maxSpeedKmh: Double = 900.0
+    ): Boolean {
+        val previous = dao.lastVerifiedFor(host) ?: return false
+        val pLat = previous.latitude ?: return false
+        val pLng = previous.longitude ?: return false
+        val hours = (System.currentTimeMillis() - previous.timestamp) / 3_600_000.0
+        if (hours <= 0) return false
+        return haversineKm(pLat, pLng, lat, lng) / hours > maxSpeedKmh
+    }
+
+    private fun haversineKm(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val r = 6371.0
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLon = Math.toRadians(lon2 - lon1)
+        val a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+                Math.sin(dLon / 2) * Math.sin(dLon / 2)
+        return r * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+    }
+}
+
+data class VerificationResultSnapshot(
+    val host: String, val state: String, val matchedCertificateId: String?,
+    val reason: String?, val latitude: Double?, val longitude: Double?,
+    val accuracy: Float?, val timestamp: Long = System.currentTimeMillis()
+)

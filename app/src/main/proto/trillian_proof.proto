@@ -1,0 +1,24 @@
+syntax = "proto3";
+package geopki.trillian;
+
+option go_package = "pkg/trillianpb";
+
+// Minimal re-declaration of google/trillian's `Proof` message.
+//
+// NOT part of the files copied from netsec-ethz/geopki — the upstream
+// crypto/verification.go decodes response.InclusionProof via
+// `proto.Unmarshal(bytes, new(trillian.Proof))` (github.com/google/trillian),
+// but trillian's own .proto sources were not copied into this repo, and
+// pulling in the full trillian module is out of scope for an Android client.
+//
+// Field numbers (leaf_index = 1, hashes = 3, field 2 reserved) are
+// reconstructed from memory of trillian's public schema and from the two
+// fields verification.go actually reads (`pf.LeafIndex`, `pf.Hashes`).
+// CONFIRMED against a real inclusion proof from a live geopki server
+// (2026-09-11, see LiveFixtureTest / geopki-fixtures/response.bin) - this
+// schema decodes real proof bytes correctly.
+message Proof {
+  int64 leaf_index = 1;
+  reserved 2;
+  repeated bytes hashes = 3;
+}
