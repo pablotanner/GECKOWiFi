@@ -15,9 +15,6 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.security.KeyFactory
-import java.security.PublicKey
-import java.security.spec.X509EncodedKeySpec
 import geopki.Request as ProtoRequest
 import geopki.Response as ProtoResponse
 import geopki.XYBitString as ProtoXYBitString
@@ -103,9 +100,6 @@ class GeckoClient(
         coerceInputValues = true
     }
 
-    @Volatile
-    private var cachedPublicKey: PublicKey? = null
-
     /**
      * Queries the GECKO map server for the given surface bit strings and
      * altitude range, over the real `/v1/query?c` protobuf endpoint, and
@@ -119,8 +113,7 @@ class GeckoClient(
         maxAltitude: Int
     ): GeckoResponse = withContext(Dispatchers.IO) {
         try {
-            val publicKey = publicKey()
-                ?: return@withContext GeckoResponse.Unreachable("could not fetch server public key")
+            val publicKey = PinnedServerKey.publicKey
 
             val rawBitStrings = bitStrings.map { it.toRawXYBitString() }
 
@@ -180,28 +173,6 @@ class GeckoClient(
             }
         } catch (e: Exception) {
             GeckoResponse.Unreachable(e.message ?: e::class.java.simpleName)
-        }
-    }
-
-    private suspend fun publicKey(): PublicKey? {
-        cachedPublicKey?.let { return it }
-
-        return withContext(Dispatchers.IO) {
-            val der = runCatching {
-                executeWithFallback(Request.Builder().url("$baseUrl/v1/public-key").build())
-                    .use { response -> if (response.isSuccessful) response.body?.bytes() else null }
-            }.onFailure { e ->
-                // Previously silently swallowed - a real bug (found 2026-09-14
-                // against a live server: this masked the actual cause, always
-                // reporting the same generic "could not fetch public key").
-                System.err.println("GeckoClient: public-key fetch failed: ${e.message}")
-            }.getOrNull() ?: return@withContext null
-
-            runCatching {
-                KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(der))
-            }.onFailure { e ->
-                System.err.println("GeckoClient: public-key parsing failed: ${e.message}")
-            }.getOrNull()?.also { cachedPublicKey = it }
         }
     }
 

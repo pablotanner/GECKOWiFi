@@ -88,6 +88,23 @@ otherwise defeat the whole mechanism without breaking any cryptography.
 Falls back to the default route (logged, not silent) when no cellular
 network is available.
 
+### Trust anchor: the map server's key is pinned, not fetched
+
+Every cryptographic check in this app - Signed Map Head, Signed Consistency
+Head, the whole Merkle proof chain - is only as trustworthy as the public
+key it's verified against. That key is **pinned at build time** (or on setup)
+(`PinnedServerKey.kt`), not fetched at runtime from `/v1/public-key`.
+
+Why: fetching it fresh on every check meant that whenever a query fell back
+to the WiFi network under evaluation (see the fallback note above), that
+same untrusted network could hand back *its own* key instead of the real
+one - and every downstream signature/proof check would then pass, because
+it'd be internally consistent with the substituted key. Pinning closes that
+specific gap for this single, developer-controlled demo server.
+
+In a real deployment we would probably need an actual key-rotation system, 
+so rotation doesn't require every client to update first.
+
 ## Architecture
 
 ```
@@ -319,6 +336,11 @@ Roughly in order of what unblocks the most:
 - **Pre-populated offline GECKO map** - a third connectivity-channel option
   floated by the advisor, deferred in favor of the cellular-first design
   above.
+- **Multi-server trust model** (explicitly out of scope for this single-demo-
+  server proof of concept, see [Trust anchor](#trust-anchor-the-map-servers-key-is-pinned-not-fetched)):
+  CA-signed `GeoCertificate`s instead of trusting the map server's own key
+  for authenticity, querying a pool of independent map servers, and
+  gossip-based split-view detection between them.
 - Surface `GeckoResponse.Success.unparsedCount` in the UI instead of only
   logging it.
 
