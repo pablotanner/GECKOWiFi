@@ -4,4 +4,5 @@ plugins {
     alias(libs.plugins.kotlin.android) apply false
     alias(libs.plugins.kotlin.serialization) apply false
     alias(libs.plugins.wire) apply false
+    id("com.facebook.react") version "0.87.1" apply false
 }

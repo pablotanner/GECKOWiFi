@@ -2,6 +2,11 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.wire)
+    id("com.facebook.react")
+}
+
+react {
+    autolinkLibrariesWithApp()
 }
 
 android {
@@ -49,6 +54,10 @@ wire {
 }
 
 dependencies {
+    implementation("com.facebook.react:react-android")
+    if (project.findProperty("hermesEnabled")?.toString()?.toBoolean() == true) {
+        implementation("com.facebook.react:hermes-android")
+    }
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.activity.ktx)

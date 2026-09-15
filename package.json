@@ -1,0 +1,17 @@
+{
+  "name": "geckowifi",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "react-native start"
+  },
+  "dependencies": {
+    "react": "19.2.3",
+    "react-native": "0.87.1"
+  },
+  "devDependencies": {
+    "@react-native-community/cli": "^20.2.0",
+    "@types/react": "^19.1.1",
+    "typescript": "^5.9.2"
+  }
+}
