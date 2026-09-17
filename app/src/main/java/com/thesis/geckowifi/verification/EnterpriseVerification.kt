@@ -53,14 +53,18 @@ fun evaluateEnterpriseNetwork(
                 observedAuthServerName,
                 matchedIdentifier = observedAuthServerName,
                 matchedCertificateId = matching.certificateId,
-                reason = "auth server name matched"
+                reason = "auth server name matched",
+                registeredIdentifier = matching.wifi.trustedCAFingerprints.firstOrNull() ?: observedCaFingerprint,
+                presentedIdentifier = observedCaFingerprint
             )
         else ->
             VerificationResult(
                 VerificationState.CONFLICT,
                 observedAuthServerName,
                 matchedCertificateId = matching.certificateId,
-                reason = "registered auth server presented an unexpected CA fingerprint"
+                reason = "registered auth server presented an unexpected CA fingerprint",
+                registeredIdentifier = matching.wifi.trustedCAFingerprints.firstOrNull(),
+                presentedIdentifier = observedCaFingerprint
             )
     }
 }

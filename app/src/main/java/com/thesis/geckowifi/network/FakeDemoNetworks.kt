@@ -16,6 +16,12 @@ package com.thesis.geckowifi.network
 object FakeDemoNetworks {
 
     val all: List<ScannedNetwork> = listOf(
+        /* On server this is registered with:
+        Certificate ID: campus-guest-portal-001
+        Portal Domains: portal.wifi.example.edu, wifi.example.edu
+        SSID: Campus Guest
+        Coordinates: lat 47.377900, lon 8.548700, alt 400m
+         */
         ScannedNetwork.FakeCaptivePortal(
             ssid = "Campus Guest",
             bssid = "DE:AD:BE:EF:00:01",
@@ -30,6 +36,11 @@ object FakeDemoNetworks {
             presumedDomain = "portal.wifi.example.edu",
             presumedSpkiHashBase64 = "IHZwfYs3i2BMXR3ah28XE5stNrPeUNkVqFmvmFEL7AY="
         ),
+        /* On server this is registered with:
+        Certificate ID: eduroam-ethz-campus-001
+        SSID: eduroam
+        Coordinates: lat 47.377900, lon 8.548700, alt 400m
+         */
         ScannedNetwork.FakeEduroam(
             ssid = "eduroam",
             bssid = "DE:AD:BE:EF:00:03",

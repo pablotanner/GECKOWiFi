@@ -6,7 +6,16 @@ import com.thesis.geckowifi.data.remote.GeckoResponse
 import java.util.concurrent.ConcurrentHashMap
 
 class VerificationEngine(
-    private val gecko: GeckoClient,
+    /**
+     * Mutable so a caller (e.g. a long-lived ViewModel) can rebind the
+     * network/server connection between checks - e.g. to pick up a freshly
+     * looked-up cellular [android.net.Network] - without losing this
+     * engine's [sessions] state. Rebuilding a whole new `VerificationEngine`
+     * per check (the previous approach) silently discarded every
+     * [PortalSession], defeating its anchor/delegate bait-and-switch
+     * detection across checks of the same network - see README.md.
+     */
+    var gecko: GeckoClient,
     private val probe: CertProbe,
     private val cache: DecisionCache,
     private val encoder: GeoQueryEncoder
@@ -19,6 +28,28 @@ class VerificationEngine(
     fun onNetworkChanged(networkKey: String) {
         sessions.remove(networkKey)
         cache.invalidateAll()
+    }
+
+    /**
+     * Every GeoCertificate registered at this location, unfiltered by SSID -
+     * for the Networks screen's "what does GECKO know about here" list, not
+     * a trust decision. Returns an empty list on any failure (unreachable
+     * server, proof failure) rather than throwing - the Networks screen
+     * treats "couldn't tell" the same as "nothing registered" for display
+     * purposes, same as everywhere else in this app that a query can fail.
+     */
+    suspend fun registeredHere(
+        lat: Double,
+        lng: Double,
+        altitude: Double?,
+        radiusMeters: Int
+    ): List<GeoCertificate> {
+        val bitStrings = encoder.encodeQuery(lat, lng, radiusMeters)
+        val (minAlt, maxAlt) = encoder.altitudeBounds(altitude, radiusMeters)
+        return when (val response = gecko.queryLocation(bitStrings, minAlt, maxAlt)) {
+            is GeckoResponse.Success -> response.certificates
+            is GeckoResponse.Unreachable, is GeckoResponse.ProofFailure -> emptyList()
+        }
     }
 
     suspend fun verify(
@@ -77,7 +108,7 @@ class VerificationEngine(
                 VerificationResult(VerificationState.CONFLICT, host, reason = response.cause) // failed proof = hostile, not absent
             is GeckoResponse.Success -> {
                 val candidates = filterBySsid(response.certificates, ssid) ?: return noMatchingSsid(host)
-                sessionFor(networkKey).observe(host, candidates, presentedSpkiHash)
+                sessionFor(networkKey).observe(host, candidates, presentedSpkiHash).withResponseMetadata(response)
             }
         }
         if (result.state != VerificationState.UNREACHABLE) cache.put(networkKey, host, result)
@@ -116,7 +147,7 @@ class VerificationEngine(
                 VerificationResult(VerificationState.CONFLICT, observedAuthServerName, reason = response.cause)
             is GeckoResponse.Success -> {
                 val candidates = filterBySsid(response.certificates, ssid) ?: return noMatchingSsid(observedAuthServerName)
-                evaluateEnterpriseNetwork(observedAuthServerName, observedCaFingerprint, candidates)
+                evaluateEnterpriseNetwork(observedAuthServerName, observedCaFingerprint, candidates).withResponseMetadata(response)
             }
         }
         if (result.state != VerificationState.UNREACHABLE) cache.put(networkKey, observedAuthServerName, result)
@@ -133,5 +164,12 @@ class VerificationEngine(
     private fun noMatchingSsid(host: String) = VerificationResult(
         VerificationState.UNVERIFIED, host,
         reason = "no certificate registered for this SSID at this location"
+    )
+
+    /** Attaches display-only response metadata (see [VerificationResult]'s doc comment) after the decision is already made. */
+    private fun VerificationResult.withResponseMetadata(response: GeckoResponse.Success) = copy(
+        certificateCount = response.certificates.size,
+        unparsedCount = response.unparsedCount,
+        usedPreferredNetwork = response.usedPreferredNetwork
     )
 }

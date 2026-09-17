@@ -1,28 +1,3 @@
 <resources>
     <string name="app_name">GECKOWiFi</string>
-
-    <string name="status_placeholder">Checking network…</string>
-    <string name="nearby_networks_label">Nearby Networks</string>
-    <string name="nearby_networks_hint">Tap a real entry to select it, then enter its observed domain below and tap Verify. Fake entries verify immediately - only a genuine evil-twin match (⚠️) interrupts you; everything else stays quiet.</string>
-    <string name="refresh_networks">Refresh</string>
-    <string name="no_network_selected">No network selected.</string>
-    <!-- 10.0.2.2 is the Android-emulator-only alias for the host machine's
-         localhost. On a real device, replace with the server's LAN IP. -->
-    <string name="server_url_label">Server URL</string>
-    <string name="default_server_url">http://10.0.2.2:1234</string>
-    <string name="latitude_label">Latitude</string>
-    <string name="longitude_label">Longitude</string>
-    <!-- Defaults match the area the demo certificates (FakeDemoNetworks.kt,
-         docs/prototype-decisions.md) are registered for, so a fresh install can
-         demonstrate a real VERIFIED/CONFLICT result immediately. Stale longitude
-         (8.5417, ~530m off) found 2026-09-14: it silently zeroed out every
-         query's match set - the server correctly found nothing that far from
-         the registered area, surfacing as UNVERIFIED everywhere with no error. -->
-    <string name="default_latitude">47.3769</string>
-    <string name="default_longitude">8.5487</string>
-    <string name="use_device_location">Use device location</string>
-    <string name="domain_label">Observed domain (selected real network only)</string>
-    <string name="default_domain">wifi.test.local</string>
-    <string name="verify">Verify</string>
-    <string name="result_placeholder">No verification run yet.</string>
 </resources>

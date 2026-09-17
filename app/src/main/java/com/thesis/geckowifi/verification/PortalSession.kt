@@ -58,21 +58,27 @@ class PortalSession(val networkKey: String) {
                 } else {
                     VerificationResult(
                         VerificationState.CONFLICT, host, host, current.certificateId,
-                        "delegate domain presented unexpected key"
+                        "delegate domain presented unexpected key",
+                        registeredIdentifier = current.portal?.pinnedSPKIHashes.orEmpty().firstOrNull(),
+                        presentedIdentifier = presentedSpkiHash
                     )
                 }
             }
         }
 
-        val nameKnown = candidates.any { it.domainEntry(host) != null }
+        val registeredMatch = candidates.firstOrNull { it.domainEntry(host) != null }
         return when {
-            nameKnown -> VerificationResult(
+            registeredMatch != null -> VerificationResult(
                 VerificationState.CONFLICT, host, host, null,
-                "registered domain presented unexpected key"
+                "registered domain presented unexpected key",
+                registeredIdentifier = registeredMatch.portal?.pinnedSPKIHashes.orEmpty().firstOrNull(),
+                presentedIdentifier = presentedSpkiHash
             )
             anchor != null -> VerificationResult(
                 VerificationState.CONFLICT, host, null, anchor?.certificateId,
-                "off-anchor domain appeared mid-session"
+                "off-anchor domain appeared mid-session",
+                registeredIdentifier = anchor?.portal?.domains.orEmpty().firstOrNull(),
+                presentedIdentifier = host
             )
             candidates.isNotEmpty() -> VerificationResult(
                 VerificationState.UNRECOGNIZED, host, null, null,

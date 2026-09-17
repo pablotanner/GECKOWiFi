@@ -129,8 +129,33 @@ com.thesis.geckowifi/
 ├── capability/              root/non-root capability pairs (see below) - not yet wired into the app
 ├── location/                LocationProvider
 ├── di/AppModule.kt          manual dependency wiring
-└── ui/MainActivity.kt       the entire current UI
+└── ui/                      Jetpack Compose UI - see below
+    ├── MainActivity.kt          thin shell: permission handling, hands off to GeckoWifiApp
+    ├── GeckoWifiApp.kt          NavHost + bottom-bar Scaffold tying the screens together
+    ├── VerificationViewModel.kt one long-lived VerificationEngine + all UI state
+    ├── theme/                   Color/Type/Theme.kt - Material3 approximation of the design system
+    ├── components/              StateBadge, DetailRow - shared across screens
+    └── {networks,activity,status,settings,networkdetail,conflict,connected,checkdetail,technicaldetails}/
+                                  one package per screen
 ```
+
+### The UI
+
+Built with Jetpack Compose against a set of screens from a Claude Design
+project, filtered to what real logic actually backs - see
+[What's real vs. simulated](#whats-real-vs-simulated) and
+[What needs to be done](#what-needs-to-be-done) for exactly what was
+included, adapted, or left out and why. Three of the original design's
+screens were skipped entirely: **Networks Protection Off** (depends on an
+enforcement on/off toggle that isn't wired anywhere - `Enforcer`/
+`IptablesEnforcer`/`VpnDropEnforcer` are unused today), and **Portal**/
+**Portal Connected** (simulate a WebView-embedded captive-portal browser
+with a live status bar - no WebView integration or live-monitoring loop
+exists). **Status** keeps its bottom-nav slot but shows an honest "not
+available yet" placeholder rather than the design's live-monitoring/
+protection-toggle mockup. **Settings** has no design reference at all (none
+was provided) - it's plain Material3 exposing the two preferences that
+already have real backing (`TrustPreferenceStore`).
 
 ### `capability/` - root and non-root mechanism pairs
 
@@ -163,6 +188,14 @@ unit tests):
 - A working, if manual, demo flow: four hardcoded network entries (two
   benign/evil-twin pairs, one captive-portal-style and one eduroam-style)
   that exercise the full comparison logic without needing real APs.
+- A real Jetpack Compose UI with bottom-nav navigation (Networks/Status/
+  Activity/Settings) and detail screens (Conflict, Connected, Network
+  Detail, Check Detail, Technical Details), all reading real app state via
+  one long-lived `VerificationViewModel` - see [The UI](#the-ui).
+- `VerificationEngine`'s `PortalSession`s now actually persist across
+  checks of the same network (a bug found and fixed during the Compose
+  rewrite: the old `MainActivity` rebuilt a whole new `VerificationEngine`,
+  and therefore a fresh empty session map, on every single tap).
 
 None of the above required root. Root-dependent pieces
 (`SupplicantCertSource`, `PcapTrafficObserver`, `EnterpriseConfigurator`'s
@@ -201,8 +234,9 @@ actual sequence, today, is:
 2. The captive portal opens in your browser, via the OS's own detection -
    independent of this app.
 3. You read the redirect domain with your own eyes.
-4. You come back to this app and **type that domain in manually**, then
-   press Verify.
+4. You come back to this app, tap that network in the Networks list, and
+   **type that domain in manually** on the Network Detail screen, then
+   press Check.
 5. *Only now* does anything real happen: `CertProbe.fetchCertificate()`
    does a genuine TLS handshake against that host (reachable only because
    you're already on that network through some other means) and the real
@@ -223,7 +257,7 @@ moment it's observed - no human reading a browser redirect required.
 
 | | Emulator | Physical (rooted) device |
 |---|---|---|
-| Server reachability | `10.0.2.2:1234` (QEMU host-loopback alias) works out of the box | `10.0.2.2` resolves to nothing - point `serverUrlInput` at the server's real reachable address |
+| Server reachability | `10.0.2.2:1234` (QEMU host-loopback alias) works out of the box | `10.0.2.2` resolves to nothing - the server address is a fixed constant (`SERVER_URL` in `VerificationViewModel.kt`, matching `PinnedServerKey`'s pinned key - see [Trust anchor](#trust-anchor-the-map-servers-key-is-pinned-not-fetched)), so it needs editing in source for a real deployment, not a runtime field |
 | Cellular binding | No real radio; needs the logged OkHttp fallback to reach the server at all over a simulated secondary network | Genuine cellular radio - the anti-interference property is real, but the server must then be reachable *from cellular data* (a LAN-only address won't be, and you'll silently hit the fallback instead) |
 | WiFi scan / GPS | Fully simulated (Extended Controls) | Real `wifi.scanResults` / real GPS fix |
 | TLS probing (`CertProbe`) | Works against any real reachable host | Same - works identically |
@@ -233,17 +267,25 @@ moment it's observed - no human reading a browser redirect required.
 ## Setup
 
 1. Run a geopki server (see [netsec-ethz/geopki](https://github.com/netsec-ethz/geopki)) and insert at least one certificate.
-2. Point `serverUrlInput` in the app at that server's address.
-3. Set the latitude/longitude fields to match wherever you registered
-   certificates - **a location a few hundred meters off from anything
-   registered silently returns zero matches, indistinguishable from
-   "unregistered network"**. This bit while debugging: `strings.xml`'s
-   prefilled default once pointed ~530m from where the actual demo certs
-   live - if every check reports `UNVERIFIED` with no error at all, check
-   this first before suspecting the crypto or the server.
+2. Point `VerificationViewModel.kt`'s `SERVER_URL` constant at that server's
+   address, and `PinnedServerKey.kt`'s pinned key at its actual public key
+   (`curl <server>/v1/public-key | base64 -w0`) - rebuild after either
+   changes. Both are fixed at build time now, not runtime fields - see
+   [Trust anchor](#trust-anchor-the-map-servers-key-is-pinned-not-fetched).
+3. Grant location permission when the app asks - it queries GECKO at the
+   device's actual last-known location (`LocationProvider.lastKnown()`), no
+   manual lat/lng entry any more. Make sure wherever you registered
+   certificates is where the device (or emulator - set one via Extended
+   Controls > Location) actually is: **a location a few hundred meters off
+   from anything registered silently returns zero matches, indistinguishable
+   from "unregistered network."** This bit while debugging once already -
+   a stale prefilled default pointed ~530m from the actual demo certs; if
+   every check reports `UNVERIFIED` with no error at all, check location
+   agreement first before suspecting the crypto or the server.
 
-Example insert payload matching the current demo entries
-(`app-design.md`'s SSID-gated flow expects `wifi.ssid` to be set):
+Example insert payload matching the current demo entries (the SSID-gated
+flow - see [How verification works](#how-verification-works) - expects
+`wifi.ssid` to be set):
 
 ```bash
 curl -X POST "http://localhost:1234/v1/insert?key=YOUR_KEY" \
@@ -341,8 +383,17 @@ Roughly in order of what unblocks the most:
   CA-signed `GeoCertificate`s instead of trusting the map server's own key
   for authenticity, querying a pool of independent map servers, and
   gossip-based split-view detection between them.
-- Surface `GeckoResponse.Success.unparsedCount` in the UI instead of only
-  logging it.
+- **Pre-connection "Mismatch" badge on the Networks screen** - the design
+  shows one (a scanned network's auth mode disagreeing with what's
+  registered, before ever connecting), deliberately not implemented:
+  would need heuristic parsing of `WifiManager`'s capability strings into
+  a comparable auth mode, which felt too fuzzy to call "real" for a first
+  pass. Today, Networks only shows Registered/Not-registered presence.
+- History (`HistoryStore`) is real but in-memory only - restart the app
+  and Activity/Network Detail's history is gone. A real deployment would
+  want this persisted (Room is already a build dependency; a Room-backed
+  draft once existed at `data/local/HistoryStore.kt.ignore`, since scaled
+  back to the simpler in-memory `Stores.kt` version this app actually uses).
 
 ## Protected invariants
 

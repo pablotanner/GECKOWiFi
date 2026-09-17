@@ -37,7 +37,16 @@ sealed class GeckoResponse {
          * malformed certificate at a location must not mask every other
          * (possibly hostile) certificate actually registered there.
          */
-        val unparsedCount: Int = 0
+        val unparsedCount: Int = 0,
+        /**
+         * True if the query actually went out over the preferred network
+         * binding passed to [GeckoClient] (e.g. cellular, via
+         * [GeckoClient]'s `network` constructor param); false if none was
+         * requested, or if it fell back to the default route (see
+         * [GeckoClient]'s `fallbackClient` doc comment) - a real
+         * security-relevant distinction, not decoration.
+         */
+        val usedPreferredNetwork: Boolean = false
     ) : GeckoResponse()
 
     /** Could not reach the server, or its response could not be parsed at all. Distinct from [ProofFailure]. */
@@ -85,6 +94,8 @@ class GeckoClient(
      */
     private val fallbackClient: OkHttpClient? = if (network != null) OkHttpClient() else null
 ) {
+    /** True iff a preferred network (e.g. cellular) was actually requested for this client. */
+    private val hasPreferredNetwork: Boolean = network != null
     private val octetStream = "application/octet-stream".toMediaType()
     // coerceInputValues: Go's `omitempty` doesn't suppress non-pointer struct
     // fields (a well-known Go quirk), so any certificate that doesn't set
@@ -130,7 +141,8 @@ class GeckoClient(
                 .post(ProtoRequest.ADAPTER.encode(protoRequest).toRequestBody(octetStream))
                 .build()
 
-            executeWithFallback(httpRequest).use { httpResponse ->
+            val (rawResponse, usedPreferredNetwork) = executeWithFallback(httpRequest)
+            rawResponse.use { httpResponse ->
                 if (!httpResponse.isSuccessful) {
                     return@withContext GeckoResponse.Unreachable("HTTP ${httpResponse.code}")
                 }
@@ -169,7 +181,7 @@ class GeckoClient(
                         System.err.println("GeckoClient: dropping unparsable certificate: ${e.message}")
                     }
                 }
-                GeckoResponse.Success(certificates, unparsedCount)
+                GeckoResponse.Success(certificates, unparsedCount, usedPreferredNetwork)
             }
         } catch (e: Exception) {
             GeckoResponse.Unreachable(e.message ?: e::class.java.simpleName)
@@ -180,11 +192,14 @@ class GeckoClient(
      * Executes [request] on the preferred (possibly network-bound) client;
      * if that throws and a [fallbackClient] exists, retries on it instead of
      * failing outright - logged, not silent, since it's a real security
-     * tradeoff (see the [fallbackClient] doc comment).
+     * tradeoff (see the [fallbackClient] doc comment). The returned boolean
+     * is true iff the preferred (network-bound) client actually served the
+     * request - false both when no preferred network was requested at all
+     * and when it failed and the fallback served it instead.
      */
-    private fun executeWithFallback(request: Request): okhttp3.Response =
+    private fun executeWithFallback(request: Request): Pair<okhttp3.Response, Boolean> =
         try {
-            client.newCall(request).execute()
+            client.newCall(request).execute() to hasPreferredNetwork
         } catch (e: Exception) {
             val fallback = fallbackClient ?: throw e
             System.err.println(
@@ -192,7 +207,7 @@ class GeckoClient(
                     "falling back to the default route. This weakens the anti-interference " +
                     "property described on GeckoClient's fallbackClient parameter."
             )
-            fallback.newCall(request).execute()
+            fallback.newCall(request).execute() to false
         }
 
     // CONFIRMED (2026-09-11, against a live geopki server - see
