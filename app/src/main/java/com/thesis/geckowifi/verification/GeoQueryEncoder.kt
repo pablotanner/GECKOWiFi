@@ -69,7 +69,12 @@ class GeoQueryEncoder {
     ): List<XYBitString> {
         require(lat in -90.0..90.0) { "Latitude must be in [-90, 90]" }
         require(lng in -180.0..180.0) { "Longitude must be in [-180, 180]" }
-        require(radiusMeters in 0..254) { "Radius must be between 0 and 254 meters" }
+        // 253, not 254: the Go reference rejects when the *inflated* radius
+        // (ceil(radius * RADIUS_ERROR_FACTOR)) exceeds 255 (uint8 max), and
+        // 254 is the first raw value where that inflation pushes it over -
+        // confirmed via the golden vectors' own "err-radius" case (radius
+        // 254 must reject, 253 - "radius-max" - must not).
+        require(radiusMeters in 0..253) { "Radius must be between 0 and 253 meters" }
 
         val radius = ceil(radiusMeters * RADIUS_ERROR_FACTOR)
 
@@ -119,7 +124,15 @@ class GeoQueryEncoder {
     /**
      * Returns encoded altitude bounds expected by geopki.proto.Request.
      *
-     * The Go client uses the query radius as vertical uncertainty.
+     * The Go client uses the query radius as vertical uncertainty - and,
+     * confirmed via golden-vector testing against `cmd/golden-dump`'s real
+     * output (2026-09-28), inflates it by [RADIUS_ERROR_FACTOR] first, the
+     * same as [encodeQuery] already does for the horizontal circle. This
+     * port previously used [uncertaintyMeters] raw here, producing an
+     * altitude window narrower than the reference by exactly
+     * `ceil(radius * RADIUS_ERROR_FACTOR) - radius` on each side (1-2m for
+     * realistic radii) - every `GeoQueryEncoderGoldenTest` altitude
+     * assertion failed by precisely that amount before this fix.
      */
     fun altitudeBounds(
         altitude: Double?,
@@ -138,11 +151,12 @@ class GeoQueryEncoder {
         }
 
         val encodedAltitude = altitude.toInt() - MIN_ALTITUDE
+        val inflatedUncertainty = ceil(uncertaintyMeters * RADIUS_ERROR_FACTOR).toInt()
 
-        val minZ = (encodedAltitude - uncertaintyMeters)
+        val minZ = (encodedAltitude - inflatedUncertainty)
             .coerceAtLeast(0)
 
-        val maxZ = (encodedAltitude + uncertaintyMeters)
+        val maxZ = (encodedAltitude + inflatedUncertainty)
             .coerceAtMost(MAX_Z)
 
         return minZ to maxZ

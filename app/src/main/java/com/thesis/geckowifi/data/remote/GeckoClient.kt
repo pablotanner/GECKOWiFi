@@ -228,7 +228,14 @@ class GeckoClient(
     }
 }
 
-private fun XYBitString.toRawXYBitString(): RawXYBitString {
+/**
+ * Visible to the golden-vector test adapter ([com.thesis.geckowifi.verification.golden.UnderTest])
+ * specifically so it reuses this exact conversion rather than re-implementing
+ * it - a golden test that verified its own re-implementation of this
+ * bit-layout logic instead of the real production code wouldn't actually
+ * catch a bug here.
+ */
+internal fun XYBitString.toRawXYBitString(): RawXYBitString {
     val padded = bits.padEnd(64, '0')
     val value = if (padded.isEmpty()) 0uL else java.lang.Long.parseUnsignedLong(padded, 2).toULong()
     return RawXYBitString(xyBitString = value, xyBitStringLen = bits.length)

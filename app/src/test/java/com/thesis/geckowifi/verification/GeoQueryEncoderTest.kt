@@ -109,8 +109,10 @@ class GeoQueryEncoderTest {
     @Test
     fun altitudeBounds_encodesAroundKnownAltitude() {
         val (min, max) = encoder.altitudeBounds(altitude = 400.0, uncertaintyMeters = 50)
-        // 400 - (-11000) = 11400
-        assertEquals(11350, min)
-        assertEquals(11450, max)
+        // 400 - (-11000) = 11400; uncertainty is inflated by RADIUS_ERROR_FACTOR
+        // (1.0052) same as encodeQuery()'s radius - ceil(50 * 1.0052) = 51,
+        // not the raw 50 - confirmed against golden vectors (2026-09-28).
+        assertEquals(11349, min)
+        assertEquals(11451, max)
     }
 }
