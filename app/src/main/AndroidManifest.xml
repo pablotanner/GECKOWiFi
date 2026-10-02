@@ -13,8 +13,6 @@
     <!-- Android 13+ runtime permission for WiFi scanning/joining; without it
          scans silently come back empty. -->
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
 
     <!-- usesCleartextTraffic: the geopki server is plain http:// (see
          GeckoClient's baseUrl / the prototype's server-URL field), and
@@ -31,16 +29,6 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.GECKOWiFi"
         android:usesCleartextTraffic="true">
-
-        <service
-            android:name=".vpn.VpnGatekeeper"
-            android:permission="android.permission.BIND_VPN_SERVICE"
-            android:foregroundServiceType="specialUse"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.net.VpnService"/>
-            </intent-filter>
-        </service>
 
         <activity
             android:name=".ui.MainActivity"

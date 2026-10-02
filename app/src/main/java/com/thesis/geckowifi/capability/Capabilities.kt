@@ -6,6 +6,6 @@ object Capabilities {
     fun certificateSource(): CertificateSource =
         if (hasRoot) SupplicantCertSource() else InferredCertSource()
 
-    fun enforcer(): Enforcer =
-        if (hasRoot) IptablesEnforcer() else VpnDropEnforcer()
+    /** Root-only by design: GECKO is assumed to run at system level (see LAB_SETUP.md). */
+    fun enforcer(): Enforcer = IptablesEnforcer()
 }

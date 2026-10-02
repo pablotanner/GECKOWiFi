@@ -225,14 +225,15 @@ Order matters:
 - `GeoCertificate` schema: `PortalDomain` entries with `role` (`primary`/`delegate`);
   altitude folded into `GeoCertArea`; `authServerCAs` carries raw base64 DER CA bytes for
   `WifiEnterpriseConfig.setCaCertificate()` (EAP-TLS path, deferred).
-- Root vs non-root behind interfaces so `VerificationEngine` runs both ways. Root enables
-  `wpa_supplicant` control-socket access + `IptablesEnforcer`. **Root not needed for the
-  current milestone** — validate non-root first.
-- `VpnService` needed for continuous detection resistant to timed bait-and-switch; single
-  self-probe is defeatable. **Next phase** — `VpnGatekeeper` / `VpnTrafficObserver` are
-  skeletons.
+- **Root approach (agreed with advisor).** GECKO is assumed to be implemented at system
+  level (part of the OS / WiFi stack), so the prototype runs with **root** as the
+  stand-in for system privileges. There is **no VPN-based (`VpnService`) path** — it was
+  a non-root workaround and is dropped. Root provides `wpa_supplicant` control-socket
+  access (`SupplicantCertSource`), traffic observation (`PcapTrafficObserver` /
+  `PcapSniCapture`) and enforcement (`IptablesEnforcer`) for continuous detection against
+  timed bait-and-switch (a single self-probe is defeatable).
 - Build order: `GeoQueryEncoder` + protobuf → `ProofVerifier` → `GeckoClient` rewrite →
-  `VerificationEngine` rewire → VPN/capability packages. Currently at the last step.
+  `VerificationEngine` rewire → root capability packages. Currently at the last step.
 
 ## Android integration (phase 1) — done
 
@@ -246,7 +247,8 @@ Order matters:
    `CHANGE_NETWORK_STATE`, `NEARBY_WIFI_DEVICES` (Android 13+); location and nearby-devices
    requested at runtime. Real `startScan()` on refresh (Android throttles to 4 scans /
    2 min — falls back to cached results).
-4. **VPN/capability packages** — *not done, next phase.*
+4. **Root capability packages** — *not done, next phase* (needs a rooted tablet). The
+   phase-1 results were obtained without root; the verification logic is the same.
 5. **App-initiated join** — `NetworkObserver.join()` via `WifiNetworkSpecifier`, BSSID-pinned,
    open networks only. GeoPKI queries go over cellular if present, else over the joined
    WiFi; the TLS probe (`CertProbe`) always goes over the joined WiFi.
@@ -297,6 +299,9 @@ Document these in the thesis; they bound what the results show.
 - **App chooses the BSSID** — sidesteps the OS's signal-based AP selection.
 - **Admin UI as "portal"** with a generic self-signed certificate; a real portal would
   use a public domain.
+- **Root as a stand-in for system-level integration:** the prototype is an app with root,
+  not part of Android itself. Results show what a system-level implementation could do,
+  not what an ordinary (unprivileged) app can.
 - **One tablet, one router model, indoor GNSS.**
 
 ## Experiment matrix
@@ -316,14 +321,17 @@ Repeat each case several times; keep raw logs.
 ## Next phases
 
 1. Experiment matrix above (clean baseline before the testbed changes).
-2. VPN-based continuous detection (`VpnService`) against timed bait-and-switch.
-3. Portals: openNDS on A, cloned portal on B — replaces the typed domain with a real
-   redirect.
-4. Independent uplink for B (blocking experiments).
+2. Root the tablet (prerequisite for everything below).
+3. Root-based continuous detection against timed bait-and-switch: traffic observation
+   (pcap / SNI capture) + `IptablesEnforcer`, `wpa_supplicant` control socket.
+4. Portals: openNDS on A, cloned portal on B — replaces the typed domain with a real
+   redirect (with root, the portal domain can come from observed traffic).
+5. Independent uplink for B (blocking experiments).
 
 ## Out of scope for now (don't start unless asked)
 
-- Root path (`wpa_supplicant` socket, `IptablesEnforcer`), EAP-TLS/`authServerCAs`.
+- EAP-TLS / `authServerCAs`.
+- Non-root / `VpnService` approach (dropped — see locked decisions).
 - GPS spoofing (out of scope for the thesis; Cases C/C.1 analyzed but assumption-based).
 
 ## adb quick reference

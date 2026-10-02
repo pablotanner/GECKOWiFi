@@ -1,13 +1,12 @@
 package com.thesis.geckowifi.capability
 
-import com.thesis.geckowifi.vpn.TlsSniParser
 import kotlinx.coroutines.*
 import java.io.DataInputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * Root alternative to the VPN tunnel: streams pcap from tcpdump and extracts SNI.
+ * Root traffic observation: streams pcap from tcpdump and extracts SNI.
  * Observation only — pair with IptablesEnforcer for blocking.
  */
 class PcapTrafficObserver(

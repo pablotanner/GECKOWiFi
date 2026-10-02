@@ -1,4 +1,4 @@
-package com.thesis.geckowifi.vpn
+package com.thesis.geckowifi.capability
 
 object TlsSniParser {
     fun extractSni(data: ByteArray): String? {

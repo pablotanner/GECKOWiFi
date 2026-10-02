@@ -126,7 +126,7 @@ com.thesis.geckowifi/
 │   └── CertProbe.kt                real TLS handshake -> presented SPKI hash
 ├── network/                NetworkObserver (real WiFi scan/cellular binding), fake demo networks
 ├── enterprise/              EnterpriseConfigurator - builds a WifiNetworkSuggestion from a GeoCert
-├── capability/              root/non-root capability pairs (see below) - not yet wired into the app
+├── capability/              root capability implementations (see below) - not yet wired into the app
 ├── location/                LocationProvider
 ├── di/AppModule.kt          manual dependency wiring
 └── ui/                      Jetpack Compose UI - see below
@@ -148,7 +148,7 @@ project, filtered to what real logic actually backs - see
 included, adapted, or left out and why. Three of the original design's
 screens were skipped entirely: **Networks Protection Off** (depends on an
 enforcement on/off toggle that isn't wired anywhere - `Enforcer`/
-`IptablesEnforcer`/`VpnDropEnforcer` are unused today), and **Portal**/
+`IptablesEnforcer` are unused today), and **Portal**/
 **Portal Connected** (simulate a WebView-embedded captive-portal browser
 with a live status bar - no WebView integration or live-monitoring loop
 exists). **Status** keeps its bottom-nav slot but shows an honest "not
@@ -157,20 +157,17 @@ protection-toggle mockup. **Settings** has no design reference at all (none
 was provided) - it's plain Material3 exposing the two preferences that
 already have real backing (`TrustPreferenceStore`).
 
-### `capability/` - root and non-root mechanism pairs
+### `capability/` - root mechanisms
 
-`Capabilities.kt` selects between a root-based and a non-root fallback
-implementation per concern:
+GECKO is assumed to be implemented at system level, so the prototype uses
+**root** as the stand-in for system privileges (agreed with the advisor).
+There is no non-root/`VpnService` path - an earlier VPN skeleton was removed.
 
-| Concern | Root path | Non-root fallback |
-|---|---|---|
-| Certificate source | `SupplicantCertSource` (reads `wpa_supplicant`'s `CTRL-EVENT-EAP-PEER-CERT`) | `InferredCertSource` |
-| Network enforcement | `IptablesEnforcer` | `VpnDropEnforcer` |
-| Traffic observation | `PcapTrafficObserver` (root `tcpdump`, streamed) | `VpnTrafficObserver` |
-
-The app assumes root is available (confirmed as a design assumption by the
-advisor), making the root column the intended primary mechanism rather than
-a fallback. **None of this is currently called from `MainActivity` or
+| Concern | Implementation |
+|---|---|
+| Certificate source | `SupplicantCertSource` (reads `wpa_supplicant`'s `CTRL-EVENT-EAP-PEER-CERT`); `InferredCertSource` remains as a no-root stand-in for development |
+| Network enforcement | `IptablesEnforcer` |
+| Traffic observation | `PcapTrafficObserver` (root `tcpdump`, streamed; SNI via `TlsSniParser`) | **None of this is currently called from `MainActivity` or
 `VerificationEngine`** - see [What needs to be done](#what-needs-to-be-done).
 
 ## Current state
@@ -247,8 +244,7 @@ demo entry is step 5 - an actual TLS probe against an actual host, instead
 of a hardcoded SPKI hash. Everything upstream of that (knowing a captive
 portal exists, knowing its domain, timing the check to the redirect) is
 you, standing in for detection - exactly the role the hardcoded string
-plays in `FakeDemoNetworks.kt`. Closing this gap is `PcapTrafficObserver`/
-`VpnTrafficObserver`'s job: watch traffic during the "just associated,
+plays in `FakeDemoNetworks.kt`. Closing this gap is `PcapTrafficObserver`'s job: watch traffic during the "just associated,
 portal not yet resolved" window, extract the SNI hostname from the
 ClientHello automatically, and feed it into `verifyPresentedDomain()` the
 moment it's observed - no human reading a browser redirect required.
@@ -341,10 +337,9 @@ Run tests: `./gradlew testDebugUnitTest`
 
 Roughly in order of what unblocks the most:
 
-- **Wire root-based capture into the running app.** `PcapTrafficObserver`/
-  `VpnTrafficObserver` exist but nothing calls them; `Capabilities` doesn't
-  yet have a `trafficObserver()` factory to select between them the way it
-  already does for `certificateSource()`/`enforcer()`. `PcapTrafficObserver`'s
+- **Wire root-based capture into the running app.** `PcapTrafficObserver`
+  exists but nothing calls it; `Capabilities` doesn't yet have a
+  `trafficObserver()` factory alongside `certificateSource()`/`enforcer()`. `PcapTrafficObserver`'s
   own SNI-extraction is also untested - `PcapSniCapture.kt`'s (unit-tested)
   logic should be reconciled with it rather than left as a second,
   divergent implementation.

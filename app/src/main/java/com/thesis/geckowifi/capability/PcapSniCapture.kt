@@ -1,6 +1,5 @@
 package com.thesis.geckowifi.capability
 
-import com.thesis.geckowifi.vpn.TlsSniParser
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
