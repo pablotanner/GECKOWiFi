@@ -1,6 +1,7 @@
 package com.thesis.geckowifi.data.remote
 
 import android.net.Network
+import com.thesis.geckowifi.BuildConfig
 import com.thesis.geckowifi.data.model.GeoCertificate
 import com.thesis.geckowifi.geopki.bitstring.RawXYBitString
 import com.thesis.geckowifi.geopki.crypto.GeoPkiQuery
@@ -11,6 +12,7 @@ import com.thesis.geckowifi.verification.XYBitString
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import okhttp3.Dns
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -64,7 +66,7 @@ sealed class GeckoResponse {
 }
 
 class GeckoClient(
-    private val baseUrl: String = "http://10.0.2.2:1234",
+    private val baseUrl: String = BuildConfig.GEOPKI_URL,
     /**
      * Bind all requests to this specific network (e.g. cellular) rather than
      * whatever the device's default route currently is. This is a real
@@ -223,7 +225,13 @@ class GeckoClient(
     companion object {
         private fun buildClient(network: Network?): OkHttpClient =
             OkHttpClient.Builder().apply {
-                if (network != null) socketFactory(network.socketFactory)
+                if (network != null) {
+                    socketFactory(network.socketFactory)
+                    // socketFactory alone still resolves hostnames via the default network.
+                    dns(object : Dns {
+                        override fun lookup(hostname: String) = network.getAllByName(hostname).toList()
+                    })
+                }
             }.build()
     }
 }

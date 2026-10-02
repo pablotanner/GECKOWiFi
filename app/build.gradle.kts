@@ -24,6 +24,25 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
+    }
+
+    // Where the geopki server is reachable from, per test target - see LAB_SETUP.md.
+    // SHOW_DEMO_NETWORKS: the hardcoded FakeDemoNetworks entries only make sense
+    // on the emulator; on the lab testbed they'd sit next to the real APs.
+    flavorDimensions += "target"
+    productFlavors {
+        create("emulator") {
+            dimension = "target"
+            buildConfigField("String", "GEOPKI_URL", "\"http://10.0.2.2:1234\"")
+            buildConfigField("boolean", "SHOW_DEMO_NETWORKS", "true")
+        }
+        create("device") {
+            dimension = "target"
+            // Laptop's ICS address on the USB-C Ethernet segment, behind Router A/B.
+            buildConfigField("String", "GEOPKI_URL", "\"http://192.168.137.1:1234\"")
+            buildConfigField("boolean", "SHOW_DEMO_NETWORKS", "false")
+        }
     }
 
     compileOptions {
@@ -82,4 +101,10 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
 
     implementation("com.google.geometry:s2-geometry:2.0.0")
+}
+
+// s2-geometry brings full guava, which already contains ListenableFuture; the
+// empty androidx "listenablefuture" stub then duplicates it and breaks APK assembly.
+configurations.configureEach {
+    exclude(group = "com.google.guava", module = "listenablefuture")
 }

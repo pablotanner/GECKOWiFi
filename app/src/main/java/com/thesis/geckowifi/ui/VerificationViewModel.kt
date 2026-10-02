@@ -5,11 +5,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.thesis.geckowifi.BuildConfig
 import com.thesis.geckowifi.data.local.HistoryStore
 import com.thesis.geckowifi.data.local.TrustPreferenceStore
 import com.thesis.geckowifi.data.local.VerificationRecord
 import com.thesis.geckowifi.data.model.GeoCertificate
 import com.thesis.geckowifi.data.model.VerificationResult
+import com.thesis.geckowifi.data.model.VerificationState
 import com.thesis.geckowifi.data.remote.GeckoClient
 import com.thesis.geckowifi.location.LocationFix
 import com.thesis.geckowifi.location.LocationProvider
@@ -27,8 +29,9 @@ import kotlinx.coroutines.launch
  * is pinned to - see README.md's "Trust anchor" section for why the server
  * address isn't a runtime-editable field any more (pinning a key only means
  * something if the server it's pinned to isn't also freely swappable).
+ * Chosen per build flavor (`emulator` / `device`), see app/build.gradle.kts.
  */
-private const val SERVER_URL = "http://10.0.2.2:1234"
+private const val SERVER_URL = BuildConfig.GEOPKI_URL
 
 /**
  * A completed check bundled with the query context it was made with, for
@@ -50,7 +53,7 @@ data class CheckDetail(
 class VerificationViewModel(
     private val networkObserver: NetworkObserver,
     private val locationProvider: LocationProvider,
-    certProbe: CertProbe,
+    private val certProbe: CertProbe,
     decisionCache: DecisionCache,
     geoQueryEncoder: GeoQueryEncoder,
     private val historyStore: HistoryStore,
@@ -85,6 +88,9 @@ class VerificationViewModel(
         private set
     var lastCheck by mutableStateOf<CheckDetail?>(null)
         private set
+    /** SSID currently being joined for a check, for the Network Detail button. */
+    var connectingTo by mutableStateOf<String?>(null)
+        private set
 
     var strictMode: Boolean
         get() = trustPreferences.strictMode
@@ -102,7 +108,8 @@ class VerificationViewModel(
     /** Re-scans nearby networks and re-queries GECKO for what's registered at the current location. */
     fun refresh() {
         if (!hasLocationPermission) return
-        scannedNetworks = networkObserver.scanResults() + FakeDemoNetworks.all
+        scannedNetworks = currentScanList()
+        networkObserver.requestScan { scannedNetworks = currentScanList() }
         viewModelScope.launch {
             isRefreshing = true
             // lastKnown() alone returns null until some component has actively
@@ -128,9 +135,22 @@ class VerificationViewModel(
         }
     }
 
-    /** Prefers cellular so the WiFi under evaluation can't interfere with its own check - see README.md. */
+    private fun currentScanList(): List<ScannedNetwork> =
+        networkObserver.scanResults() + if (BuildConfig.SHOW_DEMO_NETWORKS) FakeDemoNetworks.all else emptyList()
+
+    /**
+     * Prefers cellular so the WiFi under evaluation can't interfere with its
+     * own check - see README.md. Without cellular (the WiFi-only lab tablet)
+     * it falls back to the WiFi the app joined, which is then the only route
+     * to the server: that AP *can* block the query, which surfaces as
+     * UNREACHABLE and never as a warning. A known limitation, not a bug.
+     * The TLS probe always goes over the joined WiFi - it has to see what
+     * that network presents.
+     */
     private fun rebindGeckoClient() {
-        engine.gecko = GeckoClient(baseUrl = SERVER_URL, network = networkObserver.cellularNetwork())
+        val joined = networkObserver.joinedNetwork
+        engine.gecko = GeckoClient(baseUrl = SERVER_URL, network = networkObserver.cellularNetwork() ?: joined)
+        certProbe.network = joined
     }
 
     /**
@@ -172,10 +192,35 @@ class VerificationViewModel(
         }
     }
 
+    /**
+     * Joins [network] itself (the app drives the connection, not Android
+     * settings), pinned to its BSSID, then verifies over it.
+     */
     fun checkReal(network: ScannedNetwork.Real, domain: String, onDone: (VerificationResult) -> Unit) {
         val fix = location ?: return
+        if (connectingTo != null) return
         viewModelScope.launch {
+            if (!network.isOpen) {
+                onDone(VerificationResult(VerificationState.UNREACHABLE, domain,
+                    reason = "only open networks can be joined by this prototype"))
+                return@launch
+            }
+            connectingTo = network.ssid
+            val joined = try {
+                networkObserver.join(network.ssid, network.bssid)
+            } finally {
+                connectingTo = null
+            }
+            if (joined == null) {
+                val result = VerificationResult(VerificationState.UNREACHABLE, domain,
+                    reason = "could not join ${network.ssid} (${network.bssid})")
+                recordAndPublish(network.ssid, network.bssid, network.bssid ?: network.ssid, result, fix)
+                onDone(result)
+                return@launch
+            }
             rebindGeckoClient()
+            // The startup query ran before any network was joined; redo it now the server is reachable.
+            registeredHere = engine.registeredHere(fix.latitude, fix.longitude, null, queryRadiusMeters)
             val result = engine.verify(
                 networkKey = network.bssid ?: network.ssid,
                 host = domain,
@@ -206,6 +251,10 @@ class VerificationViewModel(
             radiusMeters = queryRadiusMeters,
             altitude = fix.altitude
         )
+    }
+
+    override fun onCleared() {
+        networkObserver.leave()
     }
 
     /** For Network Detail's per-network History section. */

@@ -3,6 +3,8 @@ package com.thesis.geckowifi.verification
 import com.thesis.geckowifi.data.model.*
 import com.thesis.geckowifi.data.remote.GeckoClient
 import com.thesis.geckowifi.data.remote.GeckoResponse
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 
 class VerificationEngine(
@@ -62,7 +64,8 @@ class VerificationEngine(
         ssid: String? = null
     ): VerificationResult {
         cache.get(networkKey, host)?.let { return it }
-        val spki = probe.spkiHash(probe.fetchCertificate(host))
+        // Blocking TLS handshake - must not run on the caller's (UI) dispatcher.
+        val spki = withContext(Dispatchers.IO) { probe.spkiHash(probe.fetchCertificate(host)) }
         return verifyPresentedDomain(networkKey, host, spki, lat, lng, altitude, radiusMeters, ssid)
     }
 

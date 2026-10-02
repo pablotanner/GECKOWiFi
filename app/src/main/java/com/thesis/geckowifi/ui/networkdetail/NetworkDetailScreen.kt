@@ -1,5 +1,6 @@
 package com.thesis.geckowifi.ui.networkdetail
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,6 +17,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -53,7 +55,16 @@ fun NetworkDetailScreen(
     onBack: () -> Unit
 ) {
     var domain by remember { mutableStateOf("") }
-    val networkKey = network.bssid ?: network.ssid
+    // Every AP broadcasting this SSID, strongest first - e.g. Router A and B both as "GeckoTest".
+    // The check joins exactly the selected one (BSSID-pinned), so A-vs-B tests are deterministic.
+    val accessPoints = viewModel.scannedNetworks
+        .filterIsInstance<ScannedNetwork.Real>()
+        .filter { it.ssid == network.ssid }
+        .sortedByDescending { it.rssi }
+        .ifEmpty { listOf(network) }
+    var selectedBssid by remember(network.ssid) { mutableStateOf(network.bssid) }
+    val selected = accessPoints.firstOrNull { it.bssid == selectedBssid } ?: accessPoints.first()
+    val networkKey = selected.bssid ?: selected.ssid
     val certs = viewModel.registeredHere.filter { it.wifi.ssid.equals(network.ssid, ignoreCase = true) }
     val registeredDomain = certs.firstOrNull()?.portal?.domains?.firstOrNull()
     val history = viewModel.historyFor(networkKey)
@@ -88,6 +99,15 @@ fun NetworkDetailScreen(
             }
 
             Text(
+                if (accessPoints.size == 1) "Access point" else "Access points (${accessPoints.size})",
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+            accessPoints.forEach { ap ->
+                AccessPointRow(ap, isSelected = ap.bssid == selected.bssid, onSelect = { selectedBssid = ap.bssid })
+            }
+
+            Text(
                 "Observed domain",
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
@@ -102,11 +122,12 @@ fun NetworkDetailScreen(
             Button(
                 onClick = {
                     if (domain.isNotBlank()) {
-                        viewModel.checkReal(network, domain, onCheckResult)
+                        viewModel.checkReal(selected, domain, onCheckResult)
                     }
                 },
+                enabled = viewModel.connectingTo == null,
                 modifier = Modifier.padding(top = 8.dp)
-            ) { Text("Check") }
+            ) { Text(if (viewModel.connectingTo != null) "Connecting…" else "Connect & check") }
 
             Text(
                 "History",
@@ -133,6 +154,31 @@ fun NetworkDetailScreen(
                     HorizontalDivider(color = Divider)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun AccessPointRow(ap: ScannedNetwork.Real, isSelected: Boolean, onSelect: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onSelect),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RadioButton(selected = isSelected, onClick = onSelect)
+        Column(Modifier.weight(1f)) {
+            Text(ap.bssid ?: "(unknown BSSID)", fontFamily = MonoFontFamily, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                listOfNotNull(
+                    ap.channel?.let { "ch $it" },
+                    ap.band,
+                    ap.rssi.takeIf { it != Int.MIN_VALUE }?.let { "$it dBm" },
+                    ap.securityLabel
+                ).joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall,
+                color = OnSurfaceMuted
+            )
         }
     }
 }

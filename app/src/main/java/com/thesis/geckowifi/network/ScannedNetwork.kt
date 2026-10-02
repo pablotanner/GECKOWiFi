@@ -20,8 +20,43 @@ sealed class ScannedNetwork {
     data class Real(
         override val ssid: String,
         override val bssid: String?,
-        val capabilities: String
-    ) : ScannedNetwork()
+        val capabilities: String,
+        val frequencyMhz: Int = 0,
+        /** Signal strength in dBm (higher = stronger). */
+        val rssi: Int = Int.MIN_VALUE
+    ) : ScannedNetwork() {
+        /** No WPA/WPA2/WPA3/WEP/802.1X in the scan's capability string - nothing to authenticate with. */
+        val isOpen: Boolean
+            get() = listOf("WPA", "RSN", "SAE", "WEP", "EAP", "OWE").none { capabilities.contains(it) }
+
+        /** Short security label for list rows, instead of the raw capability string. */
+        val securityLabel: String
+            get() = when {
+                isOpen -> "Open"
+                "EAP" in capabilities -> "Enterprise"
+                "SAE" in capabilities -> "WPA3"
+                "WEP" in capabilities -> "WEP"
+                else -> "WPA2"
+            }
+
+        /** IEEE channel number derived from [frequencyMhz], or null if unknown. */
+        val channel: Int?
+            get() = when (frequencyMhz) {
+                2484 -> 14
+                in 2412..2472 -> (frequencyMhz - 2407) / 5
+                in 5160..5885 -> (frequencyMhz - 5000) / 5
+                in 5955..7115 -> (frequencyMhz - 5950) / 5
+                else -> null
+            }
+
+        val band: String?
+            get() = when (frequencyMhz) {
+                in 2400..2500 -> "2.4 GHz"
+                in 5000..5900 -> "5 GHz"
+                in 5925..7125 -> "6 GHz"
+                else -> null
+            }
+    }
 
     /**
      * Stands in for a captive-portal login domain + presented SPKI hash that

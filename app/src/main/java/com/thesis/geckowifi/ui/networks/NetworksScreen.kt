@@ -57,8 +57,8 @@ fun NetworksScreen(
     LaunchedEffect(Unit) { viewModel.refresh() }
 
     val registeredSsids = viewModel.registeredHere.mapNotNull { it.wifi.ssid }.toSet()
-    val (registered, other) = viewModel.scannedNetworks.partition { network ->
-        registeredSsids.any { it.equals(network.ssid, ignoreCase = true) }
+    val (registered, other) = groupBySsid(viewModel.scannedNetworks).partition { group ->
+        registeredSsids.any { it.equals(group.primary.ssid, ignoreCase = true) }
     }
 
     Column(Modifier.fillMaxWidth()) {
@@ -89,15 +89,15 @@ fun NetworksScreen(
         LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
             if (registered.isNotEmpty()) {
                 item { SectionHeader("Registered here") }
-                items(registered) { network ->
-                    val certs = viewModel.registeredHere.filter { it.wifi.ssid.equals(network.ssid, ignoreCase = true) }
-                    NetworkRow(network, isRegistered = true, certs = certs, onClick = { onNetworkClick(network) })
+                items(registered) { group ->
+                    val certs = viewModel.registeredHere.filter { it.wifi.ssid.equals(group.primary.ssid, ignoreCase = true) }
+                    NetworkRow(group, isRegistered = true, certs = certs, onClick = { onNetworkClick(group.primary) })
                 }
             }
             if (other.isNotEmpty()) {
                 item { SectionHeader("Other networks") }
-                items(other) { network ->
-                    NetworkRow(network, isRegistered = false, certs = emptyList(), onClick = { onNetworkClick(network) })
+                items(other) { group ->
+                    NetworkRow(group, isRegistered = false, certs = emptyList(), onClick = { onNetworkClick(group.primary) })
                 }
             }
             if (!viewModel.hasLocationPermission) {
@@ -130,8 +130,38 @@ private fun SectionHeader(text: String) {
     )
 }
 
-private fun subtitleFor(network: ScannedNetwork, certs: List<GeoCertificate>): String = when (network) {
-    is ScannedNetwork.Real -> network.capabilities
+/**
+ * One list row per SSID. Android reports every access point (BSSID) as its
+ * own scan result, so a campus network with many APs on two bands would
+ * otherwise appear dozens of times. [primary] is the strongest AP; the
+ * individual APs are picked from on Network Detail.
+ */
+private class NetworkGroup(val primary: ScannedNetwork, val accessPoints: List<ScannedNetwork.Real>)
+
+private fun groupBySsid(networks: List<ScannedNetwork>): List<NetworkGroup> {
+    val real = networks.filterIsInstance<ScannedNetwork.Real>()
+        .groupBy { it.ssid }
+        .values
+        .map { aps -> aps.sortedByDescending { it.rssi } }
+        .sortedByDescending { it.first().rssi }
+        .map { aps -> NetworkGroup(aps.first(), aps) }
+    // Demo entries are deliberately distinct rows even when they share an SSID (benign vs evil twin).
+    val fake = networks.filter { it !is ScannedNetwork.Real }.map { NetworkGroup(it, emptyList()) }
+    return real + fake
+}
+
+private fun channelSummary(aps: List<ScannedNetwork.Real>): String {
+    val channels = aps.mapNotNull { it.channel }.distinct().sorted()
+    return when {
+        aps.size == 1 -> listOfNotNull(aps[0].channel?.let { "ch $it" }, aps[0].band).joinToString(" · ")
+        channels.isEmpty() -> "${aps.size} access points"
+        else -> "${aps.size} access points · ch ${channels.joinToString(", ")}"
+    }
+}
+
+private fun subtitleFor(group: NetworkGroup, certs: List<GeoCertificate>): String = when (val network = group.primary) {
+    is ScannedNetwork.Real -> listOf(network.securityLabel, channelSummary(group.accessPoints))
+        .filter { it.isNotEmpty() }.joinToString(" · ")
     is ScannedNetwork.FakeCaptivePortal -> "Open · claims ${network.presumedDomain}"
     is ScannedNetwork.FakeEduroam -> "WPA2-Enterprise · claims ${network.presumedAuthServerName}"
 }.let { base ->
@@ -141,7 +171,7 @@ private fun subtitleFor(network: ScannedNetwork, certs: List<GeoCertificate>): S
 
 @Composable
 private fun NetworkRow(
-    network: ScannedNetwork,
+    group: NetworkGroup,
     isRegistered: Boolean,
     certs: List<GeoCertificate>,
     onClick: () -> Unit
@@ -156,8 +186,8 @@ private fun NetworkRow(
     ) {
         Icon(Icons.Outlined.Wifi, contentDescription = null)
         Column(Modifier.weight(1f)) {
-            Text(network.ssid, style = MaterialTheme.typography.bodyLarge)
-            Text(subtitleFor(network, certs), style = MaterialTheme.typography.bodyMedium, color = OnSurfaceMuted)
+            Text(group.primary.ssid, style = MaterialTheme.typography.bodyLarge)
+            Text(subtitleFor(group, certs), style = MaterialTheme.typography.bodyMedium, color = OnSurfaceMuted)
         }
         RegisteredChip(isRegistered)
     }
