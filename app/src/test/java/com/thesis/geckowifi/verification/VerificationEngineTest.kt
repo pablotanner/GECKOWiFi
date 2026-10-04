@@ -2,6 +2,8 @@ package com.thesis.geckowifi.verification
 
 import com.thesis.geckowifi.data.model.EAPMethod
 import com.thesis.geckowifi.data.model.GeoCertificate
+import com.thesis.geckowifi.data.model.PortalDomain
+import com.thesis.geckowifi.data.model.PortalDomainRole
 import com.thesis.geckowifi.data.model.PortalTLSIdentity
 import com.thesis.geckowifi.data.model.VerificationState
 import com.thesis.geckowifi.data.model.WiFiAuthMode
@@ -15,6 +17,7 @@ import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.time.Instant
 
 /**
  * Tests instructions.MD step 5's requirements on [VerificationEngine.verify]:
@@ -39,14 +42,26 @@ class VerificationEngineTest {
         every { spkiHash(any()) } returns null
     }
 
-    private fun engine(gecko: GeckoClient, probe: CertProbe = quietProbe()) =
-        VerificationEngine(gecko, probe, DecisionCache(), GeoQueryEncoder())
+    /** A probe whose TLS handshake "presents" [spki]. */
+    private fun probePresenting(spki: String): CertProbe = mockk {
+        every { fetchCertificate(any()) } returns null
+        every { spkiHash(any()) } returns spki
+    }
 
-    private fun sampleCertificate(domain: String) = GeoCertificate(
+    private fun engine(
+        gecko: GeckoClient,
+        probe: CertProbe = quietProbe(),
+        now: Instant = Instant.parse("2026-10-01T00:00:00Z")
+    ) = VerificationEngine(gecko, probe, DecisionCache(), GeoQueryEncoder()) { now }
+
+    private fun pinnedPortal(domain: String, pin: String) =
+        PortalTLSIdentity(domains = listOf(PortalDomain(domain, PortalDomainRole.PRIMARY, listOf(pin))))
+
+    private fun sampleCertificate(domain: String, notValidAfter: String = "2099-01-01T00:00:00Z") = GeoCertificate(
         certificateId = "cert-1",
         wifi = WiFiIdentity(authMode = WiFiAuthMode.OPEN),
-        portal = PortalTLSIdentity(domains = listOf(domain)),
-        notValidAfter = "2099-01-01T00:00:00Z"
+        portal = pinnedPortal(domain, "expected-hash"),
+        notValidAfter = notValidAfter
     )
 
     @Test
@@ -80,9 +95,22 @@ class VerificationEngineTest {
         coEvery { gecko.queryLocation(any(), any(), any()) } returns
             GeckoResponse.Success(listOf(sampleCertificate(host)))
 
-        val result = engine(gecko).verify(networkKey, host, lat, lng, null, radius)
+        val result = engine(gecko, probePresenting("expected-hash")).verify(networkKey, host, lat, lng, null, radius)
 
         assertEquals(VerificationState.VERIFIED, result.state)
+    }
+
+    @Test
+    fun verify_ignoresExpiredCertificates() = runTest {
+        // Same pinned domain and matching key, but the certificate expired a day
+        // before "now": it must behave as if nothing were registered.
+        val gecko = mockk<GeckoClient>()
+        coEvery { gecko.queryLocation(any(), any(), any()) } returns
+            GeckoResponse.Success(listOf(sampleCertificate(host, notValidAfter = "2026-09-30T00:00:00Z")))
+
+        val result = engine(gecko, probePresenting("expected-hash")).verify(networkKey, host, lat, lng, null, radius)
+
+        assertEquals(VerificationState.UNVERIFIED, result.state)
     }
 
     @Test
@@ -132,7 +160,7 @@ class VerificationEngineTest {
         val pinnedCert = GeoCertificate(
             certificateId = "cert-pinned",
             wifi = WiFiIdentity(authMode = WiFiAuthMode.OPEN),
-            portal = PortalTLSIdentity(domains = listOf(host), pinnedSPKIHashes = listOf("expected-hash")),
+            portal = pinnedPortal(host, "expected-hash"),
             notValidAfter = "2099-01-01T00:00:00Z"
         )
         val gecko = mockk<GeckoClient>()
@@ -147,7 +175,7 @@ class VerificationEngineTest {
         val pinnedCert = GeoCertificate(
             certificateId = "cert-pinned",
             wifi = WiFiIdentity(authMode = WiFiAuthMode.OPEN),
-            portal = PortalTLSIdentity(domains = listOf(host), pinnedSPKIHashes = listOf("expected-hash")),
+            portal = pinnedPortal(host, "expected-hash"),
             notValidAfter = "2099-01-01T00:00:00Z"
         )
         val gecko = mockk<GeckoClient>()

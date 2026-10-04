@@ -38,7 +38,7 @@ private data class BadgeStyle(
 
 private fun VerificationState.style(): BadgeStyle = when (this) {
     VerificationState.VERIFIED -> BadgeStyle(
-        "Checked", Icons.Outlined.CheckCircle, OnSurfaceVariant, SurfaceContainerHigh, Outline
+        "Verified", Icons.Outlined.CheckCircle, OnSurfaceVariant, SurfaceContainerHigh, Outline
     )
     VerificationState.CONFLICT -> BadgeStyle(
         "Mismatch", Icons.Outlined.Warning, ConflictRed, ConflictRedContainer, ConflictRed

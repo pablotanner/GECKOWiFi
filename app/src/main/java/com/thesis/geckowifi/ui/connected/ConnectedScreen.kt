@@ -60,7 +60,7 @@ fun ConnectedScreen(
         Column(Modifier.padding(16.dp)) {
             Icon(Icons.Outlined.Wifi, contentDescription = null)
             Text(
-                "Checked and connected",
+                "Verified and connected",
                 style = MaterialTheme.typography.headlineSmall,
                 modifier = Modifier.padding(top = 20.dp)
             )

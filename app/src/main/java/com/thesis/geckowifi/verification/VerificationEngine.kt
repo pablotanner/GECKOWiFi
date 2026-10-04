@@ -5,6 +5,7 @@ import com.thesis.geckowifi.data.remote.GeckoClient
 import com.thesis.geckowifi.data.remote.GeckoResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 
 class VerificationEngine(
@@ -20,7 +21,9 @@ class VerificationEngine(
     var gecko: GeckoClient,
     private val probe: CertProbe,
     private val cache: DecisionCache,
-    private val encoder: GeoQueryEncoder
+    private val encoder: GeoQueryEncoder,
+    /** Injectable for tests; used to drop certificates past their `not_valid_after`. */
+    private val clock: () -> Instant = Instant::now
 ) {
     private val sessions = ConcurrentHashMap<String, PortalSession>()
 
@@ -49,7 +52,7 @@ class VerificationEngine(
         val bitStrings = encoder.encodeQuery(lat, lng, radiusMeters)
         val (minAlt, maxAlt) = encoder.altitudeBounds(altitude, radiusMeters)
         return when (val response = gecko.queryLocation(bitStrings, minAlt, maxAlt)) {
-            is GeckoResponse.Success -> response.certificates
+            is GeckoResponse.Success -> response.validCertificates()
             is GeckoResponse.Unreachable, is GeckoResponse.ProofFailure -> emptyList()
         }
     }
@@ -110,7 +113,7 @@ class VerificationEngine(
             is GeckoResponse.ProofFailure ->
                 VerificationResult(VerificationState.CONFLICT, host, reason = response.cause) // failed proof = hostile, not absent
             is GeckoResponse.Success -> {
-                val candidates = filterBySsid(response.certificates, ssid) ?: return noMatchingSsid(host)
+                val candidates = filterBySsid(response.validCertificates(), ssid) ?: return noMatchingSsid(host)
                 sessionFor(networkKey).observe(host, candidates, presentedSpkiHash).withResponseMetadata(response)
             }
         }
@@ -149,12 +152,21 @@ class VerificationEngine(
             is GeckoResponse.ProofFailure ->
                 VerificationResult(VerificationState.CONFLICT, observedAuthServerName, reason = response.cause)
             is GeckoResponse.Success -> {
-                val candidates = filterBySsid(response.certificates, ssid) ?: return noMatchingSsid(observedAuthServerName)
+                val candidates = filterBySsid(response.validCertificates(), ssid) ?: return noMatchingSsid(observedAuthServerName)
                 evaluateEnterpriseNetwork(observedAuthServerName, observedCaFingerprint, candidates).withResponseMetadata(response)
             }
         }
         if (result.state != VerificationState.UNREACHABLE) cache.put(networkKey, observedAuthServerName, result)
         return result
+    }
+
+    /**
+     * Expired certificates are treated as if they weren't registered at all -
+     * their domains/keys must not anchor or verify anything any more.
+     */
+    private fun GeckoResponse.Success.validCertificates(): List<GeoCertificate> {
+        val now = clock()
+        return certificates.filter { it.isValidAt(now) }
     }
 
     /** Returns `null` (meaning "stop, nothing to warn about") only when [ssid] was given and nothing matched. */

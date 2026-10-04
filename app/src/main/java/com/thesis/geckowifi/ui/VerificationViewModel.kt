@@ -192,9 +192,19 @@ class VerificationViewModel(
         }
     }
 
+    /** First primary portal domain registered for [ssid] at the last queried location, if any. */
+    fun registeredDomainFor(ssid: String): String? =
+        registeredHere.firstOrNull { it.wifi.ssid.equals(ssid, ignoreCase = true) }
+            ?.primaryDomains()?.firstOrNull()?.name
+
     /**
      * Joins [network] itself (the app drives the connection, not Android
      * settings), pinned to its BSSID, then verifies over it.
+     *
+     * A blank [domain] means "check the domain registered for this SSID" -
+     * only knowable after joining, since that's when the server becomes
+     * reachable (WiFi-only device). A stand-in for real portal detection,
+     * like typing it, but immune to typos.
      */
     fun checkReal(network: ScannedNetwork.Real, domain: String, onDone: (VerificationResult) -> Unit) {
         val fix = location ?: return
@@ -221,9 +231,17 @@ class VerificationViewModel(
             rebindGeckoClient()
             // The startup query ran before any network was joined; redo it now the server is reachable.
             registeredHere = engine.registeredHere(fix.latitude, fix.longitude, null, queryRadiusMeters)
+            val host = domain.trim().ifBlank { registeredDomainFor(network.ssid).orEmpty() }
+            if (host.isEmpty()) {
+                val result = VerificationResult(VerificationState.UNVERIFIED, "",
+                    reason = "no domain to check: nothing registered here lists a portal domain for ${network.ssid}")
+                recordAndPublish(network.ssid, network.bssid, network.bssid ?: network.ssid, result, fix)
+                onDone(result)
+                return@launch
+            }
             val result = engine.verify(
                 networkKey = network.bssid ?: network.ssid,
-                host = domain,
+                host = host,
                 lat = fix.latitude, lng = fix.longitude, altitude = null,
                 radiusMeters = queryRadiusMeters, ssid = network.ssid
             )

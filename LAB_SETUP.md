@@ -115,18 +115,60 @@ hostname checks).
 
 ## Registered GeoCerts
 
-A's GeoCert (registered, produces `VERIFIED` on A):
+Certificates use **schema v2** (since 2026-10-04): per-domain roles and pins, validated
+by the server on insert (`GeoCertificate.Validate()` in `geopki/pkg/crypto/certificate.go`).
+
+A's GeoCert `mango-a` (produces `VERIFIED` on A, `CONFLICT` on B in evil-twin mode):
 
 ```json
-"wifi":   { "ssid": "GeckoTest", "auth_mode": "open" },
-"portal": { "domains": ["gecko-a.lab"],
-            "pinned_spki_sha256": ["QwsHK0yXsUHme1g9/rqOHixTb8cCuCMBxYdaglLs1Q8="] }
+{
+  "schema_version": 2,
+  "certificate_id": "mango-a",
+  "wifi": { "auth_mode": "open", "ssid": "GeckoTest" },
+  "portal": { "domains": [
+    { "name": "gecko-a.lab", "role": "primary",
+      "pinned_spki_sha256": ["QwsHK0yXsUHme1g9/rqOHixTb8cCuCMBxYdaglLs1Q8="] }
+  ] },
+  "areas": [ ... ],
+  "areas_altitude": [[200, 700]],
+  "not_valid_after": "2031-09-26T15:28:00Z"
+}
 ```
 
+Insert (in WSL; the file is a JSON **array** of certificates):
+
+```bash
+cd ~/Thesis/geopki
+go run ./cmd/geopki-client-ingestion --address=http://127.0.0.1:1234 \
+  --insertion-key=$CERT_INSERT_KEY --certificates=/tmp/mango-a.json
+```
+
+Write the file with a heredoc or copy it in; pasting long JSON into the terminal has broken
+lines inside strings before (`invalid character '\n' in string literal`).
+
+**Schema v2 rules** (server validation + app behaviour):
+
+- `schema_version: 2` required; `wifi.auth_mode` must be a valid mode; enterprise modes need
+  `auth_server_names`; one altitude range per area; `not_valid_after` in RFC 3339.
+- `portal` is optional (omitted for non-portal networks). If present: at least one
+  `primary` domain, and every domain has its own non-empty `pinned_spki_sha256`. Roles:
+  `primary` (entry point, the only role that starts a session), `delegate` (only valid
+  after its primary, e.g. a payment page), `api` (RFC 8908 Captive Portal API host).
+- Pins are the trust anchor; the app does no Web PKI validation. A domain without pins
+  never verifies.
+- The app ignores certificates past `not_valid_after`.
+- A delegate seen before its primary: genuine key → `UNRECOGNIZED` (no anchor is set);
+  any other key → `CONFLICT`.
+
 Area covers general ETH (central Zürich) area, so I can work from different ETH locations or maybe even home
-**Known issue:** two certificates on the server have an empty `wifi.auth_mode`. The app
-drops them on every query (`GeckoClient: dropping unparsable certificate: WiFiAuthMode
-does not contain element with name ''`). Set `auth_mode` to `"open"` or remove them.
+**Legacy certificates:** the golden-vector certificates (`eth-a`, `eth-b`, `hb`,
+`stack-low`, `stack-high`, `multi`) predate the `wifi` section and are served with
+`"auth_mode": ""`. The app parses them with an unknown auth mode (they have no SSID, so the
+SSID filter ignores them). Pre-v2 certificates with string portal domains (e.g. the old
+`mango-new`) are dropped as unparsable; the log line names the certificate ID. The golden
+tests use frozen snapshots and don't depend on what's on the server, but **regenerating**
+`golden.json` needs the six golden certificates present, so keep their insert payloads
+backed up.
 
 ## Access (SSH)
 
@@ -136,27 +178,43 @@ does not contain element with name ''`). Set `auth_mode` to `"open"` or remove t
 Host mango-a
   HostName 192.168.137.50
   User root
+  IdentityFile ~/.ssh/id_mango
+  IdentitiesOnly yes
 Host mango-b
   HostName 192.168.8.115
   User root
   ProxyJump mango-a
+  IdentityFile ~/.ssh/id_mango
+  IdentitiesOnly yes
 Host mango-a-ui
   HostName 192.168.137.50
   User root
   LocalForward 8081 127.0.0.1:80
+  IdentityFile ~/.ssh/id_mango
+  IdentitiesOnly yes
 Host mango-b-ui
   HostName 192.168.8.115
   User root
   ProxyJump mango-a
   LocalForward 8082 127.0.0.1:80
+  IdentityFile ~/.ssh/id_mango
+  IdentitiesOnly yes
 ```
 
-- Key auth was set up (ed25519 pubkey in `/etc/dropbear/authorized_keys` on both). Routers
-  run Dropbear, so keys live there, not `~/.ssh`.
-- **As of 2026-10-02 key auth is not working:** `ssh mango-a` prompts for a password, and
-  key logins from other shells are rejected (`Permission denied (publickey,password)`).
-  Check the key is loaded in the shell you use, and that `authorized_keys` survived on
-  the routers.
+- Key auth with a dedicated, passphrase-less lab key `~/.ssh/id_mango` (comment
+  `mango-lab`), installed in `/etc/dropbear/authorized_keys` on both routers (Dropbear
+  keeps keys there, not in `~/.ssh`). `IdentitiesOnly yes` stops SSH from also offering the
+  other keys (e.g. the passphrase-protected `id_ed25519`). Test:
+  `ssh -o BatchMode=yes mango-a echo ok` / `mango-b`.
+- **Installing a key from Windows PowerShell:** don't pipe the `.pub` file into `ssh`
+  (`type key.pub | ssh ...`) — the conda PowerShell adds a UTF-8 BOM and CRLF, and Dropbear
+  silently ignores the corrupted line. Pass it as an argument instead:
+  ```powershell
+  $k = (Get-Content $HOME\.ssh\id_mango.pub -Raw).Trim()
+  ssh mango-a "echo '$k' > /etc/dropbear/authorized_keys; chmod 600 /etc/dropbear/authorized_keys"
+  ```
+- Routers: OpenWrt 22.03.4 (GL.iNet firmware 4.3.28), firewall4/nftables, nginx serves the
+  admin UI. Only ~1.5 MB free on `/overlay` — check before installing packages.
 - Dashboards: `ssh -N mango-a-ui` / `ssh -N mango-b-ui`, then `localhost:8081/8082`.
 - `uci` for router config (section names vary by firmware — run `uci show wireless` first).
 
@@ -207,7 +265,7 @@ Order matters:
 
 1. Start `geopki-server` in WSL (above).
 2. **Then** run `& "$HOME\geopki-proxy.ps1"` in an admin PowerShell.
-3Check: `curl.exe http://192.168.137.1:1234/` → `404`.
+3. Check: `curl.exe http://192.168.137.1:1234/` → `404`.
 
 
 ## Android app — locked architecture decisions
@@ -222,9 +280,11 @@ Order matters:
   golden-vector conformance tests passing.
 - `ProofVerifier`: Merkle inclusion proof verification — non-optional for a faithful
   prototype.
-- `GeoCertificate` schema: `PortalDomain` entries with `role` (`primary`/`delegate`);
-  altitude folded into `GeoCertArea`; `authServerCAs` carries raw base64 DER CA bytes for
-  `WifiEnterpriseConfig.setCaCertificate()` (EAP-TLS path, deferred).
+- `GeoCertificate` schema v2: `portal.domains` are `PortalDomain` entries with `role`
+  (`primary`/`delegate`/`api`) and **per-domain** pins; `schema_version`; altitude is a
+  separate `areas_altitude` list (one `[min, max]` per area); `auth_server_cas` carries raw
+  base64 DER CA bytes for `WifiEnterpriseConfig.setCaCertificate()` (EAP-TLS path,
+  deferred). Details under [Registered GeoCerts](#registered-geocerts).
 - **Root approach (agreed with advisor).** GECKO is assumed to be implemented at system
   level (part of the OS / WiFi stack), so the prototype runs with **root** as the
   stand-in for system privileges. There is **no VPN-based (`VpnService`) path** — it was
@@ -257,9 +317,11 @@ Order matters:
 
 - Build/install: `.\gradlew.bat installDeviceDebug` (tablet on USB), or select the
   `deviceDebug` variant in Android Studio and Run.
-- Check flow: Networks → `GeckoTest` → pick the access point (A or B) → type the domain
-  (`gecko-a.lab`) → **Connect & check** → approve Android's connection dialog (every time).
-- Badges: `VERIFIED` = "Checked", `CONFLICT` = "Mismatch", `UNRECOGNIZED` =
+- Check flow: Networks → `GeckoTest` → pick the access point (A or B) → leave the domain
+  empty (the app checks the first **primary** domain registered for the SSID once joined;
+  pre-filled after the first check) or type one to test something else → **Connect & check** → approve
+  Android's connection dialog (every time).
+- Badges: `VERIFIED` = "Verified", `CONFLICT` = "Mismatch", `UNRECOGNIZED` =
   "Unrecognized", `UNVERIFIED` = "Not registered", `UNREACHABLE` = "Can't check".
 - **Results are cached in memory** per BSSID + domain: force-close and reopen the app
   between attempts, or a retry just shows the previous verdict.

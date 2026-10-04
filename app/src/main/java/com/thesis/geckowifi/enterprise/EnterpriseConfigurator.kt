@@ -71,7 +71,7 @@ class EnterpriseConfigurator {
     fun expectedCaFingerprints(certificate: GeoCertificate): List<String> =
         certificate.wifi.trustedCAFingerprints
 
-    fun isEnterprise(mode: WiFiAuthMode): Boolean =
+    fun isEnterprise(mode: WiFiAuthMode?): Boolean =
         mode == WiFiAuthMode.WPA2_ENTERPRISE || mode == WiFiAuthMode.WPA3_ENTERPRISE
 
     fun mapEap(method: EAPMethod?): Int = when (method) {

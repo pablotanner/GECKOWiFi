@@ -12,6 +12,8 @@ import com.thesis.geckowifi.verification.XYBitString
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Dns
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -176,11 +178,12 @@ class GeckoClient(
                 val certificates = ArrayList<GeoCertificate>(protoResponse.Certificates.size)
                 var unparsedCount = 0
                 for (raw in protoResponse.Certificates) {
+                    val bytes = raw.toByteArray()
                     try {
-                        certificates += parseCertificate(raw.toByteArray())
+                        certificates += parseCertificate(bytes)
                     } catch (e: Exception) {
                         unparsedCount++
-                        System.err.println("GeckoClient: dropping unparsable certificate: ${e.message}")
+                        System.err.println("GeckoClient: dropping unparsable certificate ${certificateIdOf(bytes)}: ${e.message}")
                     }
                 }
                 GeckoResponse.Success(certificates, unparsedCount, usedPreferredNetwork)
@@ -221,6 +224,12 @@ class GeckoClient(
     // being required - no `omitempty` on the Go side either).
     private fun parseCertificate(bytes: ByteArray): GeoCertificate =
         certificateJson.decodeFromString(GeoCertificate.serializer(), String(bytes, Charsets.UTF_8))
+
+    /** Best-effort `certificate_id` of a certificate that failed to parse, so the log says which one. */
+    private fun certificateIdOf(bytes: ByteArray): String =
+        runCatching {
+            Json.parseToJsonElement(String(bytes, Charsets.UTF_8)).jsonObject["certificate_id"]?.jsonPrimitive?.content
+        }.getOrNull()?.let { "\"$it\"" } ?: "(no certificate_id)"
 
     companion object {
         private fun buildClient(network: Network?): OkHttpClient =

@@ -21,6 +21,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -66,7 +67,12 @@ fun NetworkDetailScreen(
     val selected = accessPoints.firstOrNull { it.bssid == selectedBssid } ?: accessPoints.first()
     val networkKey = selected.bssid ?: selected.ssid
     val certs = viewModel.registeredHere.filter { it.wifi.ssid.equals(network.ssid, ignoreCase = true) }
-    val registeredDomain = certs.firstOrNull()?.portal?.domains?.firstOrNull()
+    val registeredDomain = viewModel.registeredDomainFor(network.ssid)
+    // Pre-fill once the registered domain is known (after the first successful join);
+    // never overwrite what the user typed.
+    LaunchedEffect(registeredDomain) {
+        if (domain.isBlank() && registeredDomain != null) domain = registeredDomain
+    }
     val history = viewModel.historyFor(networkKey)
 
     Column(Modifier.fillMaxWidth()) {
@@ -117,14 +123,10 @@ fun NetworkDetailScreen(
                 onValueChange = { domain = it },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("e.g. what a captive portal redirected you to") }
+                placeholder = { Text("Leave empty to check the registered domain") }
             )
             Button(
-                onClick = {
-                    if (domain.isNotBlank()) {
-                        viewModel.checkReal(selected, domain, onCheckResult)
-                    }
-                },
+                onClick = { viewModel.checkReal(selected, domain, onCheckResult) },
                 enabled = viewModel.connectingTo == null,
                 modifier = Modifier.padding(top = 8.dp)
             ) { Text(if (viewModel.connectingTo != null) "Connecting…" else "Connect & check") }
