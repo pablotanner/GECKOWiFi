@@ -170,6 +170,74 @@ tests use frozen snapshots and don't depend on what's on the server, but **regen
 `golden.json` needs the six golden certificates present, so keep their insert payloads
 backed up.
 
+## Captive portal
+
+Router A runs **openNDS** (the gate) and sends new clients to the **portal server** on the
+laptop (`portal/` in this repo, see `portal/README.md`).
+
+```
+client → any http page → openNDS on A (192.168.8.1:2050)
+       → http://portal.gecko-a.lab/?tok=…&authaction=…&redir=…      (FAS, laptop 192.168.137.10:80)
+       → https://portal.gecko-a.lab/                                 (primary, login page)
+       → [optional] https://pay.gecko-pay.lab/checkout → https://portal.gecko-a.lab/complete   (delegate)
+       → http://192.168.8.1:2050/opennds_auth/?tok=…                 (openNDS opens the firewall)
+```
+
+**Portal server** (Windows, not WSL): `portal
+un-genuine.ps1` — must be running for logins.
+Laptop addresses on `Ethernet 4`: `192.168.137.10` (genuine), `192.168.137.20` (attacker,
+reserved), both persistent, `SkipAsSource`; firewall rule `GECKO portal 80/443` allows them
+from `192.168.137.0/24` only. Requests are logged to `portal/logs/<role>-<date>.jsonl`.
+
+| Domain | Role | IP | SPKI SHA-256 |
+|---|---|---|---|
+| `portal.gecko-a.lab` | primary | `192.168.137.10` | `dAJnHfG0hpOWSRhQOeWz1NBoiXHnUnB2y/40h9i2exk=` |
+| `pay.gecko-pay.lab` | delegate | `192.168.137.10` | `u9H7ovOnPGAi3ptBn2262bEEeXNcndvZCmnr8gmG3+c=` |
+
+Keys are in `portal/keys/` (not committed; `portal.exe keygen` won't overwrite them —
+a new key invalidates the registered pin). The server picks the key by SNI.
+
+**openNDS on A** (`/etc/config/opennds`, backup of the original in
+`/root/opennds.config.backup`):
+
+- FAS: `fasremoteip 192.168.137.10`, `fasremotefqdn portal.gecko-a.lab`, `fasport 80`,
+  `faspath /`, `fas_secure_enabled 0` (token in clear text — fine for the lab, documented
+  as insecure by openNDS; not what GECKO evaluates).
+- **Reachable before login** (`preauthenticated_users`): GeoPKI server
+  `tcp 1234 to 192.168.137.1`, portal HTTPS `tcp 443 to 192.168.137.10` (FAS port 80 is
+  allowed by openNDS itself). DNS and DHCP to the router are allowed by default. So the app
+  can query GeoPKI and probe the portal's keys while still logged out.
+- **Captive Portal API (RFC 8908/8910) is off** (`dhcp_default_url_enable 0`). By default
+  openNDS sends DHCP option 114 = `http://status.client`; that name doesn't resolve on A, so
+  Android (which prefers the API) showed "null is unreachable" instead of the login page.
+  With it off, clients use classic detection (HTTP probe → redirect). The API mode is a
+  later, separate experiment (scenario S8). Clients keep option 114 until their DHCP lease
+  renews — reconnect the WiFi after changing this.
+- **Lab CA:** the portal certificates are signed by `portal/keys/gecko-lab-ca.crt`
+  (valid until 2036; leaf certificates until 2027-11-05, renew with `portal.exe sign`, pins
+  unchanged). Install it on the tablet as a CA certificate, otherwise Android's
+  "Sign in to network" screen rejects the portal (`tls: unknown certificate` in the portal
+  log) and Chrome warns. GECKO doesn't depend on the CA — the app only compares pins.
+- **Router B is trusted** (`trustedmac 94:83:c4:97:c2:47`): B hangs off A's LAN, and its
+  uplink must not sit behind A's portal (B models an independent attacker network).
+- DNS on A: `portal.gecko-a.lab` and `pay.gecko-pay.lab` → `192.168.137.10` (the more
+  specific entries override `gecko-a.lab → 192.168.8.1`).
+- On B, the evil-twin entry `/gecko-a.lab/192.168.247.1` also matches
+  `portal.gecko-a.lab` (dnsmasq matches subdomains), so B answers for the portal domain with
+  its own admin-UI key → `CONFLICT`.
+
+Useful commands on A:
+
+```bash
+ndsctl status                     # clients, FAS URL, trusted MACs
+ndsctl json                       # client list incl. state (Preauthenticated/Authenticated)
+ndsctl deauth <client-mac>        # log a client out again (repeat a test)
+/etc/init.d/opennds stop          # portal off (all clients get through)
+/etc/init.d/opennds start
+```
+
+Android randomises the WiFi MAC per network; `ndsctl json` shows the tablet's current one.
+
 ## Access (SSH)
 
 `~/.ssh/config` (Windows: `C:\Users\41763\.ssh\config`):
@@ -215,6 +283,17 @@ Host mango-b-ui
   ```
 - Routers: OpenWrt 22.03.4 (GL.iNet firmware 4.3.28), firewall4/nftables, nginx serves the
   admin UI. Only ~1.5 MB free on `/overlay` — check before installing packages.
+- **mwan3 ping tracking is disabled on A** (2026-10-04). GL.iNet's multi-WAN manager pings
+  `1.1.1.1`/`8.8.8.8`/OpenDNS to decide whether the WAN is up; when those pings fail (e.g.
+  while ICS is broken) it marks the WAN offline and blocks the **router's own** traffic
+  (`wget: Operation not permitted`, `opkg update` fails) even though forwarded client
+  traffic may still pass. Removed `mwan3.wan.track_ip`, set `initial_state=online`; backup
+  in `/root/mwan3-wan.backup` on A. B still has tracking enabled. Restore on A with
+  `uci add_list mwan3.wan.track_ip=1.1.1.1; uci add_list mwan3.wan.track_ip=8.8.8.8;
+  uci commit mwan3; /etc/init.d/mwan3 restart` (the SSH session drops during the restart).
+- **openNDS 9.10.0 is active on A** (since 2026-10-04) — see
+  [Captive portal](#captive-portal). Note: OpenWrt starts packages on install — install
+  with `opkg install X; /etc/init.d/X stop; /etc/init.d/X disable` in one command.
 - Dashboards: `ssh -N mango-a-ui` / `ssh -N mango-b-ui`, then `localhost:8081/8082`.
 - `uci` for router config (section names vary by firmware — run `uci show wireless` first).
 
@@ -266,6 +345,65 @@ Order matters:
 1. Start `geopki-server` in WSL (above).
 2. **Then** run `& "$HOME\geopki-proxy.ps1"` in an admin PowerShell.
 3. Check: `curl.exe http://192.168.137.1:1234/` → `404`.
+
+### ICS troubleshooting
+
+Windows ICS is fragile: it often stops working after the laptop's WLAN switches networks
+(ETH WiFi ↔ phone hotspot), after sleep, or after sharing was toggled off and on. The
+checkbox still looks ticked while NAT/DNS silently stop.
+
+| Symptom | Meaning |
+|---|---|
+| `Ethernet 4` has `169.254.x.x` instead of `192.168.137.1`; `ssh mango-a` times out | ICS not applied to the adapter — no route to the lab at all |
+| `ssh mango-a` works, A reaches `http://192.168.137.1:1234/` (404) but not `http://example.com` | ICS NAT not forwarding — no internet behind the routers |
+| Tablet "connected" to `GeckoTest` but `adb shell ping 1.1.1.1` fails | Same; the WiFi icon only means "connected to the router" |
+
+Lab traffic (tablet ↔ routers ↔ GeoPKI server on the laptop) does **not** need ICS NAT —
+only `192.168.137.1` on `Ethernet 4`. Internet behind the routers is needed for `opkg` and
+the portal's "internet after login".
+
+Diagnose (admin PowerShell):
+
+```powershell
+Get-NetIPAddress -InterfaceAlias 'Ethernet 4' -AddressFamily IPv4   # expect 192.168.137.1
+$m = New-Object -ComObject HNetCfg.HNetShare
+foreach ($c in @($m.EnumEveryConnection)) { $p = $m.NetConnectionProps($c); $x = $m.INetSharingConfigurationForINetConnection($c)
+  "{0,-30} sharing={1} type={2}" -f $p.Name, $x.SharingEnabled, $x.SharingConnectionType }   # WLAN: True/0, Ethernet 4: True/1
+```
+
+Fix, in order:
+
+1. Re-enable sharing (admin PowerShell; same `$m` as above):
+   ```powershell
+   $conns = @($m.EnumEveryConnection)
+   $wlan = $conns | ? { $m.NetConnectionProps($_).Name -eq 'WLAN' }
+   $eth  = $conns | ? { $m.NetConnectionProps($_).Name -eq 'Ethernet 4' }
+   $m.INetSharingConfigurationForINetConnection($wlan).EnableSharing(0)   # shares its internet
+   $m.INetSharingConfigurationForINetConnection($eth).EnableSharing(1)    # receives it
+   ```
+   It can take a minute until `Ethernet 4` shows `192.168.137.1` again.
+2. `Restart-Service SharedAccess -Force` often fails ("Fehler beim Beenden des Diensts") —
+   the service hangs. Then **reboot**; that is why a reboot has fixed ICS before.
+3. After any reboot: [restart procedure](#restart-procedure-after-laptop-reboot-or-wsl---shutdown).
+
+Don't run `DisableSharing()` unless you re-enable right after: with sharing off, the
+adapter falls back to `169.254.x.x` and the lab is unreachable.
+
+**Fallback address (applied 2026-10-04):** even with sharing enabled, `Ethernet 4` lost
+`192.168.137.1` twice (after a reboot, and while A reconfigured its network). The address
+was re-added by hand and persists across reboots; it is the same address ICS uses, so
+they don't conflict:
+
+```powershell
+New-NetIPAddress -InterfaceAlias 'Ethernet 4' -IPAddress 192.168.137.1 -PrefixLength 24
+```
+
+If `Ethernet 4` shows `169.254.x.x` again, run that line (admin). Lab access comes back
+immediately; internet behind the routers additionally needs ICS itself to work.
+
+On a phone hotspot, some carriers/phones drop traffic from devices behind the hotspot
+(extra hops). If the laptop has internet but the routers don't even with ICS healthy,
+that's the likely cause — it doesn't affect lab traffic.
 
 
 ## Android app — locked architecture decisions
