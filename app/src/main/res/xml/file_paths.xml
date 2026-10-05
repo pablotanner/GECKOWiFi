@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- getExternalFilesDir(null)/portal-checks/ - where PortalCheckLog writes. -->
+    <external-files-path name="portal-checks" path="portal-checks/" />
+</paths>

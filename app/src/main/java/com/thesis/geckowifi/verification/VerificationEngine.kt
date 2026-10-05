@@ -49,12 +49,16 @@ class VerificationEngine(
         lng: Double,
         altitude: Double?,
         radiusMeters: Int
-    ): List<GeoCertificate> {
+    ): LocationLookup {
         val bitStrings = encoder.encodeQuery(lat, lng, radiusMeters)
         val (minAlt, maxAlt) = encoder.altitudeBounds(altitude, radiusMeters)
         return when (val response = gecko.queryLocation(bitStrings, minAlt, maxAlt)) {
-            is GeckoResponse.Success -> response.validCertificates()
-            is GeckoResponse.Unreachable, is GeckoResponse.ProofFailure -> emptyList()
+            is GeckoResponse.Success -> LocationLookup(LookupStatus.OK, response.validCertificates())
+            // The caller must tell "nothing registered here" apart from "couldn't
+            // get a trustworthy answer" - an empty list alone can't. On a WiFi-only
+            // device this query is usually unreachable until a network is joined.
+            is GeckoResponse.Unreachable -> LocationLookup(LookupStatus.UNREACHABLE, emptyList())
+            is GeckoResponse.ProofFailure -> LocationLookup(LookupStatus.UNTRUSTED, emptyList())
         }
     }
 

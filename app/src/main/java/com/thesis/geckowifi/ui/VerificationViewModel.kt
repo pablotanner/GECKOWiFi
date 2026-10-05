@@ -26,6 +26,7 @@ import com.thesis.geckowifi.verification.CertProbe
 import com.thesis.geckowifi.verification.DecisionCache
 import com.thesis.geckowifi.verification.GeoQueryEncoder
 import com.thesis.geckowifi.verification.HopVerdict
+import com.thesis.geckowifi.verification.LookupStatus
 import com.thesis.geckowifi.verification.VerificationEngine
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -95,6 +96,13 @@ class VerificationViewModel(
         private set
     var registeredHere by mutableStateOf<List<GeoCertificate>>(emptyList())
         private set
+    /**
+     * Whether [registeredHere] is actually known. `null` = not queried yet;
+     * otherwise it says whether the list is trustworthy or the server couldn't
+     * be reached - so an empty [registeredHere] isn't mistaken for "nothing here".
+     */
+    var certLookup by mutableStateOf<LookupStatus?>(null)
+        private set
     var isRefreshing by mutableStateOf(false)
         private set
     var history by mutableStateOf<List<VerificationRecord>>(emptyList())
@@ -135,7 +143,7 @@ class VerificationViewModel(
             location = fix
             if (fix != null) {
                 rebindGeckoClient()
-                registeredHere = engine.registeredHere(
+                val lookup = engine.registeredHere(
                     lat = fix.latitude,
                     lng = fix.longitude,
                     // Not fix.altitude - see the doc comment below on why this
@@ -143,6 +151,8 @@ class VerificationViewModel(
                     altitude = null,
                     radiusMeters = queryRadiusMeters
                 )
+                registeredHere = lookup.certificates
+                certLookup = lookup.status
             }
             isRefreshing = false
         }
@@ -248,7 +258,10 @@ class VerificationViewModel(
             }
             rebindGeckoClient()
             // The startup query ran before any network was joined; redo it now the server is reachable.
-            registeredHere = engine.registeredHere(fix.latitude, fix.longitude, null, queryRadiusMeters)
+            engine.registeredHere(fix.latitude, fix.longitude, null, queryRadiusMeters).let {
+                registeredHere = it.certificates
+                certLookup = it.status
+            }
 
             val typed = domain.trim()
             if (typed.isNotEmpty()) {

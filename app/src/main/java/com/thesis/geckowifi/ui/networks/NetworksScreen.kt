@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import com.thesis.geckowifi.data.model.GeoCertificate
 import com.thesis.geckowifi.network.ScannedNetwork
 import com.thesis.geckowifi.ui.VerificationViewModel
+import com.thesis.geckowifi.verification.LookupStatus
 import com.thesis.geckowifi.ui.theme.Divider
 import com.thesis.geckowifi.ui.theme.OnSurfaceMuted
 import com.thesis.geckowifi.ui.theme.OnSurfaceVariant
@@ -56,8 +57,13 @@ fun NetworksScreen(
 ) {
     LaunchedEffect(Unit) { viewModel.refresh() }
 
+    // Only trust the registered/not-registered split when the lookup actually
+    // succeeded; otherwise an empty list would mislabel every network as "not
+    // registered" when we simply couldn't ask (see the banner below).
+    val known = viewModel.certLookup == LookupStatus.OK
     val registeredSsids = viewModel.registeredHere.mapNotNull { it.wifi.ssid }.toSet()
-    val (registered, other) = groupBySsid(viewModel.scannedNetworks).partition { group ->
+    val groups = groupBySsid(viewModel.scannedNetworks)
+    val (registered, other) = groups.partition { group ->
         registeredSsids.any { it.equals(group.primary.ssid, ignoreCase = true) }
     }
 
@@ -85,19 +91,29 @@ fun NetworksScreen(
             style = MaterialTheme.typography.bodySmall,
             color = OnSurfaceMuted
         )
+        if (viewModel.hasLocationPermission && !known) {
+            LookupUnknownBanner(viewModel.certLookup)
+        }
 
         LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
-            if (registered.isNotEmpty()) {
-                item { SectionHeader("Registered here") }
-                items(registered) { group ->
-                    val certs = viewModel.registeredHere.filter { it.wifi.ssid.equals(group.primary.ssid, ignoreCase = true) }
-                    NetworkRow(group, isRegistered = true, certs = certs, onClick = { onNetworkClick(group.primary) })
+            if (!known) {
+                // Registration unknown: show every network once, chips as "unknown".
+                items(groups) { group ->
+                    NetworkRow(group, Registration.UNKNOWN, certs = emptyList(), onClick = { onNetworkClick(group.primary) })
                 }
-            }
-            if (other.isNotEmpty()) {
-                item { SectionHeader("Other networks") }
-                items(other) { group ->
-                    NetworkRow(group, isRegistered = false, certs = emptyList(), onClick = { onNetworkClick(group.primary) })
+            } else {
+                if (registered.isNotEmpty()) {
+                    item { SectionHeader("Registered here") }
+                    items(registered) { group ->
+                        val certs = viewModel.registeredHere.filter { it.wifi.ssid.equals(group.primary.ssid, ignoreCase = true) }
+                        NetworkRow(group, Registration.REGISTERED, certs = certs, onClick = { onNetworkClick(group.primary) })
+                    }
+                }
+                if (other.isNotEmpty()) {
+                    item { SectionHeader("Other networks") }
+                    items(other) { group ->
+                        NetworkRow(group, Registration.NOT_REGISTERED, certs = emptyList(), onClick = { onNetworkClick(group.primary) })
+                    }
                 }
             }
             if (!viewModel.hasLocationPermission) {
@@ -169,10 +185,12 @@ private fun subtitleFor(group: NetworkGroup, certs: List<GeoCertificate>): Strin
     if (authMode != null) "$base · Registered as $authMode" else base
 }
 
+private enum class Registration { REGISTERED, NOT_REGISTERED, UNKNOWN }
+
 @Composable
 private fun NetworkRow(
     group: NetworkGroup,
-    isRegistered: Boolean,
+    registration: Registration,
     certs: List<GeoCertificate>,
     onClick: () -> Unit
 ) {
@@ -189,7 +207,7 @@ private fun NetworkRow(
             Text(group.primary.ssid, style = MaterialTheme.typography.bodyLarge)
             Text(subtitleFor(group, certs), style = MaterialTheme.typography.bodyMedium, color = OnSurfaceMuted)
         }
-        RegisteredChip(isRegistered)
+        RegisteredChip(registration)
     }
     androidx.compose.foundation.layout.Box(
         Modifier
@@ -201,10 +219,16 @@ private fun NetworkRow(
 }
 
 @Composable
-private fun RegisteredChip(isRegistered: Boolean) {
+private fun RegisteredChip(registration: Registration) {
+    val label = when (registration) {
+        Registration.REGISTERED -> "Registered"
+        Registration.NOT_REGISTERED -> "Not registered"
+        Registration.UNKNOWN -> "Unknown"
+    }
     Surface(
         shape = RoundedCornerShape(8.dp),
-        color = if (isRegistered) SurfaceContainerHigh else androidx.compose.ui.graphics.Color.Transparent,
+        color = if (registration == Registration.REGISTERED) SurfaceContainerHigh
+        else androidx.compose.ui.graphics.Color.Transparent,
         border = BorderStroke(1.dp, Outline)
     ) {
         Row(
@@ -212,10 +236,34 @@ private fun RegisteredChip(isRegistered: Boolean) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(Icons.Outlined.HelpOutline, contentDescription = null, modifier = Modifier.padding(end = 6.dp))
-            Text(
-                if (isRegistered) "Registered" else "Not registered",
-                style = MaterialTheme.typography.labelMedium
-            )
+            Text(label, style = MaterialTheme.typography.labelMedium)
         }
+    }
+}
+
+/** Shown when the "what's registered here" lookup didn't succeed, so the chips can't be trusted. */
+@Composable
+private fun LookupUnknownBanner(status: LookupStatus?) {
+    val message = when (status) {
+        LookupStatus.UNREACHABLE ->
+            "Can't reach the map server, so it's unknown which networks are registered here. " +
+                "On this device the server is only reachable once you connect to a network."
+        LookupStatus.UNTRUSTED ->
+            "The map server's answer couldn't be verified, so registration here is unknown."
+        else ->
+            "Registration here hasn't been looked up yet."
+    }
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = SurfaceContainerHigh,
+        border = BorderStroke(1.dp, Outline),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+    ) {
+        Text(
+            message,
+            modifier = Modifier.padding(12.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = OnSurfaceVariant
+        )
     }
 }

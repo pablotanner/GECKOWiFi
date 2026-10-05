@@ -62,6 +62,11 @@ class PortalCheckLog(private val dir: File) {
 
     private val json = Json { encodeDefaults = false }
 
+    /** The newest `checks-<date>.jsonl`, or null if nothing has been logged yet. */
+    fun latestFile(): File? =
+        dir.listFiles { f -> f.name.startsWith("checks-") && f.name.endsWith(".jsonl") }
+            ?.maxByOrNull { it.lastModified() }
+
     /** Appends [entry]; returns the file written, or null if the directory isn't writable. */
     fun append(entry: CheckEntry): File? {
         val line = json.encodeToString(CheckEntry.serializer(), entry)

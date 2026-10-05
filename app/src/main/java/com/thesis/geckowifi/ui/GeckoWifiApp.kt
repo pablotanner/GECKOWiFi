@@ -129,7 +129,9 @@ fun GeckoWifiApp(hasLocationPermission: Boolean, onRequestLocationPermission: ()
                     }
                 )
             }
-            composable("status") { StatusScreen() }
+            composable("status") {
+                StatusScreen(viewModel, onCheckDetails = { navController.navigate("checkDetail") })
+            }
             composable("activity") { ActivityScreen(viewModel) }
             composable("settings") { SettingsScreen(viewModel) }
             composable("networkDetail") {

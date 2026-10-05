@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import com.thesis.geckowifi.data.model.VerificationResult
 import com.thesis.geckowifi.network.ScannedNetwork
 import com.thesis.geckowifi.ui.VerificationViewModel
+import com.thesis.geckowifi.verification.LookupStatus
 import com.thesis.geckowifi.ui.components.StateBadge
 import com.thesis.geckowifi.ui.theme.Divider
 import com.thesis.geckowifi.ui.theme.MonoFontFamily
@@ -81,7 +82,17 @@ fun NetworkDetailScreen(
 
         Column(Modifier.padding(16.dp)) {
             if (certs.isEmpty()) {
-                Text("Nothing registered here for this SSID.", color = OnSurfaceMuted)
+                Text(
+                    when (viewModel.certLookup) {
+                        LookupStatus.OK -> "Nothing registered here for this SSID."
+                        LookupStatus.UNREACHABLE ->
+                            "Registration unknown - the map server couldn't be reached. Connect and check to find out."
+                        LookupStatus.UNTRUSTED ->
+                            "Registration unknown - the map server's answer couldn't be verified."
+                        null -> "Registration not looked up yet - connect and check."
+                    },
+                    color = OnSurfaceMuted
+                )
             } else {
                 InfoCard {
                     InfoRow("Registered here", registeredDomain ?: "(no captive-portal domain on this certificate)")
