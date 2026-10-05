@@ -6,6 +6,6 @@ object Capabilities {
     fun certificateSource(): CertificateSource =
         if (hasRoot) SupplicantCertSource() else InferredCertSource()
 
-    /** Root-only by design: GECKO is assumed to run at system level (see LAB_SETUP.md). */
+    /** Root-only by design: GECKO is assumed to run at system level (see docs/lab-setup.md). */
     fun enforcer(): Enforcer = IptablesEnforcer()
 }

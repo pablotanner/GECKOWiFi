@@ -1,6 +1,8 @@
 package com.thesis.geckowifi.ui.checkdetail
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -21,6 +23,7 @@ import com.thesis.geckowifi.data.model.VerificationState
 import com.thesis.geckowifi.ui.VerificationViewModel
 import com.thesis.geckowifi.ui.components.DetailRow
 import com.thesis.geckowifi.ui.components.StateBadge
+import com.thesis.geckowifi.ui.theme.MonoFontFamily
 import com.thesis.geckowifi.ui.theme.OnSurfaceMuted
 import com.thesis.geckowifi.ui.theme.SurfaceContainer
 
@@ -56,7 +59,7 @@ fun CheckDetailScreen(viewModel: VerificationViewModel, onBack: () -> Unit) {
         }
         val result = check.result
 
-        Column(Modifier.padding(16.dp)) {
+        Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
             Card(
                 shape = RoundedCornerShape(8.dp),
                 colors = CardDefaults.cardColors(containerColor = SurfaceContainer),
@@ -101,6 +104,34 @@ fun CheckDetailScreen(viewModel: VerificationViewModel, onBack: () -> Unit) {
                 SectionCard("Comparison") {
                     DetailRow("Registered here", result.registeredIdentifier ?: "—")
                     DetailRow("This network presented", result.presentedIdentifier ?: "—")
+                }
+            }
+
+            SectionCard("How it was checked") {
+                check.modeDescription?.let { DetailRow("Method", it) }
+                result.reason?.let { DetailRow("Reason", it) }
+            }
+
+            if (check.hops.isNotEmpty()) {
+                SectionCard("Portal hops") {
+                    check.hops.forEach { (hop, verdict) ->
+                        val port = if ((hop.isHttps && hop.port == 443) || (!hop.isHttps && hop.port == 80)) "" else ":${hop.port}"
+                        Text(
+                            "${hop.index}. ${hop.scheme}://${hop.host}$port",
+                            fontFamily = MonoFontFamily,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                        Text(
+                            listOfNotNull(
+                                hop.statusCode?.let { "HTTP $it" } ?: hop.error,
+                                verdict?.state?.name ?: "not judged (transit)",
+                                hop.presentedSpkiHash?.let { "key ${it.take(12)}…" }
+                            ).joinToString(" · "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = OnSurfaceMuted
+                        )
+                    }
                 }
             }
         }

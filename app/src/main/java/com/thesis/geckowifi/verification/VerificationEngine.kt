@@ -3,6 +3,7 @@ package com.thesis.geckowifi.verification
 import com.thesis.geckowifi.data.model.*
 import com.thesis.geckowifi.data.remote.GeckoClient
 import com.thesis.geckowifi.data.remote.GeckoResponse
+import com.thesis.geckowifi.discovery.ObservedHop
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.Instant
@@ -119,6 +120,66 @@ class VerificationEngine(
         }
         if (result.state != VerificationState.UNREACHABLE) cache.put(networkKey, host, result)
         return result
+    }
+
+    /**
+     * Judges a captive-portal hop chain (from any [com.thesis.geckowifi.discovery.HopSource])
+     * with ONE location query and a fresh [PortalSession], hop by hop in order -
+     * so a chain that starts on the genuine primary and then moves to an
+     * unregistered or wrongly-keyed domain (relay-then-switch) is a CONFLICT
+     * at the hop where it switches.
+     *
+     * Judged hops: every HTTPS hop (its presented key, or none if the TLS
+     * connection failed), plus - if [judgeFinalPlainHop] - the last hop when
+     * it is plain HTTP: the page the user actually sees, served without TLS
+     * (a registered portal domain there = downgrade = CONFLICT). Plain-HTTP
+     * hops that only redirect onwards (the probe URL, openNDS, http→https
+     * upgrades) are transit hops and not judged.
+     *
+     * Overall: the first CONFLICT if any hop conflicts, else the last judged
+     * hop's verdict (the page the user ends up on). Bypasses [cache] and
+     * resets the network's session: each call is a new check of the network.
+     */
+    suspend fun verifyPortalHops(
+        networkKey: String,
+        hops: List<ObservedHop>,
+        judgeFinalPlainHop: Boolean,
+        lat: Double,
+        lng: Double,
+        altitude: Double?,
+        radiusMeters: Int,
+        ssid: String? = null
+    ): PortalCheckResult {
+        val judged = hops.filter { it.isHttps || (judgeFinalPlainHop && it === hops.lastOrNull()) }
+        val unjudged = { overall: VerificationResult -> PortalCheckResult(overall, hops.map { HopVerdict(it, null) }) }
+        if (judged.isEmpty()) {
+            return unjudged(VerificationResult(VerificationState.UNVERIFIED, hops.lastOrNull()?.host.orEmpty(),
+                reason = "no portal page to verify"))
+        }
+
+        val bitStrings = encoder.encodeQuery(lat, lng, radiusMeters)
+        val (minAlt, maxAlt) = encoder.altitudeBounds(altitude, radiusMeters)
+        val response = gecko.queryLocation(bitStrings, minAlt, maxAlt)
+        val firstHost = judged.first().host
+        val success = when (response) {
+            is GeckoResponse.Unreachable ->
+                return unjudged(VerificationResult(VerificationState.UNREACHABLE, firstHost, reason = response.cause))
+            is GeckoResponse.ProofFailure ->
+                return unjudged(VerificationResult(VerificationState.CONFLICT, firstHost, reason = response.cause))
+            is GeckoResponse.Success -> response
+        }
+        val candidates = filterBySsid(success.validCertificates(), ssid) ?: return unjudged(noMatchingSsid(firstHost))
+
+        val session = sessionFor(networkKey).also { it.reset() }
+        val verdicts = hops.map { hop ->
+            HopVerdict(hop, if (hop in judged) session.observe(hop.host, candidates, hop.presentedSpkiHash) else null)
+        }
+        val results = verdicts.mapNotNull { v -> v.result?.let { v.hop to it } }
+        val (decidingHop, decisive) = results.firstOrNull { it.second.state == VerificationState.CONFLICT } ?: results.last()
+        val overall = decisive.copy(
+            reason = "hop ${decidingHop.index} ${decidingHop.scheme}://${decidingHop.host}: ${decisive.reason}"
+        ).withResponseMetadata(success)
+        return PortalCheckResult(overall, verdicts)
     }
 
     /**

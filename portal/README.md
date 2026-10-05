@@ -1,44 +1,35 @@
-# Lab captive portal
+# Portal server
 
-The pages openNDS on the routers sends new WiFi clients to (openNDS "FAS",
-Forward Authentication Service). Runs natively on the Windows laptop; one
-process per role, each on its own lab address so both can use port 443:
+The captive-portal pages for the lab. openNDS on the router blocks new clients
+and redirects them here; after the user accepts the terms, the server sends
+them back to openNDS, which lets them through.
+
+It runs on the laptop, one process per role, each on its own address so both
+can use port 443:
 
 | Role | Address | Config |
 |---|---|---|
 | genuine (router A) | `192.168.137.10` | `config/genuine.json` |
-| attacker (router B, later) | `192.168.137.20` | — |
+| attacker (router B) | `192.168.137.20` | not yet |
 
-Each domain has its own key pair; the pins in the GeoCertificate are the SPKI
-hashes printed by `keygen` / at startup.
+Each domain has its own key. The SHA-256 hash of the public key is what goes
+into the GeoCertificate, and the server prints it on startup.
 
 ```powershell
 go build -o portal.exe .
-.\portal.exe keygen -host portal.gecko-a.lab     # once per domain; won't overwrite without -force
-.\portal.exe keygen -host pay.gecko-pay.lab
-.\run-genuine.ps1                                  # serve; prints each domain's SPKI hash
-.\portal.exe spki -cert keys\portal.gecko-a.lab.crt
+.\portal.exe ca-init                         # once: lab CA
+.\portal.exe keygen -host portal.gecko-a.lab # once per domain
+.\run-genuine.ps1                            # start the genuine portal
 ```
 
-**Lab CA** (`keys/gecko-lab-ca.crt`): the domain certificates are signed by a
-lab CA so browsers accept them once the CA is installed on the device
-(Android: Settings → Security → Install certificate → CA certificate; needs a
-screen lock). GECKO doesn't depend on it — the app only compares pinned SPKI
-hashes. `portal.exe sign -host <domain>` re-issues a certificate for the
-**existing** key (same pin); certificates are valid 397 days (until 2027-11-05),
-renew them with `sign`. Restart the server after signing.
+`keygen` won't replace an existing key, because a new key would no longer match
+the registered certificate. `sign -host <domain>` issues a new certificate for
+the existing key, which keeps the hash the same. Certificates are valid for
+about 13 months.
 
-```powershell
-.\portal.exe ca-init                          # once
-.\portal.exe sign -host portal.gecko-a.lab    # re-issue, pin unchanged
-```
+The certificates are signed by a lab CA (`keys/gecko-lab-ca.crt`). Install it
+on test devices so that browsers and Android's sign-in screen accept the
+portal. The GECKO app doesn't need it.
 
-Flow (genuine): client opens any http page → openNDS on A redirects to
-`http://portal.gecko-a.lab/` (FAS, with `tok`/`authaction`/`redir`) → 302 to
-`https://portal.gecko-a.lab/` (primary) → "Accept and connect", or "Premium
-access" via `https://pay.gecko-pay.lab/checkout` (delegate) and back to
-`https://portal.gecko-a.lab/complete` → 302 to openNDS `…/opennds_auth/?tok=…`
-→ client has internet.
-
-Every request is logged as one JSON line in `logs/<role>-<date>.jsonl`
-(ground truth for experiments). `keys/`, `logs/` and `portal.exe` are not committed.
+Every request is logged as a JSON line in `logs/<role>-<date>.jsonl`. Keys,
+logs and the binary are not committed.

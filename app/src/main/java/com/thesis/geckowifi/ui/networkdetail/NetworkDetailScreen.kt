@@ -21,7 +21,6 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,11 +67,6 @@ fun NetworkDetailScreen(
     val networkKey = selected.bssid ?: selected.ssid
     val certs = viewModel.registeredHere.filter { it.wifi.ssid.equals(network.ssid, ignoreCase = true) }
     val registeredDomain = viewModel.registeredDomainFor(network.ssid)
-    // Pre-fill once the registered domain is known (after the first successful join);
-    // never overwrite what the user typed.
-    LaunchedEffect(registeredDomain) {
-        if (domain.isBlank() && registeredDomain != null) domain = registeredDomain
-    }
     val history = viewModel.historyFor(networkKey)
 
     Column(Modifier.fillMaxWidth()) {
@@ -114,7 +108,7 @@ fun NetworkDetailScreen(
             }
 
             Text(
-                "Observed domain",
+                "Domain (optional)",
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
             )
@@ -123,7 +117,7 @@ fun NetworkDetailScreen(
                 onValueChange = { domain = it },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Leave empty to check the registered domain") }
+                placeholder = { Text("Empty = detect the captive portal") }
             )
             Button(
                 onClick = { viewModel.checkReal(selected, domain, onCheckResult) },
