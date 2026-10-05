@@ -8,7 +8,6 @@ import com.thesis.geckowifi.data.local.InMemoryHistoryStore
 import com.thesis.geckowifi.data.local.InMemoryTrustPreferenceStore
 import com.thesis.geckowifi.data.local.PortalCheckLog
 import com.thesis.geckowifi.data.local.TrustPreferenceStore
-import com.thesis.geckowifi.enterprise.EnterpriseConfigurator
 import com.thesis.geckowifi.location.LocationProvider
 import com.thesis.geckowifi.network.NetworkObserver
 import com.thesis.geckowifi.ui.VerificationViewModel
@@ -29,7 +28,6 @@ object AppModule {
     val decisionCache: DecisionCache by lazy { DecisionCache() }
     val historyStore: HistoryStore by lazy { InMemoryHistoryStore() }
     val trustPreferences: TrustPreferenceStore by lazy { InMemoryTrustPreferenceStore() }
-    val enterpriseConfigurator: EnterpriseConfigurator by lazy { EnterpriseConfigurator() }
 
     val locationProvider: LocationProvider by lazy { LocationProvider(appContext) }
     val networkObserver: NetworkObserver by lazy { NetworkObserver(appContext) }

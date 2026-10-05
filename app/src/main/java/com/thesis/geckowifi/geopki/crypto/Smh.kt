@@ -68,10 +68,9 @@ class SignedMapHead(val mapHead: MapHead, val signature: ByteArray) {
 /**
  * Signed Consistency Head.
  *
- * NOT present in the files copied from netsec-ethz/geopki: `crypto/verification.go`
- * uses `NewSCHFromCommSCH`/`sch.Verify`/`sch.Size`/`sch.RootHash`, but the type
- * itself (presumably from the missing `certificate.go`, per instructions.MD's
- * file list) was never copied into this repo. Reconstructed here purely from
+ * Not a direct port: geopki's `crypto/verification.go` uses
+ * `NewSCHFromCommSCH`/`sch.Verify`/`sch.Size`/`sch.RootHash`, but the type is
+ * defined elsewhere upstream. Reconstructed here from
  * `response.proto`'s `SignedConsistencyHead` message shape and from
  * [MapHead.tbsBytes]'s pattern (rootHash || timestamp(BE64) || size(BE64)).
  * CONFIRMED against a real signature from a live geopki server (2026-09-11,

@@ -6,10 +6,8 @@ import org.junit.Test
 import kotlin.math.abs
 
 /**
- * Kotlin translation of netsec-ethz/geopki's `bit_string_pair_test.go`
- * (copied into this repo as app/src/test/java/.../raw_bit_string_pair_test.go
- * and bit_string_pair_test.go). Same expected values as the Go fixtures -
- * byte-for-byte parity is the bar per instructions.MD.
+ * Kotlin translation of netsec-ethz/geopki's `bit_string_pair_test.go`, with
+ * the same expected values as the Go tests (the port must match byte for byte).
  */
 class BitStringPairTest {
 

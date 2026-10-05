@@ -79,5 +79,3 @@ fun StateBadge(state: VerificationState, modifier: Modifier = Modifier) {
     }
 }
 
-/** Short, real, state-derived label for contexts too tight for the full [StateBadge] (e.g. Network Detail's registration chips). */
-fun VerificationState.shortLabel(): String = style().label
