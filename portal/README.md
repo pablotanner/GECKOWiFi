@@ -7,10 +7,10 @@ them back to openNDS, which lets them through.
 It runs on the laptop, one process per role, each on its own address so both
 can use port 443:
 
-| Role | Address | Config |
-|---|---|---|
+| Role | Address | Config                |
+|---|---|-----------------------|
 | genuine (router A) | `192.168.137.10` | `config/genuine.json` |
-| attacker (router B) | `192.168.137.20` | not yet |
+| attacker (router B) | `192.168.137.20` | `config/attacker.json`      |
 
 Each domain has its own key. The SHA-256 hash of the public key is what goes
 into the GeoCertificate, and the server prints it on startup.
@@ -19,7 +19,13 @@ into the GeoCertificate, and the server prints it on startup.
 go build -o portal.exe .
 .\portal.exe ca-init                         # once: lab CA
 .\portal.exe keygen -host portal.gecko-a.lab # once per domain
-.\run-genuine.ps1                            # start the genuine portal
+```
+
+RUN BOTH (in ...\GECKOWiFi\portal):
+```powershell
+#.\run-genuine.ps1  # unnecessary, just use below
+.\portal.exe serve -config .\config\genuine.json
+.\portal.exe serve -config .\config\attacker.json
 ```
 
 `keygen` won't replace an existing key, because a new key would no longer match
