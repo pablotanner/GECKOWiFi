@@ -1,0 +1,20 @@
+{
+  "role": "attacker",
+  "listen_ip": "192.168.137.20",
+  "portal_host": "login.evil.lab",
+  "auth_prefixes": ["http://192.168.247.1:2050/"],
+  "log_dir": "logs",
+  "venue_name": "GeckoTest WiFi",
+  "sites": [
+    { "host": "login.evil.lab", "kind": "portal",
+      "cert": "keys-attacker/login.evil.lab.crt", "key": "keys-attacker/login.evil.lab.key" }
+  ],
+  "scenario": {
+    "name": "S3j-javascript",
+    "relay_hosts": ["portal.gecko-a.lab"],
+    "upstream": "192.168.137.10",
+    "switch": "js",
+    "switch_to": "https://login.evil.lab/",
+    "switch_delay_seconds": 0
+  }
+}

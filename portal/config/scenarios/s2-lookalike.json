@@ -1,0 +1,13 @@
+{
+  "role": "attacker",
+  "listen_ip": "192.168.137.20",
+  "portal_host": "portal.gecko-a-login.lab",
+  "auth_prefixes": ["http://192.168.247.1:2050/"],
+  "log_dir": "logs",
+  "venue_name": "GeckoTest WiFi",
+  "sites": [
+    { "host": "portal.gecko-a-login.lab", "kind": "portal",
+      "cert": "keys-attacker/portal.gecko-a-login.lab.crt", "key": "keys-attacker/portal.gecko-a-login.lab.key" }
+  ],
+  "scenario": { "name": "S2-lookalike-domain" }
+}
