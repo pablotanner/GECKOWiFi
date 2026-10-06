@@ -50,6 +50,23 @@ var (
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Venue}}</title>` + pageStyle + `</head>
 <body><main><h1>{{.Venue}}</h1>
 <p class="muted">This sign-in link has expired. Open any web page to start again.</p></main></body></html>`))
+
+	// switch* pages drive an experiment's bait-and-switch hop by a mechanism
+	// other than a 3xx, to measure which ones the redirect probe follows
+	// (S3m/S3h/S3j). The URL is a trusted scenario value, so template
+	// auto-escaping of it is fine.
+	switchMetaPage = template.Must(template.New("switchmeta").Parse(
+		`<!doctype html><html><head><meta charset="utf-8">` +
+			`<meta http-equiv="refresh" content="{{.Delay}};url={{.URL}}"></head>` +
+			`<body>Redirecting…</body></html>`))
+
+	switchHeaderPage = template.Must(template.New("switchheader").Parse(
+		`<!doctype html><html><head><meta charset="utf-8"></head>` +
+			`<body>Redirecting to <a href="{{.URL}}">the next page</a>…</body></html>`))
+
+	switchJSPage = template.Must(template.New("switchjs").Parse(
+		`<!doctype html><html><head><meta charset="utf-8"></head>` +
+			`<body><script>location.href={{.URL}};</script>Redirecting…</body></html>`))
 )
 
 func render(w http.ResponseWriter, status int, t *template.Template, data any) {

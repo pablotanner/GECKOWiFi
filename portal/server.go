@@ -23,10 +23,15 @@ type site struct {
 }
 
 type server struct {
-	cfg    *Config
-	sites  map[string]*site // lower-case host -> site
-	portal *site
-	events *eventLog
+	cfg      *Config
+	sites    map[string]*site // lower-case host -> site
+	portal   *site
+	events   *eventLog
+	httpsSrv *http.Server
+
+	// S5a relay timer: client IP -> first time it connected.
+	firstSeenMu sync.Mutex
+	firstSeen   map[string]time.Time
 }
 
 func serveCmd(args []string) error {
@@ -38,7 +43,7 @@ func serveCmd(args []string) error {
 	if err != nil {
 		return err
 	}
-	s := &server{cfg: cfg, sites: map[string]*site{}}
+	s := &server{cfg: cfg, sites: map[string]*site{}, firstSeen: map[string]time.Time{}}
 	for _, sc := range cfg.Sites {
 		pair, err := tls.LoadX509KeyPair(sc.Cert, sc.Key)
 		if err != nil {
@@ -58,13 +63,17 @@ func serveCmd(args []string) error {
 	if s.events, err = openEventLog(cfg.LogDir, cfg.Role); err != nil {
 		return err
 	}
+	if cfg.Scenario != nil {
+		s.events.scenario = cfg.Scenario.Name
+		log.Printf("[%s] scenario %q active", cfg.Role, cfg.Scenario.Name)
+	}
 
 	httpSrv := &http.Server{
 		Addr:              net.JoinHostPort(cfg.ListenIP, "80"),
 		Handler:           http.HandlerFunc(s.serveHTTP),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	httpsSrv := &http.Server{
+	s.httpsSrv = &http.Server{
 		Addr:              net.JoinHostPort(cfg.ListenIP, "443"),
 		Handler:           http.HandlerFunc(s.serveHTTPS),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -75,8 +84,17 @@ func serveCmd(args []string) error {
 	}
 	errs := make(chan error, 2)
 	go func() { errs <- httpSrv.ListenAndServe() }()
-	go func() { errs <- httpsSrv.ListenAndServeTLS("", "") }()
-	log.Printf("[%s] listening on %s:80 (redirect) and %s:443 (TLS)", cfg.Role, cfg.ListenIP, cfg.ListenIP)
+	httpsAddr := net.JoinHostPort(cfg.ListenIP, "443")
+	if sc := cfg.Scenario; sc != nil && (len(sc.RelayHosts) > 0 || sc.RelayForSeconds > 0) {
+		// Some hostnames are passed through to the genuine portal, so :443 is
+		// an SNI-routing listener rather than a plain TLS server.
+		go func() { errs <- s.serveTLSWithRelay(httpsAddr) }()
+		log.Printf("[%s] listening on %s:80 and %s:443 (TLS, relaying %v to %s)",
+			cfg.Role, cfg.ListenIP, cfg.ListenIP, sc.RelayHosts, sc.relayTarget())
+	} else {
+		go func() { errs <- s.httpsSrv.ListenAndServeTLS("", "") }()
+		log.Printf("[%s] listening on %s:80 (redirect) and %s:443 (TLS)", cfg.Role, cfg.ListenIP, cfg.ListenIP)
+	}
 	return <-errs
 }
 
@@ -103,9 +121,66 @@ func (s *server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.sites[host]; !ok {
 		host = s.cfg.PortalHost
 	}
+	sc := s.cfg.Scenario
+
+	// S6: the login page is served over plain HTTP, with no upgrade to TLS.
+	// The probe's last hop is then plain HTTP on a registered domain, which
+	// the app judges as a downgrade (CONFLICT).
+	if sc != nil && sc.HTTPOnly {
+		s.servePortalPage(w, r, s.portal, "http")
+		return
+	}
+
+	// The genuine flow's plain-HTTP /continue hop (HTTPBounce). On the genuine
+	// portal it just loops back to the login page; on a relay attacker in
+	// front of it, this same hop is where the switch happens (S3).
+	if sc != nil && r.URL.Path == "/continue" {
+		switch {
+		case sc.Switch != "":
+			s.writeSwitch(w, r, sc)
+			return
+		case sc.HTTPBounce:
+			target := "https://" + host + "/login"
+			if r.URL.RawQuery != "" {
+				target += "?" + r.URL.RawQuery
+			}
+			s.events.record(r, "http", "bounce_continue", map[string]string{"location": target})
+			http.Redirect(w, r, target, http.StatusFound)
+			return
+		}
+	}
+
+	// S5b: the detection probe (matched by User-Agent) is sent down the
+	// genuine path; every other client is sent to the attacker. The decision
+	// is made here because the User-Agent is only visible on this plain hop.
+	if sc != nil && sc.ProbeUserAgent != "" && !strings.Contains(r.UserAgent(), sc.ProbeUserAgent) {
+		s.events.record(r, "http", "ua_switch",
+			map[string]string{"location": sc.SwitchTo, "user_agent": r.UserAgent()})
+		http.Redirect(w, r, sc.SwitchTo, http.StatusFound)
+		return
+	}
+
 	target := "https://" + host + r.URL.RequestURI()
 	s.events.record(r, "http", "redirect_https", map[string]string{"location": target})
 	http.Redirect(w, r, target, http.StatusFound)
+}
+
+// writeSwitch bounces the client to the attacker host by one of the redirect
+// mechanisms, so each can be tested against the probe (which follows 3xx and
+// meta refresh, but not a Refresh header or JavaScript).
+func (s *server) writeSwitch(w http.ResponseWriter, r *http.Request, sc *Scenario) {
+	s.events.record(r, "http", "switch_"+sc.Switch, map[string]string{"location": sc.SwitchTo})
+	switch sc.Switch {
+	case "redirect":
+		http.Redirect(w, r, sc.SwitchTo, http.StatusFound)
+	case "meta_refresh":
+		render(w, http.StatusOK, switchMetaPage, map[string]any{"Delay": sc.SwitchDelaySeconds, "URL": sc.SwitchTo})
+	case "refresh_header":
+		w.Header().Set("Refresh", fmt.Sprintf("%d; url=%s", sc.SwitchDelaySeconds, sc.SwitchTo))
+		render(w, http.StatusOK, switchHeaderPage, map[string]any{"URL": sc.SwitchTo})
+	case "js":
+		render(w, http.StatusOK, switchJSPage, map[string]any{"URL": sc.SwitchTo})
+	}
 }
 
 func (s *server) serveHTTPS(w http.ResponseWriter, r *http.Request) {
@@ -149,28 +224,42 @@ func (n ndsSession) query() string {
 }
 
 func (s *server) servePortal(w http.ResponseWriter, r *http.Request, st *site) {
+	sc := s.cfg.Scenario
 	switch {
-	case r.URL.Path == "/" && r.Method == http.MethodGet:
-		sess := sessionFrom(r.URL.Query())
-		s.events.record(r, "https", "login_page", nil)
-		payHost := ""
-		for _, other := range s.cfg.Sites {
-			if other.Kind == "payment" {
-				payHost = other.Host
-				break
+	case (r.URL.Path == "/" || r.URL.Path == "/login") && r.Method == http.MethodGet:
+		// HTTPBounce (S3, genuine side): the first HTTPS hit redirects down to
+		// a plain-HTTP /continue hop before the login page. The genuine key is
+		// presented on this 302, so the probe still anchors on the genuine
+		// primary - a relay attacker rewrites the plain hop that follows.
+		if sc != nil && sc.HTTPBounce && r.URL.Path == "/" {
+			target := "http://" + st.Host + "/continue"
+			if r.URL.RawQuery != "" {
+				target += "?" + r.URL.RawQuery
+			}
+			s.events.record(r, "https", "bounce_http", map[string]string{"location": target})
+			http.Redirect(w, r, target, http.StatusFound)
+			return
+		}
+		// PaymentViaRedirect (S4a, genuine side): go straight to the payment
+		// delegate with a 302 instead of offering a button, so the
+		// redirect-only probe reaches it.
+		if sc != nil && sc.PaymentViaRedirect && r.URL.Path == "/" {
+			if co := s.checkoutURL(r, st); co != "" {
+				s.events.record(r, "https", "redirect_payment", map[string]string{"location": co})
+				http.Redirect(w, r, co, http.StatusFound)
+				return
 			}
 		}
-		checkout := ""
-		if payHost != "" {
-			ret := url.Values{"return": {"https://" + st.Host + "/complete"}}
-			checkout = "https://" + payHost + "/checkout?" + sess.query() + "&" + ret.Encode()
-		}
-		render(w, http.StatusOK, loginPage, map[string]any{
-			"Venue": s.cfg.VenueName, "Host": st.Host, "Session": sess,
-			"HasSession": sess.Tok != "", "Checkout": checkout,
-		})
+		s.servePortalPage(w, r, st, "https")
 	case r.URL.Path == "/accept" && r.Method == http.MethodPost:
 		r.ParseForm()
+		// S5c: flip to the attacker only after the user clicks Accept - after
+		// any one-shot check has already passed.
+		if sc != nil && sc.SwitchAfterAccept {
+			s.events.record(r, "https", "switch_after_accept", map[string]string{"location": sc.SwitchTo})
+			http.Redirect(w, r, sc.SwitchTo, http.StatusFound)
+			return
+		}
 		s.finishLogin(w, r, sessionFrom(r.PostForm), "accept")
 	case r.URL.Path == "/complete" && r.Method == http.MethodGet:
 		s.finishLogin(w, r, sessionFrom(r.URL.Query()), "complete_after_payment")
@@ -178,6 +267,35 @@ func (s *server) servePortal(w http.ResponseWriter, r *http.Request, st *site) {
 		s.events.record(r, "https", "not_found", nil)
 		http.NotFound(w, r)
 	}
+}
+
+// servePortalPage renders the login page (the chain's terminal 200). [scheme]
+// is only for the log line - "http" when served over plain HTTP for S6.
+func (s *server) servePortalPage(w http.ResponseWriter, r *http.Request, st *site, scheme string) {
+	sess := sessionFrom(r.URL.Query())
+	s.events.record(r, scheme, "login_page", nil)
+	render(w, http.StatusOK, loginPage, map[string]any{
+		"Venue": s.cfg.VenueName, "Host": st.Host, "Session": sess,
+		"HasSession": sess.Tok != "", "Checkout": s.checkoutURL(r, st),
+	})
+}
+
+// checkoutURL builds the payment-delegate URL for the current session, or ""
+// if this role has no payment site.
+func (s *server) checkoutURL(r *http.Request, st *site) string {
+	payHost := ""
+	for _, other := range s.cfg.Sites {
+		if other.Kind == "payment" {
+			payHost = other.Host
+			break
+		}
+	}
+	if payHost == "" {
+		return ""
+	}
+	sess := sessionFrom(r.URL.Query())
+	ret := url.Values{"return": {"https://" + st.Host + "/complete"}}
+	return "https://" + payHost + "/checkout?" + sess.query() + "&" + ret.Encode()
 }
 
 func (s *server) servePayment(w http.ResponseWriter, r *http.Request, st *site) {
@@ -238,9 +356,10 @@ func (s *server) finishLogin(w http.ResponseWriter, r *http.Request, sess ndsSes
 // eventLog writes one JSON object per request to <log_dir>/<role>-<date>.jsonl:
 // the server-side ground truth for experiments.
 type eventLog struct {
-	mu   sync.Mutex
-	dir  string
-	role string
+	mu       sync.Mutex
+	dir      string
+	role     string
+	scenario string // active scenario name, added to every line when set
 }
 
 func openEventLog(dir, role string) (*eventLog, error) {
@@ -259,6 +378,9 @@ func (l *eventLog) record(r *http.Request, scheme, event string, extra map[strin
 	if r.TLS != nil {
 		entry["sni"] = r.TLS.ServerName
 	}
+	if l.scenario != "" {
+		entry["scenario"] = l.scenario
+	}
 	for k, v := range extra {
 		if v != "" {
 			entry[k] = v
@@ -266,7 +388,11 @@ func (l *eventLog) record(r *http.Request, scheme, event string, extra map[strin
 	}
 	line, _ := json.Marshal(entry)
 	log.Printf("[%s] %s %s%s -> %s", l.role, r.Method, hostOnly(r.Host), r.URL.Path, event)
+	l.write(line)
+}
 
+// write appends one JSON line to today's log file.
+func (l *eventLog) write(line []byte) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	name := filepath.Join(l.dir, fmt.Sprintf("%s-%s.jsonl", l.role, time.Now().Format("2006-01-02")))
@@ -277,4 +403,19 @@ func (l *eventLog) record(r *http.Request, scheme, event string, extra map[strin
 	}
 	defer f.Close()
 	f.Write(append(line, '\n'))
+}
+
+// logEvent records an event that has no *http.Request behind it - the TLS
+// relay's accept-time decisions (relay vs terminate), which happen before any
+// HTTP layer exists.
+func (s *server) logEvent(fields map[string]string) {
+	entry := map[string]any{"time": time.Now().Format(time.RFC3339Nano), "role": s.cfg.Role}
+	for k, v := range fields {
+		if v != "" {
+			entry[k] = v
+		}
+	}
+	line, _ := json.Marshal(entry)
+	log.Printf("[%s] %s sni=%s", s.cfg.Role, fields["event"], fields["sni"])
+	s.events.write(line)
 }
