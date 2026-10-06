@@ -1,0 +1,19 @@
+{
+  "role": "attacker",
+  "listen_ip": "192.168.137.20",
+  "portal_host": "portal.gecko-a.lab",
+  "auth_prefixes": ["http://192.168.247.1:2050/"],
+  "log_dir": "logs",
+  "venue_name": "GeckoTest WiFi",
+  "sites": [
+    { "host": "portal.gecko-a.lab", "kind": "portal",
+      "cert": "keys-attacker/portal.gecko-a.lab.crt", "key": "keys-attacker/portal.gecko-a.lab.key" },
+    { "host": "pay.gecko-pay.lab", "kind": "payment",
+      "cert": "keys-attacker/pay.gecko-pay.lab.crt", "key": "keys-attacker/pay.gecko-pay.lab.key" }
+  ],
+  "scenario": {
+    "name": "S4a-payment-attacker-key",
+    "relay_hosts": ["portal.gecko-a.lab"],
+    "upstream": "192.168.137.10"
+  }
+}

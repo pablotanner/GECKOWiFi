@@ -1,0 +1,17 @@
+{
+  "role": "attacker",
+  "listen_ip": "192.168.137.20",
+  "portal_host": "portal.gecko-a.lab",
+  "auth_prefixes": ["http://192.168.247.1:2050/"],
+  "log_dir": "logs",
+  "venue_name": "GeckoTest WiFi",
+  "sites": [
+    { "host": "portal.gecko-a.lab", "kind": "portal",
+      "cert": "keys-attacker/portal.gecko-a.lab.crt", "key": "keys-attacker/portal.gecko-a.lab.key" }
+  ],
+  "scenario": {
+    "name": "S5c-switch-after-accept",
+    "switch_after_accept": true,
+    "switch_to": "https://login.evil.lab/"
+  }
+}
