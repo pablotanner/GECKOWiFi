@@ -1,0 +1,18 @@
+{
+  "role": "genuine",
+  "listen_ip": "192.168.137.10",
+  "portal_host": "portal.gecko-a.lab",
+  "auth_prefixes": ["http://192.168.8.1:2050/"],
+  "log_dir": "logs",
+  "venue_name": "GeckoTest WiFi",
+  "sites": [
+    { "host": "portal.gecko-a.lab", "kind": "portal",
+      "cert": "keys/portal.gecko-a.lab.crt", "key": "keys/portal.gecko-a.lab.key" },
+    { "host": "pay.gecko-pay.lab", "kind": "payment",
+      "cert": "keys/pay.gecko-pay.lab.crt", "key": "keys/pay.gecko-pay.lab.key" }
+  ],
+  "scenario": {
+    "name": "genuine-payment-via-redirect",
+    "payment_via_redirect": true
+  }
+}
