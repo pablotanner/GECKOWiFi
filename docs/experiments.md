@@ -4,43 +4,138 @@ Each scenario is run several times. For every run, keep the app's check log
 (`adb pull …/portal-checks/`) and the portal server's log (`portal/logs/`).
 The setup is described in [lab-setup.md](lab-setup.md).
 
+The target device is rooted; the current test tablet (Galaxy Tab A11) is not
+and is WiFi-only, so every GECKO query goes over the network being checked.
+
+**Testable**
+
+| | |
+|---|---|
+| ✅ | Testable now on the non-root tablet |
+| 🛠 | Possible without root, but needs code or lab setup first |
+| 🔒 | Needs root |
+| 📝 | Analysis or server-side demonstration only |
+
+Expected results are what the current code produces. Where that differs from
+the desired behaviour, both are given.
+
 ## Without a captive portal
+After extensively testing captive portal scenarios, we should also look at setups without captive portal;
+fully open network; password protected (simulate private router); eduroam; etc. 
 
-Baseline before the portal existed: the routers' own HTTPS admin pages stood in
-for the portal, and the domain (`gecko-a.lab`) was entered by hand.
+Some old notes:
 
-| # | Scenario | Expected | Result |
-|---|---|---|---|
-| 1 | Router A | `VERIFIED` | ✅ |
-| 2 | B relays to A (no DNS override on B) | `VERIFIED` | ✅ |
-| 3 | B answers for `gecko-a.lab` with its own key | `CONFLICT` | ✅ |
-| 4 | B blocks the map server | `UNREACHABLE` | |
-| 5 | Domain not in any certificate | `UNRECOGNIZED` | ✅ |
-| 6 | SSID without a certificate | `UNVERIFIED` | |
-| 7 | Tampered proof / wrong server key | `CONFLICT` | |
+| # | Scenario | Expected | Testable | Result |
+|---|---|---|---|---|
+| 1 | Router A | `VERIFIED` | ✅ | ✅ |
+| 2 | B relays to A (no DNS override on B) | `VERIFIED` | ✅ | ✅ |
+| 3 | B answers for `gecko-a.lab` with its own key | `CONFLICT` | ✅ | ✅ |
+| 4 | B blocks the map server | `UNREACHABLE` | ✅ | |
+| 5 | Domain not in any certificate | `UNRECOGNIZED` | ✅ | ✅ |
+| 6 | SSID without a certificate | `UNVERIFIED` | ✅ | |
+| 7a | Tampered proof (mitmproxy between tablet and map server) | `CONFLICT`; a response that no longer parses as protobuf gives `UNREACHABLE` instead | ✅ | |
+| 7b | Wrong pinned map-server key in the app (use another valid key; a corrupted one fails to load → `UNREACHABLE`) | `CONFLICT` | ✅ | |
 
 ## With a captive portal
 
-The app detects the portal itself. Router A runs the genuine portal; router B
-will run the attacker scenarios.
+The app detects the portal itself (`RedirectProbeSource`). Router A runs the
+genuine portal; router B runs the attacker scenarios.
 
-| # | Scenario | Expected | Result |
-|---|---|---|---|
-| P0 | Genuine portal on A | `VERIFIED` | ✅ |
-| P1 | A, already logged in (registered domain checked directly) | `VERIFIED` | |
-| S1 | Clone: same domain, attacker's key | `CONFLICT` | |
-| S2 | Lookalike domain (`gecko-a-login.lab`) | `UNRECOGNIZED` | |
-| S3 | Relay to the genuine portal, then redirect to the attacker's page | `CONFLICT` at the switch | |
-| S4 | Payment page (delegate) with the attacker's key | `CONFLICT` | |
-| S5 | Switch only after the check | not detected (needs continuous monitoring) | |
-| S6 | Login page over plain HTTP only | `CONFLICT` | |
-| S7 | Block the map server | `UNREACHABLE` | |
-| S8 | Spoofed Captive Portal API (RFC 8908) | not implemented | |
+### Portal chain
 
-S1–S4 and S6 are also covered by unit tests (`PortalHopsVerificationTest`).
+| # | Scenario | Expected | Testable | Result |
+|---|---|---|---|---|
+| P0 | Genuine portal on A | `VERIFIED` | ✅ | ✅ |
+| P1 | A, already logged in (204 → registered domain probed directly) | `VERIFIED` | ✅ | |
+| P1-B | B, already logged in on B, registered domain probed | `CONFLICT` if B intercepts, `VERIFIED` if B relays | ✅ | |
+| S0 | B transparently relays A's whole portal | `VERIFIED` (true about the portal, nothing about the link) | ✅ | |
+| S1 | Clone: same domain, attacker's key | `CONFLICT` | ✅ | |
+| S2 | Lookalike domain (`gecko-a-login.lab`), same SSID | `UNRECOGNIZED`, silent. Open question: should a registered SSID make this `CONFLICT`? | ✅ | |
+| S3 | Genuine portal first, then a 3xx redirect to the attacker | `CONFLICT` at the switch | ✅ | |
+| S3m | As S3, via delayed `<meta refresh content="10;url=…">` | `CONFLICT` (delay is ignored, target followed) | ✅ | |
+| S3h | As S3, via `Refresh: 10; url=…` response header | Missed (header not parsed); `CONFLICT` once fixed | 🛠 | |
+| S3j | As S3, via JavaScript redirect | Missed (no JS engine) | ✅ (shows limitation) | |
+| S4a | Payment page (delegate) with attacker's key, reached by redirect | `CONFLICT` | ✅ | |
+| S4b | Same, but reached by a button/link | Missed; caught with link extraction from the login page, WebView, or root | 🛠 / 🔒 | |
+| P2 | Benign redirect to a payment processor the certificate doesn't list | `CONFLICT` (false positive); avoided only if the operator lists it as a delegate | ✅ | |
+| S6 | Login page over plain HTTP only | `CONFLICT` | ✅ | |
+| S9 | GeoCert without pins; B serves a self-signed cert for the registered domain | `CONFLICT`: a domain without pins never verifies. The server rejects such certificates on insert, so unit test only | 📝 | |
+| F1 | Attacker registers its own GeoCert at A's location with the same SSID, own domain and key | `VERIFIED` (false) | ✅ | |
+| F1s | As F1, but the switch to the attacker domain happens mid-chain after A's anchor | Re-anchors → `VERIFIED` (false); should be `CONFLICT` | ✅ | |
+| T1 | TLS to the registered portal domain fails (timeout, refused) | `CONFLICT` (no key seen counts as a wrong key); a flaky genuine portal gives a false positive | ✅ | |
+| S8 | Spoofed Captive Portal API (RFC 8908, DHCP option 114 on B) | Not implemented | 🛠 | |
+
+### Timing and probe evasion
+
+| # | Scenario | Expected | Testable | Result |
+|---|---|---|---|---|
+| S5a | B switches every request of this client to the attacker after a per-client timer (10 s) | Missed with one probe; `CONFLICT` with repeated probing until the portal resolves | ✅ (single) / 🛠 (repeated) | |
+| S5b | B serves the genuine chain only to the probe (matches its User-Agent), the attacker's to everyone else | Missed by any probe; caught only by observing real traffic | ✅ (shows limitation) / 🔒 | |
+| S5c | B switches only after the user clicks "Accept" | Missed; caught by WebView login or root observation | ✅ (shows limitation) / 🛠 / 🔒 | |
+| S5d | S5b with Android's own probe User-Agent mimicked by the app | Shows how much harder fingerprinting gets (timing, flow) | 🛠 | |
+
+### Map server and data integrity
+
+| # | Scenario | Expected | Testable | Result |
+|---|---|---|---|---|
+| S7 | B blocks the map server | `UNREACHABLE` | ✅ | |
+| X3 | Map server down (no attacker) | `UNREACHABLE` | ✅ | |
+| R1 | Tampered proof, portal flow | `CONFLICT` | ✅ | |
+| R2 | Replay of an older, validly signed response | Accepted: the signed timestamp isn't checked for freshness | ✅ | |
+| R3 | Expired GeoCert (`notValidAfter` in the past) | Not used as a candidate | ✅ | |
+| R4 | Revoked GeoCert queried before the merge | `VERIFIED` (stale) | ✅ | |
+
+## Location
+
+Coordinates come from the device; spoofed with a developer-options mock
+location app (no root needed).
+
+| # | Scenario | Expected | Testable | Result |
+|---|---|---|---|---|
+| L1 | S1 plus a spoof to an empty area | `UNVERIFIED`, silent | ✅ | |
+| L2 | S1 plus a spoof to an unrelated registered area | `UNVERIFIED`, silent (the SSID filter drops the other area's certificates); `UNRECOGNIZED` only if that area has a `GeckoTest` certificate | ✅ | |
+| L3 | Attacker GeoCert at X, victim spoofed to X | `VERIFIED` (false) | ✅ | |
+| L4 | Two adjacent GeoCerts, position moved a few metres across the boundary | Result shifts to the neighbour | ✅ | |
+| L5 | Altitude spoof between floor-level GeoCerts | No effect: the app passes `null` altitude and queries the full range, so both floors are returned | 🛠 | |
+| L6 | Query radius vs. position accuracy (vary radius at a fixed spoof offset) | Smallest offset that changes the result | ✅ | |
+| L7 | Mock location detected (e.g. `Location.isMock()`) | LOW confidence | 🛠 (not implemented) | |
+| E5 | S0 plus a spoof to A's coordinates from elsewhere (relay, Case E) | `VERIFIED` | ✅ | |
+
+## Authentication class and enterprise
+
+| # | Scenario | Expected | Testable | Result |
+|---|---|---|---|---|
+| A1 | SSID registered as WPA2; B clones it as open | Should be `CONFLICT`; `authMode` is not compared yet | 🛠 | |
+| E1 | Genuine RADIUS (hostapd WPA2-Enterprise + FreeRADIUS), GeoCert-provisioned `WifiNetworkSuggestion` | Connects | 🛠 | |
+| E2 | Rogue RADIUS with its own CA, same profile | OS refuses the connection | 🛠 | |
+| E2r | Server certificate hash from `wpa_supplicant` compared with the GeoCert | `CONFLICT` | 🔒 | |
+| E3 | Roaming eduroam user at a visited site | No server can be named for the visitor | 📝 | |
+| E4 | EAP inner-method downgrade | Profile fixes the method → connection fails (🛠); observing the negotiated method (🔒) | 🛠 / 🔒 | |
+
+## Other threat-model cases
+
+| # | Scenario | Expected | Testable | Result |
+|---|---|---|---|---|
+| K1 | B advertises an SSID saved on the tablet (KARMA), no GeoCert there | OS auto-joins outside the app; app check gives `UNVERIFIED` | ✅ | |
+| D1 | Genuine A; A's DNS hijacks a non-portal domain (CaptiveCrunch-style) | `VERIFIED`, attack undetected | ✅ | |
+| D1p | Genuine A; the OS connectivity probe is hijacked | Not visible to the app | 🔒 | |
+| X1 | Poisoned registration: second GeoCert for A's SSID, different domain, same location | `VERIFIED`: A's primary still matches A's certificate, so no false positive | ✅ | |
+| X2 | Deauth loop / BSSID cycling against the tablet | Measure re-checks, latency, battery; deauth frames themselves invisible | ✅ | |
+
+## Unit tests
+
+`PortalHopsVerificationTest` covers S1–S4, S6, R1, P2, S9, F1, F1s, X1 and T1.
+S3m (meta refresh with a delay) is covered by `RedirectParsingTest`. S3h needs
+the `Refresh` header parsed first.
 
 ## Next steps
 
-1. Attacker portal on router B, with configurable scenarios.
-2. An independent uplink for B, needed for S7.
-3. A rootable device for continuous monitoring (S5).
+1. Attacker portal on router B with configurable scenarios (clone, lookalike,
+   relay-then-switch, per-client timer, User-Agent-based switching).
+2. An independent uplink for B, for a more realistic S7 (a firewall rule on B
+   is enough to run it now).
+3. App: parse the `Refresh` header (S3h), re-probe until the portal resolves
+   (S5a), compare `authMode` (A1), mimic Android's probe User-Agent (S5d).
+4. Enterprise lab: hostapd WPA2-Enterprise on one router, FreeRADIUS on the laptop (E1, E2).
+5. A rootable device for traffic observation and supplicant access (S4b, S5b,
+   S5c, E2r, D1p).

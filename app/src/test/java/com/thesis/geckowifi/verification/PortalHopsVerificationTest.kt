@@ -160,6 +160,115 @@ class PortalHopsVerificationTest {
     }
 
     @Test
+    fun r1_proofFailure_isConflictAndNothingJudged() = runTest {
+        val gecko = mockk<GeckoClient> {
+            coEvery { queryLocation(any(), any(), any()) } returns GeckoResponse.ProofFailure("bad signature")
+        }
+
+        val result = check(gecko, genuineChain)
+
+        assertEquals(VerificationState.CONFLICT, result.overall.state)
+        assertEquals(true, result.hops.all { it.result == null })
+    }
+
+    @Test
+    fun p2_redirectToUnlistedPaymentProcessor_isConflict() = runTest {
+        // Benign in reality, but the processor isn't in the certificate: a false positive
+        // until the operator lists it as a delegate.
+        val chain = genuineChain + hop(3, "https://checkout.payments.example/pay", 200, key = "keyProcessor")
+
+        val result = check(geckoReturning(mangoA), chain)
+
+        assertEquals(VerificationState.CONFLICT, result.overall.state)
+        assertEquals(VerificationState.CONFLICT, result.hops[3].result?.state)
+    }
+
+    @Test
+    fun s9_domainWithoutPins_neverVerifies() = runTest {
+        val unpinned = mangoA.copy(portal = PortalTLSIdentity(listOf(
+            PortalDomain("portal.gecko-a.lab", PortalDomainRole.PRIMARY, emptyList())
+        )))
+
+        assertEquals(VerificationState.CONFLICT, check(geckoReturning(unpinned), genuineChain).overall.state)
+    }
+
+    @Test
+    fun f1_attackerWithOwnCertificateForSameSsid_isVerified() = runTest {
+        // Known limitation: GECKO can't tell two registered operators of the same SSID apart.
+        val attacker = attackerCert()
+        val chain = listOf(
+            hop(0, "http://connectivitycheck.gstatic.com/generate_204", 302),
+            hop(1, "https://login.attacker.lab/", 200, key = "keyAttacker")
+        )
+
+        val result = check(geckoReturning(mangoA, attacker), chain)
+
+        assertEquals(VerificationState.VERIFIED, result.overall.state)
+        assertEquals("attacker", result.overall.matchedCertificateId)
+    }
+
+    @Test
+    fun f1s_switchToAnotherRegisteredPrimaryMidChain_reanchorsAndIsVerified() = runTest {
+        // Known limitation: a second certificate's primary domain moves the anchor
+        // instead of counting as a switch.
+        val chain = genuineChain + hop(3, "https://login.attacker.lab/", 200, key = "keyAttacker")
+
+        val result = check(geckoReturning(mangoA, attackerCert()), chain)
+
+        assertEquals(VerificationState.VERIFIED, result.hops[2].result?.state)
+        assertEquals(VerificationState.VERIFIED, result.hops[3].result?.state)
+        assertEquals(VerificationState.VERIFIED, result.overall.state)
+    }
+
+    @Test
+    fun x1_secondCertificateForSameSsid_doesNotBreakGenuineChain() = runTest {
+        // The genuine primary still matches its own certificate, so no false positive.
+        assertEquals(VerificationState.VERIFIED,
+            check(geckoReturning(attackerCert(), mangoA), genuineChain).overall.state)
+    }
+
+    @Test
+    fun failedTlsOnRegisteredPortalDomain_isConflict() = runTest {
+        // The probe stopped at the registered domain without seeing a key (timeout,
+        // refused, TLS error). Judged like "no key presented" -> CONFLICT.
+        val chain = genuineChain.dropLast(1) + failedHop(2, "https://portal.gecko-a.lab/?tok=1")
+
+        val result = check(geckoReturning(mangoA), chain, judgeFinal = false)
+
+        assertEquals(VerificationState.CONFLICT, result.overall.state)
+    }
+
+    @Test
+    fun failedTlsOnUnregisteredDomain_isNotConflict() = runTest {
+        val chain = listOf(
+            hop(0, "http://connectivitycheck.gstatic.com/generate_204", 302),
+            failedHop(1, "https://unrelated.example/")
+        )
+
+        assertEquals(VerificationState.UNRECOGNIZED,
+            check(geckoReturning(mangoA), chain, judgeFinal = false).overall.state)
+    }
+
+    private fun attackerCert() = GeoCertificate(
+        schemaVersion = 2,
+        certificateId = "attacker",
+        wifi = WiFiIdentity(ssid = "GeckoTest", authMode = WiFiAuthMode.OPEN),
+        portal = PortalTLSIdentity(listOf(
+            PortalDomain("login.attacker.lab", PortalDomainRole.PRIMARY, listOf("keyAttacker"))
+        )),
+        notValidAfter = "2031-01-01T00:00:00Z"
+    )
+
+    private fun failedHop(index: Int, url: String): ObservedHop {
+        val uri = java.net.URI(url)
+        return ObservedHop(
+            index = index, url = url, scheme = uri.scheme, host = uri.host, port = 443,
+            statusCode = null, source = HopSource.Kind.REDIRECT_PROBE, timestampMillis = 0,
+            error = "timeout"
+        )
+    }
+
+    @Test
     fun repeatedChecks_startFreshSessions() = runTest {
         // A previous relay-then-switch must not leave an anchor that changes the next verdict.
         val eng = engine(geckoReturning(mangoA))
