@@ -65,6 +65,18 @@ The map server is a local [geopki](https://github.com/netsec-ethz/geopki)
 instance. Its public key is pinned in `PinnedServerKey.kt`, so a new server
 means updating that key.
 
+## Useful
+
+To check which Router the tablet is connected to, run:
+```powershell
+adb shell "dumpsys wifi | grep -m1 mWifiInfo"
+```
+This prints something like:
+```
+mWifiInfo SSID: "GeckoTest", BSSID: 94:83:c4:97:c2:3a, MAC: 0a:61:9b:16:99:b7, IP: /192.168.8.194, Security type: 0, Supplicant state: COMPLETED, Wi-Fi standard: 11n, RSSI: -30,
+```
+Looking at the BSSID tells us the router (Router A ends with :3a, Router B ends with :47)
+
 ## Documentation
 
 - [docs/lab-setup.md](docs/lab-setup.md) – the hardware testbed: routers,

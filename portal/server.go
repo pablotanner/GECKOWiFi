@@ -117,11 +117,16 @@ func hostOnly(hostport string) string {
 // serveHTTP (port 80) is where openNDS sends clients (FAS URL); it upgrades to
 // HTTPS on the same host, keeping openNDS's query (tok, authaction, redir).
 func (s *server) serveHTTP(w http.ResponseWriter, r *http.Request) {
+	sc := s.cfg.Scenario
 	host := hostOnly(r.Host)
-	if _, ok := s.sites[host]; !ok {
+	// Keep the requested host when we either serve it locally or relay it to
+	// the genuine portal; only an unknown name falls back to the login host.
+	// A relay host (e.g. portal.gecko-a.lab in S3) is not a local site, but
+	// its http->https upgrade must still point back at itself so the HTTPS
+	// hop is relayed and the probe sees the genuine key before any switch.
+	if _, ok := s.sites[host]; !ok && !sc.relays(host) {
 		host = s.cfg.PortalHost
 	}
-	sc := s.cfg.Scenario
 
 	// S6: the login page is served over plain HTTP, with no upgrade to TLS.
 	// The probe's last hop is then plain HTTP on a registered domain, which

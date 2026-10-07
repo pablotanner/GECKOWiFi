@@ -44,26 +44,45 @@ genuine portal; router B runs the attacker scenarios.
 ### Portal chain
 
 | # | Scenario | Expected | Testable | Result |
-|---|---|---|---|---|
-| P0 | Genuine portal on A | `VERIFIED` | ✅ | ✅ |
-| P1 | A, already logged in (204 → registered domain probed directly) | `VERIFIED` | ✅ | |
-| P1-B | B, already logged in on B, registered domain probed | `CONFLICT` if B intercepts, `VERIFIED` if B relays | ✅ | |
-| S0 | B transparently relays A's whole portal | `VERIFIED` (true about the portal, nothing about the link) | ✅ | |
-| S1 | Clone: same domain, attacker's key | `CONFLICT` | ✅ | |
-| S2 | Lookalike domain (`gecko-a-login.lab`), same SSID | `UNRECOGNIZED`, silent. Open question: should a registered SSID make this `CONFLICT`? | ✅ | |
-| S3 | Genuine portal first, then a 3xx redirect to the attacker | `CONFLICT` at the switch | ✅ | |
-| S3m | As S3, via delayed `<meta refresh content="10;url=…">` | `CONFLICT` (delay is ignored, target followed) | ✅ | |
-| S3h | As S3, via `Refresh: 10; url=…` response header | Missed (header not parsed); `CONFLICT` once fixed | 🛠 | |
-| S3j | As S3, via JavaScript redirect | Missed (no JS engine) | ✅ (shows limitation) | |
-| S4a | Payment page (delegate) with attacker's key, reached by redirect | `CONFLICT` | ✅ | |
-| S4b | Same, but reached by a button/link | Missed; caught with link extraction from the login page, WebView, or root | 🛠 / 🔒 | |
-| P2 | Benign redirect to a payment processor the certificate doesn't list | `CONFLICT` (false positive); avoided only if the operator lists it as a delegate | ✅ | |
-| S6 | Login page over plain HTTP only | `CONFLICT` | ✅ | |
-| S9 | GeoCert without pins; B serves a self-signed cert for the registered domain | `CONFLICT`: a domain without pins never verifies. The server rejects such certificates on insert, so unit test only | 📝 | |
-| F1 | Attacker registers its own GeoCert at A's location with the same SSID, own domain and key | `VERIFIED` (false) | ✅ | |
-| F1s | As F1, but the switch to the attacker domain happens mid-chain after A's anchor | Re-anchors → `VERIFIED` (false); should be `CONFLICT` | ✅ | |
-| T1 | TLS to the registered portal domain fails (timeout, refused) | `CONFLICT` (no key seen counts as a wrong key); a flaky genuine portal gives a false positive | ✅ | |
-| S8 | Spoofed Captive Portal API (RFC 8908, DHCP option 114 on B) | Not implemented | 🛠 | |
+|---|---|---|---|--------|
+| P0 | Genuine portal on A | `VERIFIED` | ✅ | ✅      |
+| P1 | A, already logged in (204 → registered domain probed directly) | `VERIFIED` | ✅ | ✅      |
+| P1-B | B, already logged in on B, registered domain probed | `CONFLICT` if B intercepts, `VERIFIED` if B relays | ✅ |        |
+| S0 | B transparently relays A's whole portal | `VERIFIED` (true about the portal, nothing about the link) | ✅ |    ✅   |
+| S1 | Clone: same domain, attacker's key | `CONFLICT` | ✅ |   ✅    |
+| S2 | Lookalike domain (`gecko-a-login.lab`), same SSID | `UNRECOGNIZED`, silent. Open question: should a registered SSID make this `CONFLICT`? | ✅ |   ✅    |
+| S3 | Genuine portal first, then a 3xx redirect to the attacker | `CONFLICT` at the switch (off-anchor domain mid-session) | ✅ | ✅ (hop 4) |
+| S3m | As S3, via delayed `<meta refresh content="10;url=…">` | `CONFLICT` (delay is ignored, target followed) | ✅ |    ✅ (hop 4)    |
+| S3h | As S3, via `Refresh: 10; url=…` response header | Switch not followed (header not parsed), but the plain-HTTP `/continue` hop is itself a downgrade → `CONFLICT` at hop 3 | ✅ | ✅ (hop 3) |
+| S3j | As S3, via JavaScript redirect | Switch not followed (no JS engine), same plain-HTTP `/continue` downgrade → `CONFLICT` at hop 3 | ✅ | ✅ (hop 3) |
+| S4a | Payment page (delegate) with attacker's key, reached by redirect | `CONFLICT` | ✅ |        |
+| S4b | Same, but reached by a button/link | Missed; caught with link extraction from the login page, WebView, or root | 🛠 / 🔒 |        |
+| P2 | Benign redirect to a payment processor the certificate doesn't list | `CONFLICT` (false positive); avoided only if the operator lists it as a delegate | ✅ |        |
+| S6 | Login page over plain HTTP only | `CONFLICT` | ✅ |        |
+| S9 | GeoCert without pins; B serves a self-signed cert for the registered domain | `CONFLICT`: a domain without pins never verifies. The server rejects such certificates on insert, so unit test only | 📝 |        |
+| F1 | Attacker registers its own GeoCert at A's location with the same SSID, own domain and key | `VERIFIED` (false) | ✅ |        |
+| F1s | As F1, but the switch to the attacker domain happens mid-chain after A's anchor | Re-anchors → `VERIFIED` (false); should be `CONFLICT` | ✅ |        |
+| T1 | TLS to the registered portal domain fails (timeout, refused) | `CONFLICT` (no key seen counts as a wrong key); a flaky genuine portal gives a false positive | ✅ |        |
+| S8 | Spoofed Captive Portal API (RFC 8908, DHCP option 114 on B) | Not implemented | 🛠 |        |
+
+> **S3 setup note.** Router A must run `genuine-bounce.json` (not `genuine.json`)
+> so its flow emits a plain-HTTP `/continue` hop for the relay attacker to
+> rewrite; a plain genuine portal ends at a 200 login page and the probe never
+> reaches the switch (`VERIFIED`). The attacker's http→https upgrade must also
+> preserve a relay host's name (`serveHTTP` in `portal/`), or the probe skips
+> the genuine portal entirely and the result is a silent `UNRECOGNIZED` instead
+> of `CONFLICT`. Confirmed on hardware 2026-10-07: genuine `portal.gecko-a.lab`
+> anchors `VERIFIED` at hop 2, `login.evil.lab` is `CONFLICT` at hop 4.
+>
+> **S3h/S3j caveat.** The probe follows 3xx and meta refresh (S3, S3m) but not a
+> `Refresh:` header or JavaScript, so in S3h/S3j it never reaches the attacker's
+> page. The run is still `CONFLICT`, but at hop 3 (`/continue`), because that hop
+> is the registered primary domain over plain HTTP - a downgrade, same rule as
+> S6 - not because the switch was detected. This is not a gap: an attacker can
+> only inject a header/JS redirect on a hop it controls, which is either plain
+> HTTP (downgrade, caught) or its own TLS-terminated page (own key, caught); it
+> cannot inject into the genuine HTTPS page. The only switch the probe truly
+> can't see is the post-interaction one (S5c).
 
 ### Timing and probe evasion
 
