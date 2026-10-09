@@ -24,7 +24,8 @@ behaviour that is correct within GECKO's scope but does not stop the attacker.
 |---|-------------------------------------------------------------------------------------------------------------------|---|---|---|
 | AC5 | A network presenting the key registered for its SSID at this location verifies                                    | `VERIFIED` | `genuineChain_isVerified_andOnlyHttpsHopIsJudged`, `verify_delegatesSuccessToPortalSession`, `genuineDelegateAfterPrimary_isVerified`; HW: P0, S0 | HW |
 | AC6 | A registered domain presenting the wrong key is a conflict                                                        | `CONFLICT` | `s1_clonedPortalWithAttackerKey_isConflict`, `verifyPresentedDomain_mismatchedSpkiHashIsConflict`, `s4_delegateWithAttackerKey_isConflict`; HW: S1, S4a | HW |
-| AC7 | A domain not named by any certificate here, when certificates do exist, is unknown (not a warning)                | `UNRECOGNIZED` (silent) | `s2_lookalikeDomain_isUnrecognized`; HW: S2 | Pending (HW) |
+| AC7 | On a *registered* SSID, a network serving a domain that matches nothing registered there is impersonation, not merely unknown (SSID exclusivity, see [design-decisions.md](design-decisions.md)) | `CONFLICT` | `s2_lookalikeDomainOnRegisteredSsid_isConflictUnderExclusivity`; HW: S2 | Pending (HW) |
+| AC7b | Without an SSID assertion (a typed-domain lookup), the additive semantics hold: an unknown domain where certs exist for other SSIDs is unknown, not a warning | `UNRECOGNIZED` (silent) | `unregisteredDomain_withoutSsidScope_staysUnrecognized` | Pass |
 | AC8 | Nothing registered for this SSID/location raises no warning                                                       | `UNVERIFIED` (silent) | `unregisteredSsid_isUnverified`, `finalPlainHopNotJudgedWhenAsked_noJudgedHops_isUnverifiedWithoutQuery`; HW: N6 | Pending (HW) |
 | AC9 | A registered portal domain served without TLS is a downgrade                                                      | `CONFLICT` | `s6_registeredPortalServedOverPlainHttp_isConflict`; HW: S6 | Pending (HW) |
 | AC10 | An expired certificate is ignored (not used to anchor or verify)                                                  | treated as absent | `verify_ignoresExpiredCertificates` | Pass |
@@ -39,7 +40,7 @@ A portal that looks genuine and then redirects to a malicious page.
 |---|---|---|---|---|
 | AC13 | A chain that starts on the genuine portal and then moves to an attacker domain is flagged at the switch | `CONFLICT` at the switching hop | `s3_relayToGenuineThenSwitch_isConflictAtTheSwitch`; HW: S3 (hop 4), S3m | HW |
 | AC14 | The chain is judged hop by hop; only HTTPS hops (and a final plain-HTTP hop) are judged, in order | first `CONFLICT` wins, else last judged hop | `genuineChain_..._andOnlyHttpsHopIsJudged`, `PortalSessionTest` | Pass |
-| AC15 | A failed TLS handshake on a registered portal domain counts as a wrong key; on an unregistered domain it does not warn | registered → `CONFLICT`; unregistered → `UNRECOGNIZED` | `failedTlsOnRegisteredPortalDomain_isConflict`, `failedTlsOnUnregisteredDomain_isNotConflict` | Pass |
+| AC15 | A failed TLS handshake on a registered portal domain counts as a wrong key; on a registered SSID, a failed hop to an unregistered domain is also impersonation (exclusivity) | both → `CONFLICT` | `failedTlsOnRegisteredPortalDomain_isConflict`, `failedTlsOnUnregisteredDomainOnRegisteredSsid_isConflict` | Pass |
 | AC16 | Each check starts a fresh session; a previous check's anchor never changes a later verdict | no stale anchor | `repeatedChecks_startFreshSessions`, `onNetworkChanged_resetsSessionAndCache` | Pass |
 
 ## D. Documented limitations (correct verdict, attacker not stopped)

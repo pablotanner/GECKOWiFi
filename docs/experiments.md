@@ -50,7 +50,7 @@ genuine portal; router B runs the attacker scenarios.
 | P1-B | B, already logged in on B, registered domain probed | `CONFLICT` if B intercepts, `VERIFIED` if B relays | ✅ |        |
 | S0 | B transparently relays A's whole portal | `VERIFIED` (true about the portal, nothing about the link) | ✅ |    ✅   |
 | S1 | Clone: same domain, attacker's key | `CONFLICT` | ✅ |   ✅    |
-| S2 | Lookalike domain (`gecko-a-login.lab`), same SSID | `UNRECOGNIZED`, silent. Open question: should a registered SSID make this `CONFLICT`? | ✅ |   ✅    |
+| S2 | Lookalike domain (`gecko-a-login.lab`), same SSID | `CONFLICT` — SSID exclusivity: `GeckoTest` is registered here, so a network on it serving an unregistered domain is impersonation (see [design-decisions.md](design-decisions.md)) | ✅ |   ✅    |
 | S3 | Genuine portal first, then a 3xx redirect to the attacker | `CONFLICT` at the switch (off-anchor domain mid-session) | ✅ | ✅ (hop 4) |
 | S3m | As S3, via delayed `<meta refresh content="10;url=…">` | `CONFLICT` (delay is ignored, target followed) | ✅ |    ✅ (hop 4)    |
 | S3h | As S3, via `Refresh: 10; url=…` response header | Switch not followed (header not parsed), but the plain-HTTP `/continue` hop is itself a downgrade → `CONFLICT` at hop 3 | ✅ | ✅ (hop 3) |
@@ -70,8 +70,8 @@ genuine portal; router B runs the attacker scenarios.
 > rewrite; a plain genuine portal ends at a 200 login page and the probe never
 > reaches the switch (`VERIFIED`). The attacker's http→https upgrade must also
 > preserve a relay host's name (`serveHTTP` in `portal/`), or the probe skips
-> the genuine portal entirely and the result is a silent `UNRECOGNIZED` instead
-> of `CONFLICT`. Confirmed on hardware 2026-10-07: genuine `portal.gecko-a.lab`
+> the genuine portal entirely and the result was an `UNRECOGNIZED` (silent before
+> SSID exclusivity) instead of `CONFLICT`. Confirmed on hardware 2026-10-07: genuine `portal.gecko-a.lab`
 > anchors `VERIFIED` at hop 2, `login.evil.lab` is `CONFLICT` at hop 4.
 >
 > **S3h/S3j caveat.** The probe follows 3xx and meta refresh (S3, S3m) but not a
@@ -112,7 +112,7 @@ location app (no root needed).
 | # | Scenario | Expected | Testable | Result |
 |---|---|---|---|---|
 | L1 | S1 plus a spoof to an empty area | `UNVERIFIED`, silent | ✅ | |
-| L2 | S1 plus a spoof to an unrelated registered area | `UNVERIFIED`, silent (the SSID filter drops the other area's certificates); `UNRECOGNIZED` only if that area has a `GeckoTest` certificate | ✅ | |
+| L2 | S1 plus a spoof to an unrelated registered area | `UNVERIFIED`, silent (the SSID filter drops the other area's certificates); `CONFLICT` (SSID exclusivity) if that area has a `GeckoTest` certificate for a different identity | ✅ | |
 | L3 | Attacker GeoCert at X, victim spoofed to X | `VERIFIED` (false) | ✅ | |
 | L4 | Two adjacent GeoCerts, position moved a few metres across the boundary | Result shifts to the neighbour | ✅ | |
 | L5 | Altitude spoof between floor-level GeoCerts | No effect: the app passes `null` altitude and queries the full range, so both floors are returned | 🛠 | |

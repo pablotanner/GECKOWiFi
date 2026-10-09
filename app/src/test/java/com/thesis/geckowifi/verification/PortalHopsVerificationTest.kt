@@ -84,13 +84,33 @@ class PortalHopsVerificationTest {
     }
 
     @Test
-    fun s2_lookalikeDomain_isUnrecognized() = runTest {
+    fun s2_lookalikeDomainOnRegisteredSsid_isConflictUnderExclusivity() = runTest {
+        // GeckoTest is registered here (mangoA), so a network on it serving a
+        // domain that matches nothing registered is impersonation, not merely
+        // "unknown": SSID exclusivity escalates UNRECOGNIZED to CONFLICT.
         val lookalike = listOf(
             hop(0, "http://connectivitycheck.gstatic.com/generate_204", 302),
             hop(1, "https://gecko-a-login.lab/", 200, key = "keyAttacker")
         )
 
-        assertEquals(VerificationState.UNRECOGNIZED, check(geckoReturning(mangoA), lookalike).overall.state)
+        val result = check(geckoReturning(mangoA), lookalike).overall
+        assertEquals(VerificationState.CONFLICT, result.state)
+        assertEquals(true, result.reason?.contains("SSID exclusive"))
+    }
+
+    @Test
+    fun unregisteredDomain_withoutSsidScope_staysUnrecognized() = runTest {
+        // The additive fallback: with no SSID asserted (ssid = null), certs may
+        // exist here for other SSIDs without claiming this domain, so an unknown
+        // domain is UNRECOGNIZED, not CONFLICT.
+        val lookalike = listOf(
+            hop(0, "http://connectivitycheck.gstatic.com/generate_204", 302),
+            hop(1, "https://gecko-a-login.lab/", 200, key = "keyAttacker")
+        )
+
+        val result = engine(geckoReturning(mangoA))
+            .verifyPortalHops("net", lookalike, true, 47.3777, 8.5484, null, 50, ssid = null)
+        assertEquals(VerificationState.UNRECOGNIZED, result.overall.state)
     }
 
     @Test
@@ -239,13 +259,15 @@ class PortalHopsVerificationTest {
     }
 
     @Test
-    fun failedTlsOnUnregisteredDomain_isNotConflict() = runTest {
+    fun failedTlsOnUnregisteredDomainOnRegisteredSsid_isConflict() = runTest {
+        // On a registered SSID, a hop to an unregistered domain is impersonation
+        // regardless of whether its TLS succeeded: exclusivity makes it CONFLICT.
         val chain = listOf(
             hop(0, "http://connectivitycheck.gstatic.com/generate_204", 302),
             failedHop(1, "https://unrelated.example/")
         )
 
-        assertEquals(VerificationState.UNRECOGNIZED,
+        assertEquals(VerificationState.CONFLICT,
             check(geckoReturning(mangoA), chain, judgeFinal = false).overall.state)
     }
 
@@ -277,6 +299,12 @@ class PortalHopsVerificationTest {
         val lookalike = listOf(hop(0, "https://gecko-a-login.lab/", 200, key = "keyAttacker"))
         val second = eng.verifyPortalHops("net", lookalike, true, 47.3777, 8.5484, null, 50, "GeckoTest")
 
-        assertEquals(VerificationState.UNRECOGNIZED, second.overall.state)
+        // Under exclusivity both a fresh and a stale session would be CONFLICT,
+        // so the reason is the discriminator: a fresh session escalates via SSID
+        // exclusivity ("SSID exclusive"); a leaked anchor would instead report an
+        // "off-anchor" domain. Seeing the former proves the session reset.
+        assertEquals(VerificationState.CONFLICT, second.overall.state)
+        assertEquals(true, second.overall.reason?.contains("SSID exclusive"))
+        assertEquals(false, second.overall.reason?.contains("off-anchor"))
     }
 }
