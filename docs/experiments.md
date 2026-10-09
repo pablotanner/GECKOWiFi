@@ -55,10 +55,10 @@ genuine portal; router B runs the attacker scenarios.
 | S3m | As S3, via delayed `<meta refresh content="10;url=…">` | `CONFLICT` (delay is ignored, target followed) | ✅ |    ✅ (hop 4)    |
 | S3h | As S3, via `Refresh: 10; url=…` response header | Switch not followed (header not parsed), but the plain-HTTP `/continue` hop is itself a downgrade → `CONFLICT` at hop 3 | ✅ | ✅ (hop 3) |
 | S3j | As S3, via JavaScript redirect | Switch not followed (no JS engine), same plain-HTTP `/continue` downgrade → `CONFLICT` at hop 3 | ✅ | ✅ (hop 3) |
-| S4a | Payment page (delegate) with attacker's key, reached by redirect | `CONFLICT` | ✅ |        |
-| S4b | Same, but reached by a button/link | Missed; caught with link extraction from the login page, WebView, or root | 🛠 / 🔒 |        |
+| S4a | Payment page (delegate) with attacker's key, reached by redirect | `CONFLICT` | ✅ |    ✅   |
+| S4b | Same, but reached by a button/link | Missed; caught with link extraction from the login page, WebView, or root | 🛠 / 🔒 |    ✅   |
 | P2 | Benign redirect to a payment processor the certificate doesn't list | `CONFLICT` (false positive); avoided only if the operator lists it as a delegate | ✅ |        |
-| S6 | Login page over plain HTTP only | `CONFLICT` | ✅ |        |
+| S6 | Login page over plain HTTP only | `CONFLICT` | ✅ |    ✅    |
 | S9 | GeoCert without pins; B serves a self-signed cert for the registered domain | `CONFLICT`: a domain without pins never verifies. The server rejects such certificates on insert, so unit test only | 📝 |        |
 | F1 | Attacker registers its own GeoCert at A's location with the same SSID, own domain and key | `VERIFIED` (false) | ✅ |        |
 | F1s | As F1, but the switch to the attacker domain happens mid-chain after A's anchor | Re-anchors → `VERIFIED` (false); should be `CONFLICT` | ✅ |        |
@@ -147,14 +147,3 @@ location app (no root needed).
 S3m (meta refresh with a delay) is covered by `RedirectParsingTest`. S3h needs
 the `Refresh` header parsed first.
 
-## Next steps
-
-1. Attacker portal on router B with configurable scenarios (clone, lookalike,
-   relay-then-switch, per-client timer, User-Agent-based switching).
-2. An independent uplink for B, for a more realistic S7 (a firewall rule on B
-   is enough to run it now).
-3. App: parse the `Refresh` header (S3h), re-probe until the portal resolves
-   (S5a), compare `authMode` (A1), mimic Android's probe User-Agent (S5d).
-4. Enterprise lab: hostapd WPA2-Enterprise on one router, FreeRADIUS on the laptop (E1, E2).
-5. A rootable device for traffic observation and supplicant access (S4b, S5b,
-   S5c, E2r, D1p).
