@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -15,6 +14,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.NetworkWifi1Bar
 import androidx.compose.material.icons.outlined.NetworkWifi2Bar
@@ -22,24 +23,18 @@ import androidx.compose.material.icons.outlined.NetworkWifi3Bar
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Science
 import androidx.compose.material.icons.outlined.SignalWifi4Bar
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -63,9 +58,9 @@ import com.thesis.geckowifi.verification.LookupStatus
  * GECKO vouches for it (the status card), then the networks to pick from.
  *
  * Picking a network is the only decision the user makes. Joining it starts
- * the check automatically; there is no separate "check" step, no domain to
- * type and no access point to choose. Those exist only in lab mode, for
- * running the testbed scenarios (Router A vs. B, a manual domain).
+ * the check automatically; there is no separate "check" step and no access
+ * point to choose. Lab mode adds the access-point choice, for running the
+ * testbed scenarios (Router A vs. B).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,17 +69,22 @@ fun HomeScreen(
     onOpenCheck: (String) -> Unit
 ) {
     LaunchedEffect(Unit) { viewModel.refresh() }
-    var labTarget by remember { mutableStateOf<ScannedNetwork.Real?>(null) }
+    // Lab mode: SSIDs expanded or collapsed by hand; otherwise registered ones start expanded.
+    val expandOverrides = remember { mutableStateMapOf<String, Boolean>() }
 
     val known = viewModel.certLookup == LookupStatus.OK
     val registeredSsids = viewModel.registeredHere.mapNotNull { it.wifi.ssid?.lowercase() }.toSet()
-    val rows = buildRows(viewModel.scannedNetworks, grouped = !viewModel.labMode)
+    val rows = buildRows(viewModel.scannedNetworks)
     val busy = viewModel.activeCheck != null
 
-    val connect: (ScannedNetwork) -> Unit = { network ->
-        if (viewModel.labMode && network is ScannedNetwork.Real && network.isOpen) labTarget = network
-        else viewModel.startCheck(network)
-    }
+    val connect: (ScannedNetwork) -> Unit = { viewModel.startCheck(it) }
+    val list = ListContext(
+        viewModel = viewModel,
+        busy = busy,
+        isExpanded = { ssid, registered -> expandOverrides[ssid] ?: registered },
+        onToggle = { ssid, registered -> expandOverrides[ssid] = !(expandOverrides[ssid] ?: registered) },
+        onConnect = connect
+    )
 
     Column(Modifier.fillMaxWidth()) {
         TopAppBar(
@@ -125,13 +125,13 @@ fun HomeScreen(
 
             if (known) {
                 val (registered, other) = checkable.partition { it.primary.ssid.lowercase() in registeredSsids }
-                networkSection("Registered here", registered, true, busy, viewModel, connect)
-                networkSection("Other open networks", other, false, busy, viewModel, connect)
+                networkSection("Registered here", registered, true, list)
+                networkSection("Other open networks", other, false, list)
             } else {
-                networkSection("Open networks", checkable, false, busy, viewModel, connect)
+                networkSection("Open networks", checkable, false, list)
             }
-            networkSection("Demo networks", demo, false, busy, viewModel, connect)
-            networkSection("Secured networks", secured, false, busy, viewModel, connect)
+            networkSection("Demo networks", demo, false, list)
+            networkSection("Secured networks", secured, false, list)
 
             if (rows.isEmpty()) {
                 item {
@@ -145,65 +145,96 @@ fun HomeScreen(
             }
         }
     }
-
-    labTarget?.let { target ->
-        LabConnectSheet(
-            network = target,
-            registeredDomain = viewModel.registeredDomainFor(target.ssid),
-            onDismiss = { labTarget = null },
-            onConnect = { domain ->
-                labTarget = null
-                viewModel.startCheck(target, domain)
-            }
-        )
-    }
 }
 
 /**
- * One list row. In the normal view Android's per-access-point scan results
- * are folded into one row per SSID (a campus network would otherwise appear
- * dozens of times) and the strongest AP is joined. Lab mode lists every AP.
+ * One list row per SSID: Android reports every access point (BSSID) as its
+ * own scan result, so a campus network would otherwise appear dozens of
+ * times. Groups are ordered by their strongest AP. In the normal view the
+ * strongest AP is joined; in lab mode a group expands to its APs so a
+ * specific one (Router A vs. B) can be joined.
  */
 private class NetworkRow(val primary: ScannedNetwork, val accessPoints: List<ScannedNetwork.Real>)
 
-private fun buildRows(networks: List<ScannedNetwork>, grouped: Boolean): List<NetworkRow> {
-    val real = networks.filterIsInstance<ScannedNetwork.Real>()
-    val realRows = if (grouped) {
-        real.groupBy { it.ssid }.values
-            .map { aps -> aps.sortedByDescending { it.rssi } }
-            .sortedByDescending { it.first().rssi }
-            .map { NetworkRow(it.first(), it) }
-    } else {
-        real.sortedWith(compareBy<ScannedNetwork.Real> { it.ssid.lowercase() }.thenByDescending { it.rssi })
-            .map { NetworkRow(it, listOf(it)) }
-    }
+private fun buildRows(networks: List<ScannedNetwork>): List<NetworkRow> {
+    val realRows = networks.filterIsInstance<ScannedNetwork.Real>()
+        .groupBy { it.ssid }.values
+        .map { aps -> aps.sortedByDescending { it.rssi } }
+        .sortedByDescending { it.first().rssi }
+        .map { NetworkRow(it.first(), it) }
     // Demo entries stay separate rows even when they share an SSID (benign vs. evil twin).
     return realRows + networks.filter { it !is ScannedNetwork.Real }.map { NetworkRow(it, emptyList()) }
 }
 
-private fun LazyListScope.networkSection(
-    title: String,
-    rows: List<NetworkRow>,
-    registered: Boolean,
-    busy: Boolean,
-    viewModel: VerificationViewModel,
-    onConnect: (ScannedNetwork) -> Unit
-) {
+private class ListContext(
+    val viewModel: VerificationViewModel,
+    val busy: Boolean,
+    val isExpanded: (ssid: String, registered: Boolean) -> Boolean,
+    val onToggle: (ssid: String, registered: Boolean) -> Unit,
+    val onConnect: (ScannedNetwork) -> Unit
+)
+
+private fun ListContext.latestFor(aps: List<ScannedNetwork>): CheckDetail? =
+    aps.mapNotNull { viewModel.latestCheckFor(it.bssid ?: it.ssid) }.maxByOrNull { it.result.timestamp }
+
+private fun LazyListScope.networkSection(title: String, rows: List<NetworkRow>, registered: Boolean, ctx: ListContext) {
     if (rows.isEmpty()) return
-    item { SectionHeader(title) }
-    items(rows, key = { "$title:${it.primary.ssid}:${it.primary.bssid}" }) { row ->
-        val latest = row.accessPoints.ifEmpty { listOf(row.primary) }
-            .mapNotNull { viewModel.latestCheckFor(it.bssid ?: it.ssid) }
-            .maxByOrNull { it.result.timestamp }
-        NetworkListItem(
-            row = row,
-            registered = registered,
-            latest = latest,
-            labMode = viewModel.labMode,
-            enabled = !busy,
-            onClick = { onConnect(row.primary) }
-        )
+    item(key = "header:$title") { SectionHeader(title) }
+    rows.forEach { row ->
+        val ssid = row.primary.ssid
+        val open = (row.primary as? ScannedNetwork.Real)?.isOpen ?: true
+        // Only an open SSID with several APs has a choice worth expanding; a single AP is joined directly.
+        val expandable = ctx.viewModel.labMode && open && row.accessPoints.size > 1
+        val expanded = expandable && ctx.isExpanded(ssid, registered)
+        item(key = "$title:$ssid:${row.primary.bssid}") {
+            NetworkListItem(
+                row = row,
+                registered = registered,
+                // An expanded group shows each AP's own result instead.
+                latest = if (expanded) null else ctx.latestFor(row.accessPoints.ifEmpty { listOf(row.primary) }),
+                labMode = ctx.viewModel.labMode,
+                expandable = expandable,
+                expanded = expanded,
+                enabled = !ctx.busy,
+                onClick = { if (expandable) ctx.onToggle(ssid, registered) else ctx.onConnect(row.primary) }
+            )
+        }
+        if (expanded) {
+            items(row.accessPoints, key = { "$title:$ssid:ap:${it.bssid}" }) { ap ->
+                AccessPointItem(ap, ctx.latestFor(listOf(ap)), enabled = !ctx.busy, onClick = { ctx.onConnect(ap) })
+            }
+        }
     }
+}
+
+/** Lab mode: one access point inside an expanded SSID group. Tapping it joins exactly this BSSID. */
+@Composable
+private fun AccessPointItem(ap: ScannedNetwork.Real, latest: CheckDetail?, enabled: Boolean, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(start = 56.dp, end = Space.lg, top = Space.sm, bottom = Space.sm),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Space.md)
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(ap.bssid ?: "Unknown BSSID", fontFamily = MonoFontFamily, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                listOfNotNull(ap.channel?.let { "ch $it" }, ap.band, ap.rssi.takeIf { it != Int.MIN_VALUE }?.let { "$it dBm" })
+                    .joinToString("  "),
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant
+            )
+        }
+        if (latest != null && latest.result.state in setOf(VerificationState.VERIFIED, VerificationState.CONFLICT)) {
+            val v = latest.verdict()
+            VerdictBadge(v.tone, v.label, v.icon)
+        }
+    }
+    HorizontalDivider(Modifier.padding(start = 56.dp), color = colors.outlineVariant)
 }
 
 @Composable
@@ -212,6 +243,8 @@ private fun NetworkListItem(
     registered: Boolean,
     latest: CheckDetail?,
     labMode: Boolean,
+    expandable: Boolean,
+    expanded: Boolean,
     enabled: Boolean,
     onClick: () -> Unit
 ) {
@@ -227,7 +260,10 @@ private fun NetworkListItem(
             .heightIn(min = 64.dp)
             .clickable(enabled = enabled && checkable, role = Role.Button, onClick = onClick)
             .padding(horizontal = Space.lg, vertical = Space.md)
-            .semantics { if (!checkable) stateDescription = "Can't be checked" },
+            .semantics {
+                if (!checkable) stateDescription = "Can't be checked"
+                else if (expandable) stateDescription = if (expanded) "Expanded" else "Collapsed"
+            },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.lg)
     ) {
@@ -236,9 +272,10 @@ private fun NetworkListItem(
             Text(network.ssid, style = MaterialTheme.typography.bodyLarge, color = content)
             val supporting = supportingText(row, labMode)
             if (supporting.isNotEmpty()) {
+                val mono = labMode && real != null && real.isOpen && row.accessPoints.size == 1
                 Text(
                     supporting,
-                    style = if (labMode && real != null) MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily)
+                    style = if (mono) MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily)
                     else MaterialTheme.typography.bodyMedium,
                     color = colors.onSurfaceVariant
                 )
@@ -255,15 +292,23 @@ private fun NetworkListItem(
                 VerdictBadge(v.tone, v.label, v.icon)
             }
         }
+        if (expandable) {
+            Icon(
+                if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                contentDescription = null,
+                tint = colors.onSurfaceVariant
+            )
+        }
     }
-    HorizontalDivider(Modifier.padding(start = 56.dp), color = colors.outlineVariant)
+    if (!expanded) HorizontalDivider(Modifier.padding(start = 56.dp), color = colors.outlineVariant)
 }
 
 private fun supportingText(row: NetworkRow, labMode: Boolean): String = when (val n = row.primary) {
     is ScannedNetwork.Real -> when {
         !n.isOpen -> "${n.securityLabel}. Can't be checked yet"
-        labMode -> listOfNotNull(n.bssid, n.channel?.let { "ch $it" }, n.rssi.takeIf { it != Int.MIN_VALUE }?.let { "$it dBm" })
-            .joinToString("  ")
+        labMode && row.accessPoints.size == 1 ->
+            listOfNotNull(n.bssid, n.channel?.let { "ch $it" }, n.rssi.takeIf { it != Int.MIN_VALUE }?.let { "$it dBm" })
+                .joinToString("  ")
         row.accessPoints.size > 1 -> "Open, ${row.accessPoints.size} access points"
         else -> "Open"
     }
@@ -277,45 +322,4 @@ private fun signalIcon(rssi: Int?): ImageVector = when {
     rssi >= -67 -> Icons.Outlined.NetworkWifi3Bar
     rssi >= -78 -> Icons.Outlined.NetworkWifi2Bar
     else -> Icons.Outlined.NetworkWifi1Bar
-}
-
-/** Lab mode only: the exact access point is already chosen by the row; this adds the manual domain override. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun LabConnectSheet(
-    network: ScannedNetwork.Real,
-    registeredDomain: String?,
-    onDismiss: () -> Unit,
-    onConnect: (String) -> Unit
-) {
-    var domain by remember { mutableStateOf("") }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.padding(horizontal = Space.xl).padding(bottom = Space.xl)) {
-            Text(network.ssid, style = MaterialTheme.typography.headlineSmall)
-            Text(
-                listOfNotNull(network.bssid, network.channel?.let { "ch $it" }, network.band).joinToString("  "),
-                fontFamily = MonoFontFamily,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.size(Space.xl))
-            OutlinedTextField(
-                value = domain,
-                onValueChange = { domain = it },
-                singleLine = true,
-                label = { Text("Login domain (optional)") },
-                supportingText = {
-                    Text(
-                        "Leave empty to follow the network's login page." +
-                            (registeredDomain?.let { " Registered here: $it" } ?: "")
-                    )
-                },
-                modifier = Modifier.fillMaxWidth()
-            )
-            Button(
-                onClick = { onConnect(domain) },
-                modifier = Modifier.fillMaxWidth().padding(top = Space.lg).heightIn(min = 48.dp)
-            ) { Text("Join and check") }
-        }
-    }
 }

@@ -58,9 +58,9 @@ data class CheckDetail(
     val accuracyMeters: Float?,
     val radiusMeters: Int,
     val altitude: Double?,
-    /** Portal hops in order (empty for a typed-domain check or when no portal was seen). */
+    /** Portal hops in order (empty when no portal was seen). */
     val hops: List<HopVerdict> = emptyList(),
-    /** How the check was made: portal discovery, or a typed/registered domain. */
+    /** How the check was made: portal discovery, or the registered domain when no portal appeared. */
     val modeDescription: String? = null,
     /** The app holds a connection to this network (false for demo entries and failed joins). */
     val joined: Boolean = false,
@@ -215,11 +215,11 @@ class VerificationViewModel(
         certProbe.network = joined
     }
 
-    /** The one entry point for the UI: joins and checks [network]. [domain] is the lab-mode manual override. */
-    fun startCheck(network: ScannedNetwork, domain: String = "") {
+    /** The one entry point for the UI: joins and checks [network]. */
+    fun startCheck(network: ScannedNetwork) {
         if (activeCheck != null) return
         checkJob = when (network) {
-            is ScannedNetwork.Real -> checkReal(network, domain)
+            is ScannedNetwork.Real -> checkReal(network)
             else -> checkFake(network)
         }
     }
@@ -317,27 +317,21 @@ class VerificationViewModel(
 
     /**
      * Joins [network] itself (the app drives the connection, not Android
-     * settings), pinned to its BSSID, then verifies over it:
-     *
-     * - [domain] blank (normal case): portal discovery - [hopSource] follows
-     *   the network's redirects from a probe URL and every hop is judged
-     *   ([VerificationEngine.verifyPortalHops]). If the probe sees no portal
-     *   (HTTP 204: open network, or already logged in), the domain registered
-     *   for the SSID is probed instead, so a logged-in network is still checked.
-     * - [domain] given: manual override - just that domain is probed (the
-     *   pre-discovery behaviour, useful to test a specific host).
+     * settings), pinned to its BSSID, then verifies over it: [hopSource]
+     * follows the network's redirects from a probe URL and every hop is judged
+     * ([VerificationEngine.verifyPortalHops]). If the probe sees no portal
+     * (HTTP 204: open network, or already logged in), the domain registered
+     * for the SSID is probed instead, so a logged-in network is still checked.
      *
      * Every check is appended to [checkLog] (JSON lines, see [PortalCheckLog]).
      */
-    private fun checkReal(network: ScannedNetwork.Real, domain: String): Job? {
+    private fun checkReal(network: ScannedNetwork.Real): Job? {
         val fix = location ?: return null
         val networkKey = network.bssid ?: network.ssid
-        val typed = domain.trim()
-        val steps = if (typed.isEmpty()) CheckStep.entries.toList()
-        else listOf(CheckStep.JOIN, CheckStep.LOOKUP, CheckStep.COMPARE)
+        val steps = CheckStep.entries.toList()
 
         if (!network.isOpen) {
-            val result = VerificationResult(VerificationState.UNREACHABLE, typed,
+            val result = VerificationResult(VerificationState.UNREACHABLE, "",
                 reason = "only open networks can be joined by this prototype")
             publish(network.ssid, network.bssid, networkKey, result, fix, failure = CheckFailure.NOT_OPEN)
             return null
@@ -348,7 +342,7 @@ class VerificationViewModel(
             try {
                 val joined = networkObserver.join(network.ssid, network.bssid)
                 if (joined == null) {
-                    val result = VerificationResult(VerificationState.UNREACHABLE, typed,
+                    val result = VerificationResult(VerificationState.UNREACHABLE, "",
                         reason = "could not join ${network.ssid} (${network.bssid})")
                     finishCheck(network, networkKey, fix, result, mode = "join", failure = CheckFailure.JOIN_FAILED)
                     return@launch
@@ -359,13 +353,6 @@ class VerificationViewModel(
                 engine.registeredHere(fix.latitude, fix.longitude, null, queryRadiusMeters).let {
                     registeredHere = it.certificates
                     certLookup = it.status
-                }
-
-                if (typed.isNotEmpty()) {
-                    step(network, steps, CheckStep.COMPARE)
-                    val result = verifyDomain(network, networkKey, typed, fix)
-                    finishCheck(network, networkKey, fix, result, mode = "domain")
-                    return@launch
                 }
 
                 step(network, steps, CheckStep.PORTAL)
@@ -451,7 +438,6 @@ class VerificationViewModel(
         val modeDescription = when (mode) {
             "discovery" -> if (outcome == Discovery.Outcome.NoPortal) "No login page appeared; the registered one was checked directly"
             else "Login page found by following the network's redirects"
-            "domain" -> "Manual domain (lab mode)"
             else -> null
         }
         publish(network.ssid, network.bssid, networkKey, result, fix, hops, modeDescription,
