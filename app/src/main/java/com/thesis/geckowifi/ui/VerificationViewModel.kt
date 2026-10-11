@@ -40,6 +40,14 @@ import java.util.UUID
  */
 const val SERVER_URL = BuildConfig.GEOPKI_URL
 
+/**
+ * Which network the map-server query actually went out on. [MOBILE_DATA] and
+ * [JOINED_WIFI] are the network GeckoClient was bound to (cellular when there
+ * is any, else the WiFi being checked); [DEFAULT_ROUTE] is the system default,
+ * used when nothing was bound or the bound network failed and GeckoClient fell back.
+ */
+enum class QueryRoute { MOBILE_DATA, JOINED_WIFI, DEFAULT_ROUTE }
+
 /** Why a check ended without a verdict from the map server, so the UI can say it in plain words. */
 enum class CheckFailure { NOT_OPEN, JOIN_FAILED, PORTAL_FAILED }
 
@@ -68,7 +76,9 @@ data class CheckDetail(
     /** Simulated demo entry (emulator flavor): nothing was joined or probed. */
     val isDemo: Boolean = false,
     /** 802.1X check (login server compared) rather than a captive portal check. */
-    val isEnterprise: Boolean = false
+    val isEnterprise: Boolean = false,
+    /** Null when no map-server answer was used (e.g. the query never got through). */
+    val queryRoute: QueryRoute? = null
 )
 
 /** The steps of a check, in the order the app runs them (README "How a check works"). */
@@ -211,9 +221,18 @@ class VerificationViewModel(
      */
     private fun rebindGeckoClient() {
         val joined = networkObserver.joinedNetwork
-        engine.gecko = GeckoClient(baseUrl = SERVER_URL, network = networkObserver.cellularNetwork() ?: joined)
+        val cellular = networkObserver.cellularNetwork()
+        boundRoute = when {
+            cellular != null -> QueryRoute.MOBILE_DATA
+            joined != null -> QueryRoute.JOINED_WIFI
+            else -> QueryRoute.DEFAULT_ROUTE
+        }
+        engine.gecko = GeckoClient(baseUrl = SERVER_URL, network = cellular ?: joined)
         certProbe.network = joined
     }
+
+    /** What [rebindGeckoClient] bound the map-server client to; read back when a check is published. */
+    private var boundRoute = QueryRoute.DEFAULT_ROUTE
 
     /** The one entry point for the UI: joins and checks [network]. */
     fun startCheck(network: ScannedNetwork) {
@@ -472,7 +491,13 @@ class VerificationViewModel(
             joined = joined,
             failure = failure,
             isDemo = isDemo,
-            isEnterprise = isEnterprise
+            isEnterprise = isEnterprise,
+            // usedPreferredNetwork = "the bound network served it", not "cellular".
+            queryRoute = when (result.usedPreferredNetwork) {
+                true -> boundRoute
+                false -> QueryRoute.DEFAULT_ROUTE
+                null -> null
+            }
         )
         checks = listOf(detail) + checks
         current = detail

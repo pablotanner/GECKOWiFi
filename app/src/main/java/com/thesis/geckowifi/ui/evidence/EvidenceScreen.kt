@@ -32,6 +32,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import com.thesis.geckowifi.ui.CheckDetail
+import com.thesis.geckowifi.ui.QueryRoute
 import com.thesis.geckowifi.ui.SERVER_URL
 import com.thesis.geckowifi.ui.components.DetailRow
 import com.thesis.geckowifi.ui.components.SectionCard
@@ -155,10 +156,11 @@ fun EvidenceScreen(check: CheckDetail?, labMode: Boolean, onBack: () -> Unit) {
                 }
                 DetailRow(
                     "Sent over",
-                    when (result.usedPreferredNetwork) {
-                        true -> "Mobile data"
-                        false -> "The joined WiFi"
-                        null -> "Not sent"
+                    when (check.queryRoute) {
+                        QueryRoute.MOBILE_DATA -> "Mobile Data"
+                        QueryRoute.JOINED_WIFI -> "This WiFi Network"
+                        QueryRoute.DEFAULT_ROUTE -> "Default connection"
+                        null -> "No answer received"
                     },
                     mono = false
                 )
