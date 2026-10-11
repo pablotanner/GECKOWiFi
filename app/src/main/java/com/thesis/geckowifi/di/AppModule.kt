@@ -5,7 +5,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.thesis.geckowifi.data.local.HistoryStore
 import com.thesis.geckowifi.data.local.InMemoryHistoryStore
-import com.thesis.geckowifi.data.local.InMemoryTrustPreferenceStore
+import com.thesis.geckowifi.data.local.SharedPrefsTrustPreferenceStore
 import com.thesis.geckowifi.data.local.PortalCheckLog
 import com.thesis.geckowifi.data.local.TrustPreferenceStore
 import com.thesis.geckowifi.location.LocationProvider
@@ -27,7 +27,9 @@ object AppModule {
     val certProbe: CertProbe by lazy { CertProbe() }
     val decisionCache: DecisionCache by lazy { DecisionCache() }
     val historyStore: HistoryStore by lazy { InMemoryHistoryStore() }
-    val trustPreferences: TrustPreferenceStore by lazy { InMemoryTrustPreferenceStore() }
+    val trustPreferences: TrustPreferenceStore by lazy {
+        SharedPrefsTrustPreferenceStore(appContext.getSharedPreferences("gecko_prefs", Context.MODE_PRIVATE))
+    }
 
     val locationProvider: LocationProvider by lazy { LocationProvider(appContext) }
     val networkObserver: NetworkObserver by lazy { NetworkObserver(appContext) }

@@ -1,80 +1,164 @@
 package com.thesis.geckowifi.ui.settings
 
+import android.content.Intent
+import android.widget.Toast
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
-import android.content.Intent
-import android.widget.Toast
 import androidx.core.content.FileProvider
 import com.thesis.geckowifi.di.AppModule
+import com.thesis.geckowifi.ui.SERVER_URL
 import com.thesis.geckowifi.ui.VerificationViewModel
-import com.thesis.geckowifi.ui.theme.Divider
-import com.thesis.geckowifi.ui.theme.OnSurfaceMuted
+import com.thesis.geckowifi.ui.components.DetailRow
+import com.thesis.geckowifi.ui.components.SectionCard
+import com.thesis.geckowifi.ui.components.SectionHeader
+import com.thesis.geckowifi.ui.theme.Space
+import com.thesis.geckowifi.verification.LookupStatus
 
 /**
- * No Claude Design screen was provided for Settings, so this is plain
- * Material3, not styled to match the other screens. Deliberately minimal:
- * exposes exactly the two preferences that already have real backing
- * (`AppModule.trustPreferences` / `TrustPreferenceStore`) rather than
- * inventing settings this app doesn't act on anywhere.
+ * Deliberately almost empty for the end user: GECKO has nothing they need
+ * to configure. What it does and doesn't protect against is explained here
+ * once, instead of on every result. The researcher's controls (radius, log,
+ * diagnostics) sit behind lab mode.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(viewModel: VerificationViewModel) {
     Column(Modifier.fillMaxWidth()) {
         TopAppBar(title = { Text("Settings") })
-
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("Strict mode", style = MaterialTheme.typography.bodyLarge)
+        Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = Space.xxl)) {
+            SectionHeader("How GECKO protects you")
+            SectionCard(null, Modifier.padding(horizontal = Space.lg)) {
                 Text(
-                    "Not yet consumed by any verification path in this build - flipping it has no effect elsewhere yet.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = OnSurfaceMuted
+                    "Network operators register their WiFi and its login page for the place where it is. " +
+                        "When you join a network, GECKO compares it with that registration and warns you " +
+                        "if someone is imitating it.",
+                    style = MaterialTheme.typography.bodyLarge
                 )
+                ScopeLine(true, "Fake networks with a copied name and login page")
+                ScopeLine(true, "Login or payment pages swapped for someone else's")
+                ScopeLine(false, "Networks nobody registered (most of them, for now)")
+                ScopeLine(false, "What happens to your traffic after you log in")
             }
-            Switch(checked = viewModel.strictMode, onCheckedChange = { viewModel.strictMode = it })
-        }
-        HorizontalDivider(color = Divider)
 
-        Column(Modifier.padding(16.dp)) {
-            Text("Query radius: ${viewModel.queryRadiusMeters} m", style = MaterialTheme.typography.bodyLarge)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = Space.xl)
+                    .toggleable(value = viewModel.labMode, role = Role.Switch, onValueChange = viewModel::updateLabMode)
+                    .heightIn(min = 64.dp)
+                    .padding(horizontal = Space.lg, vertical = Space.md),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Space.lg)
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Lab mode", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "Lists every access point, adds a manual login domain and shows diagnostics. For testing.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = viewModel.labMode, onCheckedChange = null)
+            }
+
+            if (viewModel.labMode) LabSection(viewModel)
+        }
+    }
+}
+
+@Composable
+private fun ScopeLine(covered: Boolean, text: String) {
+    Row(Modifier.padding(top = Space.md), horizontalArrangement = Arrangement.spacedBy(Space.md)) {
+        val icon: ImageVector = if (covered) Icons.Outlined.Check else Icons.Outlined.Close
+        Icon(
+            icon,
+            contentDescription = if (covered) "Detected" else "Not covered",
+            tint = if (covered) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp)
+        )
+        Text(text, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+@Composable
+private fun LabSection(viewModel: VerificationViewModel) {
+    val context = LocalContext.current
+    Column(Modifier.padding(horizontal = Space.lg), verticalArrangement = Arrangement.spacedBy(Space.md)) {
+        SectionHeader("Lab", Modifier.padding(start = 0.dp))
+
+        SectionCard("Search radius") {
+            var radius by remember { mutableFloatStateOf(viewModel.queryRadiusMeters.toFloat()) }
+            Text("${radius.toInt()} m around your location", style = MaterialTheme.typography.bodyMedium)
             Slider(
-                value = viewModel.queryRadiusMeters.toFloat(),
-                onValueChange = { viewModel.queryRadiusMeters = it.toInt() },
+                value = radius,
+                onValueChange = { radius = it },
+                onValueChangeFinished = { viewModel.updateQueryRadius(radius.toInt()) },
                 valueRange = 10f..250f
             )
         }
-        HorizontalDivider(color = Divider)
 
-        val context = LocalContext.current
-        Column(Modifier.padding(horizontal = 16.dp)) {
-            Text("Check log", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 12.dp))
-            Text(
-                "Every check is recorded as one JSON line, with all portal hops and verdicts.",
-                style = MaterialTheme.typography.bodySmall,
-                color = OnSurfaceMuted
+        SectionCard("Diagnostics") {
+            DetailRow("Map server", SERVER_URL)
+            DetailRow(
+                "Lookup",
+                when (viewModel.certLookup) {
+                    LookupStatus.OK -> "OK, ${viewModel.registeredHere.size} certificates"
+                    LookupStatus.UNREACHABLE -> "Unreachable"
+                    LookupStatus.UNTRUSTED -> "Proof failed"
+                    null -> "Not yet"
+                },
+                mono = false
             )
-            TextButton(
+            val ssids = viewModel.registeredHere.mapNotNull { it.wifi.ssid }.distinct()
+            if (ssids.isNotEmpty()) DetailRow("Registered SSIDs", ssids.joinToString(", "))
+            val fix = viewModel.location
+            if (fix == null) {
+                DetailRow("Location", "No fix", mono = false)
+            } else {
+                DetailRow("Location", "%.5f, %.5f".format(fix.latitude, fix.longitude))
+                DetailRow("Accuracy", "${fix.accuracyMeters.toInt()} m")
+                fix.provider?.let { DetailRow("Provider", it) }
+            }
+            DetailRow("Scan results", "${viewModel.scannedNetworks.size}")
+        }
+
+        SectionCard("Check log") {
+            Text(
+                "Every check is written as one JSON line with all login-page hops and verdicts.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            OutlinedButton(
                 onClick = {
                     val file = AppModule.portalCheckLog.latestFile()
                     if (file == null) {
@@ -88,8 +172,9 @@ fun SettingsScreen(viewModel: VerificationViewModel) {
                         }
                         context.startActivity(Intent.createChooser(share, "Share check log"))
                     }
-                }
-            ) { Text("Share latest check log") }
+                },
+                modifier = Modifier.padding(top = Space.md).heightIn(min = 48.dp)
+            ) { Text("Share latest log") }
         }
     }
 }

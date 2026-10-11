@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -21,6 +22,7 @@ import com.thesis.geckowifi.ui.theme.GeckoWifiTheme
 class MainActivity : ComponentActivity() {
 
     private var hasLocationPermission by mutableStateOf(false)
+    private var permissionDeniedBefore by mutableStateOf(false)
 
     /**
      * Fine location gates scan results on every version; Android 13+ also
@@ -37,6 +39,7 @@ class MainActivity : ComponentActivity() {
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
             hasLocationPermission = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
                 isGranted(Manifest.permission.ACCESS_FINE_LOCATION)
+            permissionDeniedBefore = !hasLocationPermission
         }
 
     private fun isGranted(permission: String) =
@@ -47,16 +50,15 @@ class MainActivity : ComponentActivity() {
         AppModule.init(applicationContext)
         enableEdgeToEdge()
 
+        // Not requested here: PermissionScreen explains why first and asks on a tap.
         hasLocationPermission = isGranted(Manifest.permission.ACCESS_FINE_LOCATION)
-        if (!requiredPermissions.all(::isGranted)) {
-            requestPermissions.launch(requiredPermissions)
-        }
 
         setContent {
             GeckoWifiTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     GeckoWifiApp(
                         hasLocationPermission = hasLocationPermission,
+                        permissionDeniedBefore = permissionDeniedBefore,
                         onRequestLocationPermission = {
                             requestPermissions.launch(requiredPermissions)
                         }

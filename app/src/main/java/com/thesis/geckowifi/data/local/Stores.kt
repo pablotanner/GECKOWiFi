@@ -1,5 +1,7 @@
 package com.thesis.geckowifi.data.local
 
+import android.content.SharedPreferences
+import androidx.core.content.edit
 import com.thesis.geckowifi.data.model.VerificationResult
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -47,9 +49,25 @@ class InMemoryHistoryStore : HistoryStore {
 interface TrustPreferenceStore {
     var strictMode: Boolean
     var queryRadiusMeters: Int
+    /** Researcher view: individual access points, manual domain, diagnostics. Off = the end-user experience. */
+    var labMode: Boolean
 }
 
 class InMemoryTrustPreferenceStore : TrustPreferenceStore {
     override var strictMode: Boolean = false
     override var queryRadiusMeters: Int = 50
+    override var labMode: Boolean = false
+}
+
+/** Survives restarts, so lab mode doesn't have to be switched on again before every test run. */
+class SharedPrefsTrustPreferenceStore(private val prefs: SharedPreferences) : TrustPreferenceStore {
+    override var strictMode: Boolean
+        get() = prefs.getBoolean("strict_mode", false)
+        set(value) = prefs.edit { putBoolean("strict_mode", value) }
+    override var queryRadiusMeters: Int
+        get() = prefs.getInt("query_radius_m", 50)
+        set(value) = prefs.edit { putInt("query_radius_m", value) }
+    override var labMode: Boolean
+        get() = prefs.getBoolean("lab_mode", false)
+        set(value) = prefs.edit { putBoolean("lab_mode", value) }
 }

@@ -9,7 +9,6 @@ import com.thesis.geckowifi.BuildConfig
 import com.thesis.geckowifi.data.local.HistoryStore
 import com.thesis.geckowifi.data.local.PortalCheckLog
 import com.thesis.geckowifi.data.local.TrustPreferenceStore
-import com.thesis.geckowifi.data.local.VerificationRecord
 import com.thesis.geckowifi.data.model.GeoCertificate
 import com.thesis.geckowifi.data.model.VerificationResult
 import com.thesis.geckowifi.data.model.VerificationState
@@ -28,6 +27,7 @@ import com.thesis.geckowifi.verification.GeoQueryEncoder
 import com.thesis.geckowifi.verification.HopVerdict
 import com.thesis.geckowifi.verification.LookupStatus
 import com.thesis.geckowifi.verification.VerificationEngine
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -38,15 +38,18 @@ import java.util.UUID
  * something if the server it's pinned to isn't also freely swappable).
  * Chosen per build flavor (`emulator` / `device`), see app/build.gradle.kts.
  */
-private const val SERVER_URL = BuildConfig.GEOPKI_URL
+const val SERVER_URL = BuildConfig.GEOPKI_URL
+
+/** Why a check ended without a verdict from the map server, so the UI can say it in plain words. */
+enum class CheckFailure { NOT_OPEN, JOIN_FAILED, PORTAL_FAILED }
 
 /**
- * A completed check bundled with the query context it was made with, for
- * Check Detail / Technical Details to display. Held as plain view state
- * (not persisted) - same lifetime as `MainActivity`'s old ad hoc fields,
- * just centralized.
+ * A completed check bundled with the query context it was made with. Kept for
+ * the whole session (newest first in [VerificationViewModel.checks]) so every
+ * History row opens its own evidence, not just the last one.
  */
 data class CheckDetail(
+    val id: String = UUID.randomUUID().toString(),
     val result: VerificationResult,
     val ssid: String?,
     val bssid: String?,
@@ -58,8 +61,21 @@ data class CheckDetail(
     /** Portal hops in order (empty for a typed-domain check or when no portal was seen). */
     val hops: List<HopVerdict> = emptyList(),
     /** How the check was made: portal discovery, or a typed/registered domain. */
-    val modeDescription: String? = null
+    val modeDescription: String? = null,
+    /** The app holds a connection to this network (false for demo entries and failed joins). */
+    val joined: Boolean = false,
+    val failure: CheckFailure? = null,
+    /** Simulated demo entry (emulator flavor): nothing was joined or probed. */
+    val isDemo: Boolean = false,
+    /** 802.1X check (login server compared) rather than a captive portal check. */
+    val isEnterprise: Boolean = false
 )
+
+/** The steps of a check, in the order the app runs them (README "How a check works"). */
+enum class CheckStep { JOIN, LOOKUP, PORTAL, COMPARE }
+
+/** A check that is still running: which steps it has and which one is in progress. */
+data class ActiveCheck(val ssid: String, val bssid: String?, val steps: List<CheckStep>, val current: CheckStep)
 
 class VerificationViewModel(
     private val networkObserver: NetworkObserver,
@@ -105,21 +121,44 @@ class VerificationViewModel(
         private set
     var isRefreshing by mutableStateOf(false)
         private set
-    var history by mutableStateOf<List<VerificationRecord>>(emptyList())
+
+    /** Every check this session, newest first. */
+    var checks by mutableStateOf<List<CheckDetail>>(emptyList())
         private set
-    var lastCheck by mutableStateOf<CheckDetail?>(null)
+    val lastCheck: CheckDetail? get() = checks.firstOrNull()
+
+    /** The check that is running right now, if any. */
+    var activeCheck by mutableStateOf<ActiveCheck?>(null)
         private set
-    /** SSID currently being joined for a check, for the Network Detail button. */
-    var connectingTo by mutableStateOf<String?>(null)
+    private var checkJob: Job? = null
+
+    /** The network the status card is about: the last check's network, until the user disconnects. */
+    var current by mutableStateOf<CheckDetail?>(null)
+        private set
+
+    /** A CONFLICT the user hasn't seen the full-screen warning for yet; the UI shows it and calls [warningShown]. */
+    var pendingWarning by mutableStateOf<String?>(null)
         private set
 
     var strictMode: Boolean
         get() = trustPreferences.strictMode
         set(value) { trustPreferences.strictMode = value }
 
-    var queryRadiusMeters: Int
-        get() = trustPreferences.queryRadiusMeters
-        set(value) { trustPreferences.queryRadiusMeters = value }
+    var queryRadiusMeters by mutableStateOf(trustPreferences.queryRadiusMeters)
+        private set
+
+    fun updateQueryRadius(meters: Int) {
+        queryRadiusMeters = meters
+        trustPreferences.queryRadiusMeters = meters
+    }
+
+    var labMode by mutableStateOf(trustPreferences.labMode)
+        private set
+
+    fun updateLabMode(enabled: Boolean) {
+        labMode = enabled
+        trustPreferences.labMode = enabled
+    }
 
     fun onPermissionResult(granted: Boolean) {
         hasLocationPermission = granted
@@ -128,7 +167,7 @@ class VerificationViewModel(
 
     /** Re-scans nearby networks and re-queries GECKO for what's registered at the current location. */
     fun refresh() {
-        if (!hasLocationPermission) return
+        if (!hasLocationPermission || isRefreshing) return
         scannedNetworks = currentScanList()
         networkObserver.requestScan { scannedNetworks = currentScanList() }
         viewModelScope.launch {
@@ -176,6 +215,50 @@ class VerificationViewModel(
         certProbe.network = joined
     }
 
+    /** The one entry point for the UI: joins and checks [network]. [domain] is the lab-mode manual override. */
+    fun startCheck(network: ScannedNetwork, domain: String = "") {
+        if (activeCheck != null) return
+        checkJob = when (network) {
+            is ScannedNetwork.Real -> checkReal(network, domain)
+            else -> checkFake(network)
+        }
+    }
+
+    /** Stops a running check (e.g. a join stuck waiting for the system dialog) and drops the connection. */
+    fun cancelCheck() {
+        checkJob?.cancel()
+        checkJob = null
+        activeCheck = null
+        networkObserver.leave()
+    }
+
+    /** Leaves the network the app joined for the current check; the status card goes back to idle. */
+    fun disconnect() {
+        networkObserver.leave()
+        current = null
+        pendingWarning = null
+    }
+
+    /** The user has seen the full-screen warning for [pendingWarning]; it isn't shown again for this check. */
+    fun warningShown() {
+        pendingWarning = null
+    }
+
+    /** The status card's network was dismissed without disconnecting (nothing joined to drop, e.g. a demo entry). */
+    fun dismissCurrent() {
+        current = null
+    }
+
+    fun checkById(id: String): CheckDetail? = checks.firstOrNull { it.id == id }
+
+    /** Most recent check of the access point [networkKey] (BSSID, or SSID if unknown), for the list badge. */
+    fun latestCheckFor(networkKey: String): CheckDetail? =
+        checks.firstOrNull { (it.bssid ?: it.ssid) == networkKey }
+
+    private fun step(network: ScannedNetwork, steps: List<CheckStep>, current: CheckStep) {
+        activeCheck = ActiveCheck(network.ssid, network.bssid, steps, current)
+    }
+
     /**
      * Every query below passes `altitude = null` (the encoder's "full
      * vertical range" case, see `GeoQueryEncoder.altitudeBounds`) rather
@@ -189,29 +272,41 @@ class VerificationViewModel(
      * narrow a security-relevant query with; `fix.altitude` is still
      * recorded on [CheckDetail] for display, just never fed into a query.
      */
-    fun checkFake(fake: ScannedNetwork, onDone: (VerificationResult) -> Unit) {
-        val fix = location ?: return
-        viewModelScope.launch {
-            rebindGeckoClient()
-            val result = when (fake) {
-                is ScannedNetwork.FakeCaptivePortal -> engine.verifyPresentedDomain(
-                    networkKey = "fake:${fake.ssid}:${fake.label}",
-                    host = fake.presumedDomain,
-                    presentedSpkiHash = fake.presumedSpkiHashBase64,
-                    lat = fix.latitude, lng = fix.longitude, altitude = null,
-                    radiusMeters = queryRadiusMeters, ssid = fake.ssid
-                )
-                is ScannedNetwork.FakeEduroam -> engine.verifyEnterprise(
-                    networkKey = "fake:${fake.ssid}:${fake.label}",
-                    observedAuthServerName = fake.presumedAuthServerName,
-                    observedCaFingerprint = fake.presumedCaFingerprintBase64,
-                    lat = fix.latitude, lng = fix.longitude, altitude = null,
-                    radiusMeters = queryRadiusMeters, ssid = fake.ssid
-                )
-                is ScannedNetwork.Real -> return@launch
+    private fun checkFake(fake: ScannedNetwork): Job? {
+        val fix = location ?: return null
+        val steps = listOf(CheckStep.LOOKUP, CheckStep.COMPARE)
+        step(fake, steps, CheckStep.LOOKUP)
+        return viewModelScope.launch {
+            try {
+                rebindGeckoClient()
+                step(fake, steps, CheckStep.COMPARE)
+                val result = when (fake) {
+                    is ScannedNetwork.FakeCaptivePortal -> engine.verifyPresentedDomain(
+                        networkKey = "fake:${fake.ssid}:${fake.label}",
+                        host = fake.presumedDomain,
+                        presentedSpkiHash = fake.presumedSpkiHashBase64,
+                        lat = fix.latitude, lng = fix.longitude, altitude = null,
+                        radiusMeters = queryRadiusMeters, ssid = fake.ssid
+                    )
+                    is ScannedNetwork.FakeEduroam -> engine.verifyEnterprise(
+                        networkKey = "fake:${fake.ssid}:${fake.label}",
+                        observedAuthServerName = fake.presumedAuthServerName,
+                        observedCaFingerprint = fake.presumedCaFingerprintBase64,
+                        lat = fix.latitude, lng = fix.longitude, altitude = null,
+                        radiusMeters = queryRadiusMeters, ssid = fake.ssid
+                    )
+                    is ScannedNetwork.Real -> return@launch
+                }
+                val mode = when (fake) {
+                    is ScannedNetwork.FakeEduroam -> "Demo entry: login server compared"
+                    else -> "Demo entry: login page compared"
+                }
+                publish(fake.ssid, fake.bssid, fake.bssid ?: fake.ssid, result, fix,
+                    modeDescription = mode, joined = false, isDemo = true,
+                    isEnterprise = fake is ScannedNetwork.FakeEduroam)
+            } finally {
+                activeCheck = null
             }
-            recordAndPublish(fake.ssid, fake.bssid, fake.bssid ?: fake.ssid, result, fix)
-            onDone(result)
         }
     }
 
@@ -234,76 +329,86 @@ class VerificationViewModel(
      *
      * Every check is appended to [checkLog] (JSON lines, see [PortalCheckLog]).
      */
-    fun checkReal(network: ScannedNetwork.Real, domain: String, onDone: (VerificationResult) -> Unit) {
-        val fix = location ?: return
-        if (connectingTo != null) return
+    private fun checkReal(network: ScannedNetwork.Real, domain: String): Job? {
+        val fix = location ?: return null
         val networkKey = network.bssid ?: network.ssid
-        viewModelScope.launch {
-            if (!network.isOpen) {
-                onDone(VerificationResult(VerificationState.UNREACHABLE, domain,
-                    reason = "only open networks can be joined by this prototype"))
-                return@launch
-            }
-            connectingTo = network.ssid
-            val joined = try {
-                networkObserver.join(network.ssid, network.bssid)
-            } finally {
-                connectingTo = null
-            }
-            if (joined == null) {
-                val result = VerificationResult(VerificationState.UNREACHABLE, domain,
-                    reason = "could not join ${network.ssid} (${network.bssid})")
-                finishCheck(network, networkKey, fix, result, mode = "join", onDone = onDone)
-                return@launch
-            }
-            rebindGeckoClient()
-            // The startup query ran before any network was joined; redo it now the server is reachable.
-            engine.registeredHere(fix.latitude, fix.longitude, null, queryRadiusMeters).let {
-                registeredHere = it.certificates
-                certLookup = it.status
-            }
+        val typed = domain.trim()
+        val steps = if (typed.isEmpty()) CheckStep.entries.toList()
+        else listOf(CheckStep.JOIN, CheckStep.LOOKUP, CheckStep.COMPARE)
 
-            val typed = domain.trim()
-            if (typed.isNotEmpty()) {
-                val result = verifyDomain(network, networkKey, typed, fix)
-                finishCheck(network, networkKey, fix, result, mode = "domain", onDone = onDone)
-                return@launch
-            }
+        if (!network.isOpen) {
+            val result = VerificationResult(VerificationState.UNREACHABLE, typed,
+                reason = "only open networks can be joined by this prototype")
+            publish(network.ssid, network.bssid, networkKey, result, fix, failure = CheckFailure.NOT_OPEN)
+            return null
+        }
 
-            val discovery = hopSource.discover(joined)
-            when (val outcome = discovery.outcome) {
-                Discovery.Outcome.PortalReached -> {
-                    val check = engine.verifyPortalHops(
-                        networkKey, discovery.hops, judgeFinalPlainHop = true,
-                        fix.latitude, fix.longitude, null, queryRadiusMeters, network.ssid
-                    )
-                    finishCheck(network, networkKey, fix, check.overall, "discovery", outcome, check.hops, onDone)
+        step(network, steps, CheckStep.JOIN)
+        return viewModelScope.launch {
+            try {
+                val joined = networkObserver.join(network.ssid, network.bssid)
+                if (joined == null) {
+                    val result = VerificationResult(VerificationState.UNREACHABLE, typed,
+                        reason = "could not join ${network.ssid} (${network.bssid})")
+                    finishCheck(network, networkKey, fix, result, mode = "join", failure = CheckFailure.JOIN_FAILED)
+                    return@launch
                 }
-                Discovery.Outcome.NoPortal -> {
-                    // No portal in the way: check the network's registered portal domain directly.
-                    val registered = registeredDomainFor(network.ssid)
-                    val result = if (registered == null) {
-                        VerificationResult(VerificationState.UNVERIFIED, "",
-                            reason = "no captive portal seen, and nothing registered here lists a portal domain for ${network.ssid}")
-                    } else {
-                        verifyDomain(network, networkKey, registered, fix).let {
-                            it.copy(reason = "no captive portal seen (already logged in?) - checked registered $registered: ${it.reason}")
-                        }
+                step(network, steps, CheckStep.LOOKUP)
+                rebindGeckoClient()
+                // The startup query ran before any network was joined; redo it now the server is reachable.
+                engine.registeredHere(fix.latitude, fix.longitude, null, queryRadiusMeters).let {
+                    registeredHere = it.certificates
+                    certLookup = it.status
+                }
+
+                if (typed.isNotEmpty()) {
+                    step(network, steps, CheckStep.COMPARE)
+                    val result = verifyDomain(network, networkKey, typed, fix)
+                    finishCheck(network, networkKey, fix, result, mode = "domain")
+                    return@launch
+                }
+
+                step(network, steps, CheckStep.PORTAL)
+                val discovery = hopSource.discover(joined)
+                step(network, steps, CheckStep.COMPARE)
+                when (val outcome = discovery.outcome) {
+                    Discovery.Outcome.PortalReached -> {
+                        val check = engine.verifyPortalHops(
+                            networkKey, discovery.hops, judgeFinalPlainHop = true,
+                            fix.latitude, fix.longitude, null, queryRadiusMeters, network.ssid
+                        )
+                        finishCheck(network, networkKey, fix, check.overall, "discovery", outcome, check.hops)
                     }
-                    finishCheck(network, networkKey, fix, result, "discovery", outcome,
-                        discovery.hops.map { HopVerdict(it, null) }, onDone)
+                    Discovery.Outcome.NoPortal -> {
+                        // No portal in the way: check the network's registered portal domain directly.
+                        val registered = registeredDomainFor(network.ssid)
+                        val result = if (registered == null) {
+                            VerificationResult(VerificationState.UNVERIFIED, "",
+                                reason = "no captive portal seen, and nothing registered here lists a portal domain for ${network.ssid}")
+                        } else {
+                            verifyDomain(network, networkKey, registered, fix).let {
+                                it.copy(reason = "no captive portal seen (already logged in?) - checked registered $registered: ${it.reason}")
+                            }
+                        }
+                        finishCheck(network, networkKey, fix, result, "discovery", outcome,
+                            discovery.hops.map { HopVerdict(it, null) })
+                    }
+                    is Discovery.Outcome.Failed -> {
+                        // Judge what was seen: a key mismatch before the failure is still a CONFLICT.
+                        val partial = engine.verifyPortalHops(
+                            networkKey, discovery.hops, judgeFinalPlainHop = false,
+                            fix.latitude, fix.longitude, null, queryRadiusMeters, network.ssid
+                        )
+                        val conflict = partial.overall.state == VerificationState.CONFLICT
+                        val result = if (conflict) partial.overall
+                        else VerificationResult(VerificationState.UNREACHABLE, discovery.hops.lastOrNull()?.host.orEmpty(),
+                            reason = "portal discovery failed: ${outcome.reason}")
+                        finishCheck(network, networkKey, fix, result, "discovery", outcome, partial.hops,
+                            failure = if (conflict) null else CheckFailure.PORTAL_FAILED)
+                    }
                 }
-                is Discovery.Outcome.Failed -> {
-                    // Judge what was seen: a key mismatch before the failure is still a CONFLICT.
-                    val partial = engine.verifyPortalHops(
-                        networkKey, discovery.hops, judgeFinalPlainHop = false,
-                        fix.latitude, fix.longitude, null, queryRadiusMeters, network.ssid
-                    )
-                    val result = if (partial.overall.state == VerificationState.CONFLICT) partial.overall
-                    else VerificationResult(VerificationState.UNREACHABLE, discovery.hops.lastOrNull()?.host.orEmpty(),
-                        reason = "portal discovery failed: ${outcome.reason}")
-                    finishCheck(network, networkKey, fix, result, "discovery", outcome, partial.hops, onDone)
-                }
+            } finally {
+                activeCheck = null
             }
         }
     }
@@ -325,7 +430,7 @@ class VerificationViewModel(
         mode: String,
         outcome: Discovery.Outcome? = null,
         hops: List<HopVerdict> = emptyList(),
-        onDone: (VerificationResult) -> Unit
+        failure: CheckFailure? = null
     ) {
         checkLog?.append(
             PortalCheckLog.CheckEntry(
@@ -344,26 +449,30 @@ class VerificationViewModel(
             )
         )
         val modeDescription = when (mode) {
-            "discovery" -> "Portal detected by the app" + if (outcome == Discovery.Outcome.NoPortal) " (none seen)" else ""
-            "domain" -> "Typed domain"
+            "discovery" -> if (outcome == Discovery.Outcome.NoPortal) "No login page appeared; the registered one was checked directly"
+            else "Login page found by following the network's redirects"
+            "domain" -> "Manual domain (lab mode)"
             else -> null
         }
-        recordAndPublish(network.ssid, network.bssid, networkKey, result, fix, hops, modeDescription)
-        onDone(result)
+        publish(network.ssid, network.bssid, networkKey, result, fix, hops, modeDescription,
+            joined = failure != CheckFailure.JOIN_FAILED, failure = failure)
     }
 
-    private fun recordAndPublish(
+    private fun publish(
         ssid: String?,
         bssid: String?,
         networkKey: String,
         result: VerificationResult,
         fix: LocationFix,
         hops: List<HopVerdict> = emptyList(),
-        modeDescription: String? = null
+        modeDescription: String? = null,
+        joined: Boolean = false,
+        failure: CheckFailure? = null,
+        isDemo: Boolean = false,
+        isEnterprise: Boolean = false
     ) {
         historyStore.record(networkKey, ssid, result, fix.latitude, fix.longitude)
-        history = historyStore.recent()
-        lastCheck = CheckDetail(
+        val detail = CheckDetail(
             result = result,
             ssid = ssid,
             bssid = bssid,
@@ -373,15 +482,18 @@ class VerificationViewModel(
             radiusMeters = queryRadiusMeters,
             altitude = fix.altitude,
             hops = hops,
-            modeDescription = modeDescription
+            modeDescription = modeDescription,
+            joined = joined,
+            failure = failure,
+            isDemo = isDemo,
+            isEnterprise = isEnterprise
         )
+        checks = listOf(detail) + checks
+        current = detail
+        if (result.state == VerificationState.CONFLICT) pendingWarning = detail.id
     }
 
     override fun onCleared() {
         networkObserver.leave()
     }
-
-    /** For Network Detail's per-network History section. */
-    fun historyFor(networkKey: String): List<VerificationRecord> =
-        history.filter { it.networkKey == networkKey }
 }
