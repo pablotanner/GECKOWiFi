@@ -65,18 +65,6 @@ The map server is a local [geopki](https://github.com/netsec-ethz/geopki)
 instance. Its public key is pinned in `PinnedServerKey.kt`, so a new server
 means updating that key.
 
-## Useful
-
-To check which Router the tablet is connected to, run:
-```powershell
-adb shell "dumpsys wifi | grep -m1 mWifiInfo"
-```
-This prints something like:
-```
-mWifiInfo SSID: "GeckoTest", BSSID: 94:83:c4:97:c2:3a, MAC: 0a:61:9b:16:99:b7, IP: /192.168.8.194, Security type: 0, Supplicant state: COMPLETED, Wi-Fi standard: 11n, RSSI: -30,
-```
-Looking at the BSSID tells us the router (Router A ends with :3a, Router B ends with :47)
-
 ## Documentation
 
 - [docs/lab-setup.md](docs/lab-setup.md) – the hardware testbed: routers,
@@ -86,6 +74,64 @@ Looking at the BSSID tells us the router (Router A ends with :3a, Router B ends 
 - [docs/experiments.md](docs/experiments.md) – attack scenarios and results
 - [portal/README.md](portal/README.md) – the portal server
 
+## Cheat Sheet
+### Tablet Related
+To check which Router the tablet is connected to, run:
+```powershell
+adb shell "dumpsys wifi | grep -m1 mWifiInfo"
+```
+This prints something like (BSSID of Router A ends with :3a, Router B ends with :47):
+```powershell
+mWifiInfo SSID: "GeckoTest", BSSID: 94:83:c4:97:c2:3a, MAC: 0a:61:9b:16:99:b7, IP: /192.168.8.194, Security type: 0, Supplicant state: COMPLETED, Wi-Fi standard: 11n, RSSI: -30,
+```
+
+Does the tablet have internet / reach the server?
+```powershell
+adb shell ping -c3 1.1.1.1          # raw (works only once authenticated)
+adb shell ping -c3 example.com      # DNS working?
+adb shell ip addr show wlan0        # tablet IP
+adb shell ip route                  # gateway = which router
+```
+### Router Related
+To check if router has internet
+```powershell
+ssh mango-a "ping -c3 1.1.1.1"                          # raw reachability
+ssh mango-a "nslookup connectivitycheck.gstatic.com"    # public DNS
+```
+Can the router reach the map server? (404 = reachable)
+```powershell
+ssh mango-a "curl -s -o /dev/null -w '%{http_code}\n' http://192.168.137.1:1234/ || echo FAIL" 
+```
+
+### GECKO App
+```powershell
+./gradlew installDeviceDebug                        # (re)install the app
+adb logcat -c                                       # clear, then run a check
+adb logcat -s PortalDiscovery PortalCheckLog CertProbe NetworkObserver GeckoClient VerificationViewModel
+adb pull /sdcard/Android/data/com.thesis.geckowifi/files/portal-checks/ # per-check JSON logs
+```
+
+### openNDS (the gate)
+```powershell
+ssh mango-a "ndsctl status"                 # running? client counts
+ssh mango-a "ndsctl json"                   # clients + MAC + auth state
+ssh mango-a "ndsctl auth <tablet-mac>"      # force-authenticate (skip portal) — for P1 tests
+ssh mango-a "ndsctl deauth <tablet-mac>"    # log the client out (do before each check)
+ssh mango-a "/etc/init.d/opennds restart"   # restart if it's wedged
+ssh mango-a "uci show opennds | grep -E 'fas|preauth|trusted'"   # FAS target + whitelist
+```
+### DNS / SSID on router B (scenario setup)
+```powershell
+ssh mango-b "uci show dhcp | grep address"         # B's DNS spoofing entries
+ssh mango-b "uci get wireless.wifi2g.ssid"         # current SSID
+ssh mango-b "iwinfo"                               # BSSID, channel, associated stations
+ssh mango-b "nft list ruleset | grep -i gecko"     # S7 firewall block present?
+```
+### Scenario Control
+```powershell
+.\scenario.ps1 S3      # configure B (DNS/openNDS/firewall) + print the laptop portals to start
+.\reset.ps1            # return B to the evil-twin baseline (also clears S7 rule / N6 SSID)
+```
 ## Status
 
 This is a research prototype. Working on real hardware: joining a specific
