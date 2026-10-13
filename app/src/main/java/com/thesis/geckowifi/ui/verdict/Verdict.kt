@@ -33,8 +33,8 @@ data class Verdict(
 )
 
 /** What GECKO does and doesn't vouch for (design-decisions.md, section 3). Shown with every verified result. */
-const val SCOPE_NOTE =
-    "GECKO confirms who runs the login page. It doesn't protect what you do after logging in."
+const val SCOPE_NOTE = "GECKO confirms who runs the captive portal page."
+    //"GECKO confirms who runs the login page. It doesn't protect what you do after logging in."
 
 fun CheckDetail.conflictCause(): ConflictCause? {
     if (result.state != VerificationState.CONFLICT) return null

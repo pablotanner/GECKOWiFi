@@ -22,7 +22,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import kotlin.time.Duration
-import kotlin.time.Duration.Companion.hours
 import geopki.Request as ProtoRequest
 import geopki.Response as ProtoResponse
 import geopki.XYBitString as ProtoXYBitString
@@ -102,17 +101,23 @@ class GeckoClient(
      */
     private val fallbackClient: OkHttpClient? = if (network != null) OkHttpClient() else null,
     /**
-     * A signed map head older than this is rejected as a possible replay: the
-     * log is append-only and the map head carries a (signed) timestamp, but
-     * nothing proves it is *recent*, so an attacker who can replay an older,
-     * still-validly-signed answer (one from before a certificate was
-     * registered, revoked, or re-keyed) would otherwise have it accepted - see
-     * docs/experiments.md (G4) and R2. GECKO itself does not define a maximum
-     * map-head age; 24 h is a working default, the order of a Certificate
-     * Transparency maximum merge delay, and belongs in the thesis as a chosen
-     * parameter. Relies on a roughly correct device clock.
+     * If set, a signed map head older than this is rejected as a possible
+     * replay (see docs/experiments.md, G4 / R2): an attacker who replays an
+     * older, still-validly-signed answer - one from before a certificate was
+     * registered, revoked or re-keyed - would otherwise have it accepted.
+     *
+     * Off by default (`null`), on purpose. This is only a valid staleness
+     * signal if the map server **re-signs the map head on a schedule**, the way
+     * a Certificate Transparency log periodically re-signs its tree head. The
+     * current geopki prototype server signs the map head only when the map
+     * changes (a certificate insert/merge), so a genuine "latest" map head can
+     * be days old, and comparing its timestamp with `now` wrongly rejects every
+     * response (confirmed on hardware 2026-10-13). Enable this (e.g. 24 h, the
+     * order of a CT maximum merge delay) only against a server that re-signs
+     * periodically; GECKO itself does not yet define that cadence, which is the
+     * point to make in the thesis. Relies on a roughly correct device clock.
      */
-    private val maxMapHeadAge: Duration = 24.hours,
+    private val maxMapHeadAge: Duration? = null,
     /** Nanoseconds since the Unix epoch (the map head's time base); injectable for tests. */
     private val nowNanos: () -> Long = { System.currentTimeMillis() * 1_000_000L }
 ) {
@@ -188,15 +193,17 @@ class GeckoClient(
                     return@withContext GeckoResponse.ProofFailure(e.message ?: "proof verification failed")
                 }
 
-                // Freshness (see docs/experiments.md, G4): the signed map head is
-                // authenticated above, but an attacker can replay an older, still
-                // validly-signed answer. Reject one whose signed timestamp is too old,
-                // so a pre-registration / pre-rotation state can't be served back.
-                val mapHeadNanos = protoResponse.geopki_SignedMapHead?.Timestamp ?: 0L
-                if (isMapHeadStale(mapHeadNanos, nowNanos(), maxMapHeadAge.inWholeNanoseconds)) {
-                    return@withContext GeckoResponse.ProofFailure(
-                        "map server answer is stale (signed map head older than $maxMapHeadAge) - possible replay"
-                    )
+                // Freshness (see docs/experiments.md, G4). Only meaningful when the
+                // server re-signs the map head on a schedule, so it is opt-in - see
+                // maxMapHeadAge's doc for why it is off by default on this testbed.
+                val maxAge = maxMapHeadAge
+                if (maxAge != null) {
+                    val mapHeadNanos = protoResponse.geopki_SignedMapHead?.Timestamp ?: 0L
+                    if (isMapHeadStale(mapHeadNanos, nowNanos(), maxAge.inWholeNanoseconds)) {
+                        return@withContext GeckoResponse.ProofFailure(
+                            "map server answer is stale (signed map head older than $maxAge) - possible replay"
+                        )
+                    }
                 }
 
                 // Completeness the other direction (see docs/experiments.md, G1).
