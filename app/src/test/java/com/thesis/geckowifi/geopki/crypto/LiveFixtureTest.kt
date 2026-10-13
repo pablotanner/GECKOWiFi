@@ -73,4 +73,44 @@ class LiveFixtureTest {
         val protoResponse = ProtoResponse.ADAPTER.decode(fixture("response.bin"))
         ensureConsistency(protoResponse, publicKey) // throws on failure
     }
+
+    /**
+     * G1 completeness (see docs/experiments.md and GeckoClient): the honest
+     * captured response delivers every certificate its proof references, and a
+     * stripped copy - same signed nodes, certificate bytes removed - is caught
+     * as withholding. Replicates GeckoClient's referenced-vs-delivered check
+     * against real server bytes.
+     */
+    private fun deliveredHashes(response: ProtoResponse): Set<String> =
+        response.Certificates.mapTo(HashSet()) {
+            java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(SHA256Hash.sha256(it.toByteArray()).bytes)
+        }
+
+    @Test
+    fun honestResponse_deliversEveryReferencedCertificate() {
+        val protoRequest = ProtoRequest.ADAPTER.decode(fixture("request.bin"))
+        val protoResponse = ProtoResponse.ADAPTER.decode(fixture("response.bin"))
+        val query = GeoPkiQuery.fromProtoRequest(protoRequest)
+
+        val referenced = verifyResponse(protoResponse, query, publicKey)
+        assertTrue("fixture should reference at least one certificate", referenced.isNotEmpty())
+        assertTrue("honest response withholds nothing", (referenced - deliveredHashes(protoResponse)).isEmpty())
+    }
+
+    @Test
+    fun strippedResponse_isDetectedAsWithholding() {
+        val protoRequest = ProtoRequest.ADAPTER.decode(fixture("request.bin"))
+        val protoResponse = ProtoResponse.ADAPTER.decode(fixture("response.bin"))
+        val query = GeoPkiQuery.fromProtoRequest(protoRequest)
+
+        // Same signed map head and nodes; only the certificate bytes removed.
+        val stripped = protoResponse.copy(Certificates = emptyList())
+
+        // The proof still verifies (nodes untouched) and still references the cert,
+        val referenced = verifyResponse(stripped, query, publicKey)
+        assertTrue(referenced.isNotEmpty())
+        // but the certificate is no longer delivered -> withholding is detectable.
+        assertTrue("stripped cert must be flagged as withheld",
+            (referenced - deliveredHashes(stripped)).isNotEmpty())
+    }
 }

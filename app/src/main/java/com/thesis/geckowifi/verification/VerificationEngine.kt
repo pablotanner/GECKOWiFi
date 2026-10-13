@@ -53,7 +53,7 @@ class VerificationEngine(
         val bitStrings = encoder.encodeQuery(lat, lng, radiusMeters)
         val (minAlt, maxAlt) = encoder.altitudeBounds(altitude, radiusMeters)
         return when (val response = gecko.queryLocation(bitStrings, minAlt, maxAlt)) {
-            is GeckoResponse.Success -> LocationLookup(LookupStatus.OK, response.validCertificates())
+            is GeckoResponse.Success -> LocationLookup(LookupStatus.OK, response.validCertificates(lat, lng, radiusMeters))
             // The caller must tell "nothing registered here" apart from "couldn't
             // get a trustworthy answer" - an empty list alone can't. On a WiFi-only
             // device this query is usually unreachable until a network is joined.
@@ -118,7 +118,7 @@ class VerificationEngine(
             is GeckoResponse.ProofFailure ->
                 VerificationResult(VerificationState.CONFLICT, host, reason = response.cause) // failed proof = hostile, not absent
             is GeckoResponse.Success -> {
-                val candidates = filterBySsid(response.validCertificates(), ssid) ?: return noMatchingSsid(host)
+                val candidates = filterBySsid(response.validCertificates(lat, lng, radiusMeters), ssid) ?: return noMatchingSsid(host)
                 sessionFor(networkKey).observe(host, candidates, presentedSpkiHash).applyExclusivity(ssid).withResponseMetadata(response)
             }
         }
@@ -172,7 +172,7 @@ class VerificationEngine(
                 return unjudged(VerificationResult(VerificationState.CONFLICT, firstHost, reason = response.cause))
             is GeckoResponse.Success -> response
         }
-        val candidates = filterBySsid(success.validCertificates(), ssid) ?: return unjudged(noMatchingSsid(firstHost))
+        val candidates = filterBySsid(success.validCertificates(lat, lng, radiusMeters), ssid) ?: return unjudged(noMatchingSsid(firstHost))
 
         val session = sessionFor(networkKey).also { it.reset() }
         val verdicts = hops.map { hop ->
@@ -217,7 +217,7 @@ class VerificationEngine(
             is GeckoResponse.ProofFailure ->
                 VerificationResult(VerificationState.CONFLICT, observedAuthServerName, reason = response.cause)
             is GeckoResponse.Success -> {
-                val candidates = filterBySsid(response.validCertificates(), ssid) ?: return noMatchingSsid(observedAuthServerName)
+                val candidates = filterBySsid(response.validCertificates(lat, lng, radiusMeters), ssid) ?: return noMatchingSsid(observedAuthServerName)
                 evaluateEnterpriseNetwork(observedAuthServerName, observedCaFingerprint, candidates).applyExclusivity(ssid).withResponseMetadata(response)
             }
         }
@@ -226,12 +226,21 @@ class VerificationEngine(
     }
 
     /**
-     * Expired certificates are treated as if they weren't registered at all -
-     * their domains/keys must not anchor or verify anything any more.
+     * The certificates from this response that may actually be used to judge
+     * the network: dropped if expired (their domains/keys must not anchor or
+     * verify anything any more) or if their registered area does not reach the
+     * device ([GeoCertificate.coversLocation]). The area check closes the gap
+     * where the map server's cell-based query returns a certificate registered
+     * for the same SSID at *another* place (see docs/experiments.md, G2/G3):
+     * the query cell is coarser than both the area and the search circle, so
+     * presence in the response is not by itself proof the registration applies
+     * where the device is.
      */
-    private fun GeckoResponse.Success.validCertificates(): List<GeoCertificate> {
+    private fun GeckoResponse.Success.validCertificates(
+        lat: Double, lng: Double, radiusMeters: Int
+    ): List<GeoCertificate> {
         val now = clock()
-        return certificates.filter { it.isValidAt(now) }
+        return certificates.filter { it.isValidAt(now) && it.coversLocation(lat, lng, radiusMeters) }
     }
 
     /** Returns `null` (meaning "stop, nothing to warn about") only when [ssid] was given and nothing matched. */

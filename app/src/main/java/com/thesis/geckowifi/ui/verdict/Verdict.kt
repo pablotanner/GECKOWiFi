@@ -4,6 +4,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.GppBad
 import androidx.compose.material.icons.outlined.GppGood
+import androidx.compose.material.icons.outlined.LocationSearching
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.WifiOff
@@ -106,6 +107,11 @@ fun CheckDetail.verdict(): Verdict {
                 Tone.NEUTRAL, "Not checked", "Couldn't load the login page",
                 "The network's login page didn't respond, so there was nothing to compare.",
                 Icons.Outlined.CloudOff
+            )
+            CheckFailure.LOW_ACCURACY -> Verdict(
+                Tone.NEUTRAL, "Not checked", "Your location isn't precise enough",
+                "GECKO needs a sharper location fix to tell which registration applies here. Move to a spot with a clearer sky view and try again.",
+                Icons.Outlined.LocationSearching
             )
             null -> Verdict(
                 Tone.NEUTRAL, "Not checked", "Couldn't reach the map server",

@@ -30,6 +30,7 @@ import com.thesis.geckowifi.verification.VerificationEngine
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.util.UUID
+import kotlin.math.ceil
 
 /**
  * The one demo server this build's [com.thesis.geckowifi.data.remote.PinnedServerKey]
@@ -49,7 +50,15 @@ const val SERVER_URL = BuildConfig.GEOPKI_URL
 enum class QueryRoute { MOBILE_DATA, JOINED_WIFI, DEFAULT_ROUTE }
 
 /** Why a check ended without a verdict from the map server, so the UI can say it in plain words. */
-enum class CheckFailure { NOT_OPEN, JOIN_FAILED, PORTAL_FAILED }
+enum class CheckFailure { NOT_OPEN, JOIN_FAILED, PORTAL_FAILED, LOW_ACCURACY }
+
+/**
+ * The map query's hard radius cap (see [com.thesis.geckowifi.verification.GeoQueryEncoder]).
+ * When the location fix is less accurate than this, the query can't be made wide
+ * enough to be sure it covers the device, so a check is refused rather than risking
+ * a silent miss (see docs/experiments.md, G5).
+ */
+const val MAX_QUERY_RADIUS_METERS = 253
 
 /**
  * A completed check bundled with the query context it was made with. Kept for
@@ -162,6 +171,18 @@ class VerificationViewModel(
         trustPreferences.queryRadiusMeters = meters
     }
 
+    /**
+     * Radius actually used for a query: the user's setting, but never smaller
+     * than the GPS uncertainty, capped at the protocol max. A fixed radius
+     * narrower than the real uncertainty can miss the device's true position,
+     * so the registration isn't returned and the check goes silently
+     * UNVERIFIED (see docs/experiments.md, G5). Widening to the accuracy keeps
+     * the query honest about how precisely the device is actually located.
+     */
+    private fun effectiveRadius(fix: LocationFix): Int =
+        maxOf(queryRadiusMeters, ceil(fix.accuracyMeters.toDouble()).toInt())
+            .coerceAtMost(MAX_QUERY_RADIUS_METERS)
+
     var labMode by mutableStateOf(trustPreferences.labMode)
         private set
 
@@ -198,7 +219,7 @@ class VerificationViewModel(
                     // Not fix.altitude - see the doc comment below on why this
                     // query deliberately never narrows by device altitude.
                     altitude = null,
-                    radiusMeters = queryRadiusMeters
+                    radiusMeters = effectiveRadius(fix)
                 )
                 registeredHere = lookup.certificates
                 certLookup = lookup.status
@@ -305,14 +326,14 @@ class VerificationViewModel(
                         host = fake.presumedDomain,
                         presentedSpkiHash = fake.presumedSpkiHashBase64,
                         lat = fix.latitude, lng = fix.longitude, altitude = null,
-                        radiusMeters = queryRadiusMeters, ssid = fake.ssid
+                        radiusMeters = effectiveRadius(fix), ssid = fake.ssid
                     )
                     is ScannedNetwork.FakeEduroam -> engine.verifyEnterprise(
                         networkKey = "fake:${fake.ssid}:${fake.label}",
                         observedAuthServerName = fake.presumedAuthServerName,
                         observedCaFingerprint = fake.presumedCaFingerprintBase64,
                         lat = fix.latitude, lng = fix.longitude, altitude = null,
-                        radiusMeters = queryRadiusMeters, ssid = fake.ssid
+                        radiusMeters = effectiveRadius(fix), ssid = fake.ssid
                     )
                     is ScannedNetwork.Real -> return@launch
                 }
@@ -356,6 +377,13 @@ class VerificationViewModel(
             return null
         }
 
+        if (fix.accuracyMeters > MAX_QUERY_RADIUS_METERS) {
+            val result = VerificationResult(VerificationState.UNREACHABLE, "",
+                reason = "location too imprecise (±${fix.accuracyMeters.toInt()} m); a reliable check needs it within $MAX_QUERY_RADIUS_METERS m")
+            publish(network.ssid, network.bssid, networkKey, result, fix, failure = CheckFailure.LOW_ACCURACY)
+            return null
+        }
+
         step(network, steps, CheckStep.JOIN)
         return viewModelScope.launch {
             try {
@@ -366,10 +394,14 @@ class VerificationViewModel(
                     finishCheck(network, networkKey, fix, result, mode = "join", failure = CheckFailure.JOIN_FAILED)
                     return@launch
                 }
+                // A cached verdict must never survive a (re)join: the BSSID a key is
+                // keyed on can be spoofed, so an attacker taking over that BSSID would
+                // otherwise inherit an earlier VERIFIED (see docs/experiments.md, G6).
+                engine.onNetworkChanged(networkKey)
                 step(network, steps, CheckStep.LOOKUP)
                 rebindGeckoClient()
                 // The startup query ran before any network was joined; redo it now the server is reachable.
-                engine.registeredHere(fix.latitude, fix.longitude, null, queryRadiusMeters).let {
+                engine.registeredHere(fix.latitude, fix.longitude, null, effectiveRadius(fix)).let {
                     registeredHere = it.certificates
                     certLookup = it.status
                 }
@@ -381,7 +413,7 @@ class VerificationViewModel(
                     Discovery.Outcome.PortalReached -> {
                         val check = engine.verifyPortalHops(
                             networkKey, discovery.hops, judgeFinalPlainHop = true,
-                            fix.latitude, fix.longitude, null, queryRadiusMeters, network.ssid
+                            fix.latitude, fix.longitude, null, effectiveRadius(fix), network.ssid
                         )
                         finishCheck(network, networkKey, fix, check.overall, "discovery", outcome, check.hops)
                     }
@@ -403,7 +435,7 @@ class VerificationViewModel(
                         // Judge what was seen: a key mismatch before the failure is still a CONFLICT.
                         val partial = engine.verifyPortalHops(
                             networkKey, discovery.hops, judgeFinalPlainHop = false,
-                            fix.latitude, fix.longitude, null, queryRadiusMeters, network.ssid
+                            fix.latitude, fix.longitude, null, effectiveRadius(fix), network.ssid
                         )
                         val conflict = partial.overall.state == VerificationState.CONFLICT
                         val result = if (conflict) partial.overall
@@ -425,7 +457,7 @@ class VerificationViewModel(
         networkKey = networkKey,
         host = host,
         lat = fix.latitude, lng = fix.longitude, altitude = null,
-        radiusMeters = queryRadiusMeters, ssid = network.ssid
+        radiusMeters = effectiveRadius(fix), ssid = network.ssid
     )
 
     private fun finishCheck(
@@ -484,7 +516,7 @@ class VerificationViewModel(
             lat = fix.latitude,
             lng = fix.longitude,
             accuracyMeters = fix.accuracyMeters,
-            radiusMeters = queryRadiusMeters,
+            radiusMeters = effectiveRadius(fix),
             altitude = fix.altitude,
             hops = hops,
             modeDescription = modeDescription,

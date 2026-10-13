@@ -1,5 +1,6 @@
 package com.thesis.geckowifi.verification
 
+import com.thesis.geckowifi.data.model.GeoCertArea
 import com.thesis.geckowifi.data.model.GeoCertificate
 import com.thesis.geckowifi.data.model.PortalDomain
 import com.thesis.geckowifi.data.model.PortalDomainRole
@@ -306,5 +307,40 @@ class PortalHopsVerificationTest {
         assertEquals(VerificationState.CONFLICT, second.overall.state)
         assertEquals(true, second.overall.reason?.contains("SSID exclusive"))
         assertEquals(false, second.overall.reason?.contains("off-anchor"))
+    }
+
+    /** A rectangular MultiPolygon area; points are [lng, lat] as in a GeoCertificate. */
+    private fun areaAround(minLng: Double, minLat: Double, maxLng: Double, maxLat: Double) =
+        GeoCertArea(coordinates = listOf(listOf(listOf(
+            listOf(minLng, minLat), listOf(maxLng, minLat),
+            listOf(maxLng, maxLat), listOf(minLng, maxLat), listOf(minLng, minLat)
+        ))))
+
+    // The check runs at 47.3777, 8.5484 (see check()).
+
+    @Test
+    fun g2_certificateRegisteredForAnotherArea_isDroppedAndRegisteredSsidGoesSilent() = runTest {
+        // Same SSID + genuine key, but the area is ~60 km away (Bern). The map
+        // server's coarse cell can still return it; the client must not use it.
+        val elsewhere = mangoA.copy(areas = listOf(areaAround(7.440, 46.945, 7.450, 46.950)))
+        val result = check(geckoReturning(elsewhere), genuineChain)
+        // Nothing covers this location, so after the area filter the SSID has no
+        // registration here: silent UNVERIFIED, never a false VERIFIED or warning.
+        assertEquals(VerificationState.UNVERIFIED, result.overall.state)
+    }
+
+    @Test
+    fun certificateWhoseAreaCoversTheDevice_stillVerifies() = runTest {
+        val here = mangoA.copy(areas = listOf(areaAround(8.5480, 47.3775, 8.5490, 47.3780)))
+        val result = check(geckoReturning(here), genuineChain)
+        assertEquals(VerificationState.VERIFIED, result.overall.state)
+    }
+
+    @Test
+    fun certificateJustOutsideButWithinQueryRadius_stillCovers() = runTest {
+        // Device is ~11 m south of this area's edge (0.0001 deg lat), well within the 50 m query radius.
+        val justNorth = mangoA.copy(areas = listOf(areaAround(8.5480, 47.3778, 8.5490, 47.3783)))
+        val result = check(geckoReturning(justNorth), genuineChain)
+        assertEquals(VerificationState.VERIFIED, result.overall.state)
     }
 }

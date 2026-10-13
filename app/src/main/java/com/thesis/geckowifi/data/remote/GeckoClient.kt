@@ -6,6 +6,8 @@ import com.thesis.geckowifi.data.model.GeoCertificate
 import com.thesis.geckowifi.geopki.bitstring.RawXYBitString
 import com.thesis.geckowifi.geopki.crypto.GeoPkiQuery
 import com.thesis.geckowifi.geopki.crypto.GeoPkiVerificationException
+import com.thesis.geckowifi.geopki.crypto.SHA256Hash
+import java.util.Base64
 import com.thesis.geckowifi.geopki.crypto.ensureConsistency
 import com.thesis.geckowifi.geopki.crypto.verifyResponse
 import com.thesis.geckowifi.verification.XYBitString
@@ -19,6 +21,8 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.hours
 import geopki.Request as ProtoRequest
 import geopki.Response as ProtoResponse
 import geopki.XYBitString as ProtoXYBitString
@@ -96,7 +100,21 @@ class GeckoClient(
      * a production build should probably surface this as a visible warning
      * rather than silently degrading.
      */
-    private val fallbackClient: OkHttpClient? = if (network != null) OkHttpClient() else null
+    private val fallbackClient: OkHttpClient? = if (network != null) OkHttpClient() else null,
+    /**
+     * A signed map head older than this is rejected as a possible replay: the
+     * log is append-only and the map head carries a (signed) timestamp, but
+     * nothing proves it is *recent*, so an attacker who can replay an older,
+     * still-validly-signed answer (one from before a certificate was
+     * registered, revoked, or re-keyed) would otherwise have it accepted - see
+     * docs/experiments.md (G4) and R2. GECKO itself does not define a maximum
+     * map-head age; 24 h is a working default, the order of a Certificate
+     * Transparency maximum merge delay, and belongs in the thesis as a chosen
+     * parameter. Relies on a roughly correct device clock.
+     */
+    private val maxMapHeadAge: Duration = 24.hours,
+    /** Nanoseconds since the Unix epoch (the map head's time base); injectable for tests. */
+    private val nowNanos: () -> Long = { System.currentTimeMillis() * 1_000_000L }
 ) {
     /** True iff a preferred network (e.g. cellular) was actually requested for this client. */
     private val hasPreferredNetwork: Boolean = network != null
@@ -162,11 +180,44 @@ class GeckoClient(
 
                 val query = GeoPkiQuery(rawBitStrings, minAltitude, maxAltitude)
 
-                try {
-                    verifyResponse(protoResponse, query, publicKey)
+                val referencedHashes = try {
+                    val hashes = verifyResponse(protoResponse, query, publicKey)
                     ensureConsistency(protoResponse, publicKey)
+                    hashes
                 } catch (e: GeoPkiVerificationException) {
                     return@withContext GeckoResponse.ProofFailure(e.message ?: "proof verification failed")
+                }
+
+                // Freshness (see docs/experiments.md, G4): the signed map head is
+                // authenticated above, but an attacker can replay an older, still
+                // validly-signed answer. Reject one whose signed timestamp is too old,
+                // so a pre-registration / pre-rotation state can't be served back.
+                val mapHeadNanos = protoResponse.geopki_SignedMapHead?.Timestamp ?: 0L
+                if (isMapHeadStale(mapHeadNanos, nowNanos(), maxMapHeadAge.inWholeNanoseconds)) {
+                    return@withContext GeckoResponse.ProofFailure(
+                        "map server answer is stale (signed map head older than $maxMapHeadAge) - possible replay"
+                    )
+                }
+
+                // Completeness the other direction (see docs/experiments.md, G1).
+                // This query uses `?c`, so the server includes the full certificate
+                // for every certificate the signed tree references. A referenced
+                // hash with no certificate delivered means the certificate was
+                // withheld - an attacker on the (cleartext) query path stripping it
+                // from an otherwise valid answer - not that nothing is registered
+                // here. Treat it as a proof failure (hostile) so it surfaces as a
+                // CONFLICT, instead of being read as silent "nothing registered".
+                // verifyResponse already enforces the reverse (no certificate
+                // without a node), so together the delivered set must equal exactly
+                // what the tree references.
+                val deliveredHashes = protoResponse.Certificates.mapTo(HashSet()) {
+                    Base64.getUrlEncoder().withoutPadding().encodeToString(SHA256Hash.sha256(it.toByteArray()).bytes)
+                }
+                val withheld = referencedHashes - deliveredHashes
+                if (withheld.isNotEmpty()) {
+                    return@withContext GeckoResponse.ProofFailure(
+                        "response withheld ${withheld.size} certificate(s) its own signed proof references"
+                    )
                 }
 
                 // verifyResponse already confirmed every certificate here is
@@ -252,6 +303,15 @@ class GeckoClient(
  * bit-layout logic instead of the real production code wouldn't actually
  * catch a bug here.
  */
+/**
+ * Whether a signed map head is too old to trust, given the current time and a
+ * maximum age (all in nanoseconds; the map head's time base, see G4). A map
+ * head timestamped in the future (negative age, e.g. device-clock skew) is not
+ * treated as stale.
+ */
+internal fun isMapHeadStale(mapHeadNanos: Long, nowNanos: Long, maxAgeNanos: Long): Boolean =
+    nowNanos - mapHeadNanos > maxAgeNanos
+
 internal fun XYBitString.toRawXYBitString(): RawXYBitString {
     val padded = bits.padEnd(64, '0')
     val value = if (padded.isEmpty()) 0uL else java.lang.Long.parseUnsignedLong(padded, 2).toULong()
