@@ -98,6 +98,13 @@ To check if router has internet
 ssh mango-a "ping -c3 1.1.1.1"                          # raw reachability
 ssh mango-a "nslookup connectivitycheck.gstatic.com"    # public DNS
 ```
+If it doesn't, disable and re-enable the Sharing of WiFi adapter, then run this:
+```powershell
+# portal addresses: genuine and attacker
+New-NetIPAddress -InterfaceAlias 'Ethernet 4' -IPAddress 192.168.137.10 -PrefixLength 24 -SkipAsSource $true
+New-NetIPAddress -InterfaceAlias 'Ethernet 4' -IPAddress 192.168.137.20 -PrefixLength 24 -SkipAsSource $true
+```
+
 Can the router reach the map server? (404 = reachable)
 ```powershell
 ssh mango-a "curl -s -o /dev/null -w '%{http_code}\n' http://192.168.137.1:1234/ || echo FAIL" 
