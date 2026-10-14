@@ -223,4 +223,40 @@ class EnterpriseVerificationTest {
         val server = AuthServer(caSPKIHashes = listOf(genuineCaKey), caCertificates = listOf(b64("rogue-ca"), b64("genuine-ca"), "not base64!"))
         assertEquals(listOf(genuineCaKey), server.pinnedCaCertificates().map { ObservedAuthServer.spkiSha256(it) })
     }
+
+    // --- a captured chain through the engine (VerificationEngine.verifyEnterpriseChain) ---
+
+    private fun engineReturning(vararg certs: GeoCertificate) = VerificationEngine(
+        io.mockk.mockk<com.thesis.geckowifi.data.remote.GeckoClient> {
+            io.mockk.coEvery { queryLocation(any(), any(), any()) } returns com.thesis.geckowifi.data.remote.GeckoResponse.Success(certs.toList())
+        },
+        io.mockk.mockk(relaxed = true), DecisionCache(), GeoQueryEncoder()
+    ) { java.time.Instant.parse("2026-10-14T00:00:00Z") }
+
+    /** The lab eduroam as registered: genuine CA pinned and carried, area around the test location. */
+    private fun registeredLab() = cert(server = AuthServer(
+        names = listOf("radius.gecko-a.lab"),
+        caSPKIHashes = listOf(genuineCaKey),
+        caCertificates = listOf(b64("genuine-ca"))
+    )).copy(areas = listOf(com.thesis.geckowifi.ZURICH_AREA))
+
+    private suspend fun captured(chain: List<X509Certificate>, realm: String?) =
+        engineReturning(registeredLab()).verifyEnterpriseChain("net", chain, realm, 47.3765, 8.5473, null, 20, ssid = "eduroam")
+
+    @Test
+    fun capturedGenuineLeaf_withoutItsCa_isVerifiedViaTheRegisteredCa() = kotlinx.coroutines.test.runTest {
+        // The server sent only its own certificate; the GeoCert carries the CA.
+        assertEquals(VerificationState.VERIFIED, captured(listOf(pem("genuine-leaf")), "gecko-a.lab").state)
+    }
+
+    @Test
+    fun capturedRogueChainWithTheGenuineCaAppended_isConflict() = kotlinx.coroutines.test.runTest {
+        assertEquals(VerificationState.CONFLICT, captured(listOf(pem("rogue-leaf"), pem("genuine-ca")), "gecko-a.lab").state)
+    }
+
+    @Test
+    fun capturedRogueChain_withoutRealm_isOnlyRegistered() = kotlinx.coroutines.test.runTest {
+        // In a federation an unknown realm could be a visitor: no warning without it.
+        assertEquals(VerificationState.REGISTERED, captured(listOf(pem("rogue-leaf"), pem("rogue-ca")), null).state)
+    }
 }

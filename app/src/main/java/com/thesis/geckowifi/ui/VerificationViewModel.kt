@@ -21,12 +21,16 @@ import com.thesis.geckowifi.location.LocationProvider
 import com.thesis.geckowifi.network.FakeDemoNetworks
 import com.thesis.geckowifi.network.NetworkObserver
 import com.thesis.geckowifi.network.ScannedNetwork
+import com.thesis.geckowifi.verification.AdvertisedMatch
 import com.thesis.geckowifi.verification.CertProbe
 import com.thesis.geckowifi.verification.DecisionCache
 import com.thesis.geckowifi.verification.GeoQueryEncoder
 import com.thesis.geckowifi.verification.HopVerdict
 import com.thesis.geckowifi.verification.LookupStatus
 import com.thesis.geckowifi.verification.VerificationEngine
+import com.thesis.geckowifi.verification.matchAdvertised
+import com.thesis.geckowifi.capability.Capabilities
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -50,7 +54,7 @@ const val SERVER_URL = BuildConfig.GEOPKI_URL
 enum class QueryRoute { MOBILE_DATA, JOINED_WIFI, DEFAULT_ROUTE }
 
 /** Why a check ended without a verdict from the map server, so the UI can say it in plain words. */
-enum class CheckFailure { NOT_OPEN, JOIN_FAILED, PORTAL_FAILED, LOW_ACCURACY }
+enum class CheckFailure { SERVER_UNREADABLE, JOIN_FAILED, PORTAL_FAILED, LOW_ACCURACY }
 
 /**
  * The map query's hard radius cap (see [com.thesis.geckowifi.verification.GeoQueryEncoder]).
@@ -59,6 +63,9 @@ enum class CheckFailure { NOT_OPEN, JOIN_FAILED, PORTAL_FAILED, LOW_ACCURACY }
  * a silent miss (see docs/experiments.md, G5).
  */
 const val MAX_QUERY_RADIUS_METERS = 253
+
+/** How long the login-server check waits for the user to reconnect and the EAP handshake to run. */
+const val HANDSHAKE_CAPTURE_SECONDS = 60
 
 /**
  * A completed check bundled with the query context it was made with. Kept for
@@ -91,7 +98,7 @@ data class CheckDetail(
 )
 
 /** The steps of a check, in the order the app runs them (README "How a check works"). */
-enum class CheckStep { JOIN, LOOKUP, PORTAL, COMPARE }
+enum class CheckStep { JOIN, LOOKUP, PORTAL, SERVER, COMPARE }
 
 /** A check that is still running: which steps it has and which one is in progress. */
 data class ActiveCheck(val ssid: String, val bssid: String?, val steps: List<CheckStep>, val current: CheckStep)
@@ -189,6 +196,62 @@ class VerificationViewModel(
     fun updateLabMode(enabled: Boolean) {
         labMode = enabled
         trustPreferences.labMode = enabled
+    }
+
+    /** Whether the root-only login-server check is available (GECKO's system-level stand-in). */
+    var rootAvailable by mutableStateOf(false)
+        private set
+
+    init {
+        viewModelScope.launch(Dispatchers.IO) { rootAvailable = Capabilities.hasRoot }
+    }
+
+    /** Whether the device itself is connected to [ssid] (via its own settings, with the user's account). */
+    fun isConnectedTo(ssid: String): Boolean = networkObserver.connectedSsid().equals(ssid, ignoreCase = true)
+
+    /**
+     * Root: checks the login server of the enterprise network the device is
+     * connected to. Captures the next EAP handshake (the user reconnects while
+     * this runs), then judges the server's chain against the registration
+     * ([VerificationEngine.verifyEnterpriseChain]), with the realm of the
+     * account the connection uses (from the supplicant, as the OS would know
+     * it) deciding local user vs. visitor. Read-only: it observes the device's
+     * own handshake and reports what the server presented; it doesn't change
+     * or stop the connection.
+     */
+    fun checkLoginServer(network: ScannedNetwork.Real) {
+        if (activeCheck != null) return
+        val fix = location ?: return
+        val networkKey = network.bssid ?: network.ssid
+        val steps = listOf(CheckStep.SERVER, CheckStep.LOOKUP, CheckStep.COMPARE)
+        step(network, steps, CheckStep.SERVER)
+        checkJob = viewModelScope.launch {
+            try {
+                val source = Capabilities.certificateSource()
+                val chain = source.captureHandshake(HANDSHAKE_CAPTURE_SECONDS)
+                if (chain == null || !chain.isComplete) {
+                    val reason = if (chain == null) "no EAP handshake seen within $HANDSHAKE_CAPTURE_SECONDS s"
+                        else "the supplicant reported the server's chain without certificates (cert_in_cb not applied?)"
+                    publish(network.ssid, network.bssid, networkKey,
+                        VerificationResult(VerificationState.UNREACHABLE, chain?.subjects?.firstOrNull().orEmpty(), reason = reason),
+                        fix, modeDescription = "Your connection: login server", failure = CheckFailure.SERVER_UNREADABLE,
+                        isEnterprise = true)
+                    return@launch
+                }
+                step(network, steps, CheckStep.LOOKUP)
+                rebindGeckoClient()
+                step(network, steps, CheckStep.COMPARE)
+                val result = engine.verifyEnterpriseChain(
+                    networkKey, chain.certificates, source.accountRealm(),
+                    fix.latitude, fix.longitude, null, effectiveRadius(fix),
+                    ssid = network.ssid, observedAuthModes = network.authModes
+                )
+                publish(network.ssid, network.bssid, networkKey, result, fix,
+                    modeDescription = "Your connection: login server compared", isEnterprise = true)
+            } finally {
+                activeCheck = null
+            }
+        }
     }
 
     fun onPermissionResult(granted: Boolean) {
@@ -351,6 +414,14 @@ class VerificationViewModel(
         }
     }
 
+    /**
+     * How [network]'s advertised security type fits its registration, from the
+     * last lookup (proof-checked when it was fetched; a check queries again).
+     * Null when the SSID isn't registered here or the lookup isn't known.
+     */
+    fun advertisedMatch(network: ScannedNetwork.Real): AdvertisedMatch? =
+        if (certLookup == LookupStatus.OK) matchAdvertised(network.ssid, network.authModes, registeredHere) else null
+
     /** First primary portal domain registered for [ssid] at the last queried location, if any. */
     fun registeredDomainFor(ssid: String): String? =
         registeredHere.firstOrNull { it.wifi.ssid.equals(ssid, ignoreCase = true) }
@@ -369,7 +440,7 @@ class VerificationViewModel(
     private fun checkReal(network: ScannedNetwork.Real): Job? {
         val fix = location ?: return null
         val networkKey = network.bssid ?: network.ssid
-        val steps = CheckStep.entries.toList()
+        val steps = listOf(CheckStep.JOIN, CheckStep.LOOKUP, CheckStep.PORTAL, CheckStep.COMPARE)
 
         if (fix.accuracyMeters > MAX_QUERY_RADIUS_METERS) {
             val result = VerificationResult(VerificationState.UNREACHABLE, "",
@@ -378,7 +449,9 @@ class VerificationViewModel(
             return null
         }
 
-        if (!network.isOpen) return checkSecured(network, networkKey, fix)
+        // A secured network can't be joined without credentials; the list judges it
+        // from its scan instead ([advertisedMatch]) and never starts a check for it.
+        if (!network.isOpen) return null
 
         step(network, steps, CheckStep.JOIN)
         return viewModelScope.launch {
@@ -417,7 +490,12 @@ class VerificationViewModel(
                     Discovery.Outcome.NoPortal -> {
                         // No portal in the way: check the network's registered portal domain directly.
                         val registered = registeredDomainFor(network.ssid)
-                        val result = if (registered == null) {
+                        val ssidRegistered = registeredHere.any { it.wifi.ssid.equals(network.ssid, ignoreCase = true) }
+                        val result = if (registered == null && ssidRegistered) {
+                            // Registered without a login page: only the security type can be compared.
+                            engine.checkAdvertised(networkKey, network.ssid, network.authModes,
+                                fix.latitude, fix.longitude, null, effectiveRadius(fix))
+                        } else if (registered == null) {
                             VerificationResult(VerificationState.UNVERIFIED, "",
                                 reason = "no captive portal seen, and nothing registered here lists a portal domain for ${network.ssid}")
                         } else {
@@ -443,33 +521,6 @@ class VerificationViewModel(
                             failure = if (conflict) null else CheckFailure.PORTAL_FAILED)
                     }
                 }
-            } finally {
-                activeCheck = null
-            }
-        }
-    }
-
-    /**
-     * A secured network is checked without joining it (that needs credentials,
-     * and seeing the login server's certificate needs root): its advertised
-     * auth modes are compared with the registration, over whatever connection
-     * the device has. See [VerificationEngine.checkAdvertised].
-     */
-    private fun checkSecured(network: ScannedNetwork.Real, networkKey: String, fix: LocationFix): Job {
-        val steps = listOf(CheckStep.LOOKUP, CheckStep.COMPARE)
-        step(network, steps, CheckStep.LOOKUP)
-        return viewModelScope.launch {
-            try {
-                rebindGeckoClient()
-                step(network, steps, CheckStep.COMPARE)
-                val modes = network.authModes
-                val result = engine.checkAdvertised(
-                    networkKey, network.ssid, modes,
-                    fix.latitude, fix.longitude, null, effectiveRadius(fix)
-                )
-                publish(network.ssid, network.bssid, networkKey, result, fix,
-                    modeDescription = "Not joined: security type compared",
-                    isEnterprise = modes.any { it.isEnterprise })
             } finally {
                 activeCheck = null
             }

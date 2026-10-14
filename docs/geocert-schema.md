@@ -105,9 +105,9 @@ hashes for the demo entries), [`lab/certs/ethz-eduroam.json`](../lab/certs/ethz-
 | `aaa[].servers[].names` | SAN dNSName (CN if none) of the RADIUS server certificate |
 | `aaa[].servers[].pinned_spki_sha256` | SHA-256 of the leaf's SPKI, base64 |
 | `aaa[].servers[].ca_spki_sha256` | SHA-256 of a CA's SPKI, base64. Matched against the chain the server sends, or against `ca_certificates` |
-| `aaa[].servers[].ca_certificates` | Optional: the CA certificates themselves, base64 DER (as in an eduroam CAT profile). Only those whose key is in `ca_spki_sha256` are used. They let the client check a chain whose root the server doesn't send, and let Android's own supplicant pin the CA when the app provisions the network, without root |
+| `aaa[].servers[].ca_certificates` | Optional: the CA certificates themselves, base64 DER (as in an eduroam CAT profile). Only those whose key is in `ca_spki_sha256` are used. They let the client check a chain whose root the server doesn't send, and are what a supplicant needs to pin the CA when it enforces the check inside the handshake |
 
-### `portal` (unchanged from v2)
+### `portal`
 
 `domains[]` of `{name, role, pinned_spki_sha256[], certificate_sha256[]}`,
 `role` one of `primary` (entry point), `delegate` (only after the primary),
@@ -143,8 +143,11 @@ is harmless while the app queries the full altitude range.
      here, so `REGISTERED` (the site and auth mode still count);
    - federation, realm unknown: a match verifies, no match is `REGISTERED`;
    - closed network: all servers, whatever the realm.
-   A secured network checked from its scan alone (not joined) stops after
-   step 3: `REGISTERED` if the modes match, never `VERIFIED`.
+   Before connecting, the network list applies step 3 to every registered
+   network from the last lookup, so a mismatch is flagged before anyone joins;
+   a match is shown as registered, never as verified. A joined network whose
+   registration lists nothing else to compare (no portal, no server) ends
+   here as `REGISTERED`.
 6. **SSID exclusivity**: an `UNRECOGNIZED` result on a registered SSID becomes
    `CONFLICT`, unless a certificate sets `ssid_shared`.
 

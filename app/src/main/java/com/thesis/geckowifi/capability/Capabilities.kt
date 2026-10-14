@@ -1,6 +1,7 @@
 package com.thesis.geckowifi.capability
 
 object Capabilities {
+    /** Blocking (runs `su`): call off the main thread. */
     val hasRoot: Boolean by lazy { RootShell.isAvailable() }
 
     fun certificateSource(): CertificateSource =

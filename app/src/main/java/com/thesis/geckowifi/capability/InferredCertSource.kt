@@ -1,8 +1,7 @@
 package com.thesis.geckowifi.capability
 
-import java.security.cert.X509Certificate
-
+/** Without root, Android exposes nothing about the server's certificate. */
 class InferredCertSource : CertificateSource {
-    override val isGroundTruth = false
-    override suspend fun presentedCertificate(ssid: String): X509Certificate? = null
+    override suspend fun captureHandshake(timeoutSeconds: Int): PeerChain? = null
+    override suspend fun accountRealm(): String? = null
 }

@@ -14,8 +14,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.GppBad
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.NetworkWifi1Bar
 import androidx.compose.material.icons.outlined.NetworkWifi2Bar
@@ -33,7 +35,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,7 +55,9 @@ import com.thesis.geckowifi.ui.components.SectionHeader
 import com.thesis.geckowifi.ui.components.VerdictBadge
 import com.thesis.geckowifi.ui.theme.MonoFontFamily
 import com.thesis.geckowifi.ui.theme.Space
+import com.thesis.geckowifi.ui.verdict.Tone
 import com.thesis.geckowifi.ui.verdict.verdict
+import com.thesis.geckowifi.verification.AdvertisedMatch
 import com.thesis.geckowifi.verification.LookupStatus
 
 /**
@@ -82,15 +89,37 @@ fun HomeScreen(
     val rows = buildRows(viewModel.scannedNetworks)
     val busy = viewModel.activeCheck != null
 
+    // The registered network whose registration sheet is open, if any.
+    var sheetFor by remember { mutableStateOf<ScannedNetwork.Real?>(null) }
+
     val connect: (ScannedNetwork) -> Unit = { viewModel.startCheck(it) }
     val list = ListContext(
         viewModel = viewModel,
         busy = busy,
         registrantOf = { ssid -> registrants[ssid.lowercase()] },
+        onShowRegistration = { sheetFor = it },
         isExpanded = { ssid, registered -> expandOverrides[ssid] ?: registered },
         onToggle = { ssid, registered -> expandOverrides[ssid] = !(expandOverrides[ssid] ?: registered) },
         onConnect = connect
     )
+
+    sheetFor?.let { network ->
+        val match = viewModel.advertisedMatch(network)
+        if (match == null) {
+            sheetFor = null
+        } else {
+            RegistrationSheet(
+                network = network,
+                match = match,
+                onDismiss = { sheetFor = null },
+                onConnectAnyway = if (network.isOpen && !busy) ({ sheetFor = null; connect(network) }) else null,
+                loginServerCheck = if (viewModel.rootAvailable && !network.isOpen && !busy) LoginServerCheck(
+                    connected = viewModel.isConnectedTo(network.ssid),
+                    onCheck = { sheetFor = null; viewModel.checkLoginServer(network) }
+                ) else null
+            )
+        }
+    }
 
     Column(Modifier.fillMaxWidth()) {
         TopAppBar(
@@ -132,7 +161,9 @@ fun HomeScreen(
                 if (known) real.partition { it.primary.ssid.lowercase() in registeredSsids } else emptyList<NetworkRow>() to real
             val (checkable, secured) = unregistered.partition { (it.primary as ScannedNetwork.Real).isOpen }
 
-            networkSection("Registered here", registered, true, list)
+            // A network that contradicts its registration leads: it is the one thing to act on.
+            val byConcern = registered.sortedByDescending { list.matchOf(it.primary) is AdvertisedMatch.Mismatch }
+            networkSection("Registered here", byConcern, true, list)
             networkSection(if (known) "Other open networks" else "Open networks", checkable, false, list)
             networkSection("Demo networks", demo, false, list)
             networkSection("Secured networks", secured, false, list)
@@ -161,8 +192,10 @@ fun HomeScreen(
 private class NetworkRow(val primary: ScannedNetwork, val accessPoints: List<ScannedNetwork.Real>)
 
 private fun buildRows(networks: List<ScannedNetwork>): List<NetworkRow> {
+    // Grouped by SSID *and* security type: an open "eduroam" next to the real one is a
+    // different network and gets its own row (and its own verdict), as in Android's settings.
     val realRows = networks.filterIsInstance<ScannedNetwork.Real>()
-        .groupBy { it.ssid }.values
+        .groupBy { it.ssid to it.authModes }.values
         .map { aps -> aps.sortedByDescending { it.rssi } }
         .sortedByDescending { it.first().rssi }
         .map { NetworkRow(it.first(), it) }
@@ -174,10 +207,27 @@ private class ListContext(
     val viewModel: VerificationViewModel,
     val busy: Boolean,
     val registrantOf: (ssid: String) -> String?,
+    val onShowRegistration: (ScannedNetwork.Real) -> Unit,
     val isExpanded: (ssid: String, registered: Boolean) -> Boolean,
     val onToggle: (ssid: String, registered: Boolean) -> Unit,
     val onConnect: (ScannedNetwork) -> Unit
 )
+
+/** Pre-connection judgement of a registered real network; null for demo entries and unregistered SSIDs. */
+private fun ListContext.matchOf(network: ScannedNetwork): AdvertisedMatch? =
+    (network as? ScannedNetwork.Real)?.let { viewModel.advertisedMatch(it) }
+
+/**
+ * What tapping a row does. Joining only happens for an open network that
+ * doesn't contradict its registration; a mismatching one, or a registered
+ * secured one (no credentials to join with), opens its registration instead.
+ */
+private fun ListContext.open(network: ScannedNetwork) {
+    val real = network as? ScannedNetwork.Real
+    val match = real?.let { matchOf(it) }
+    if (real != null && match != null && (match is AdvertisedMatch.Mismatch || !real.isOpen)) onShowRegistration(real)
+    else onConnect(network)
+}
 
 private fun ListContext.latestFor(aps: List<ScannedNetwork>): CheckDetail? =
     aps.mapNotNull { viewModel.latestCheckFor(it.bssid ?: it.ssid) }.maxByOrNull { it.result.timestamp }
@@ -189,25 +239,27 @@ private fun LazyListScope.networkSection(title: String, rows: List<NetworkRow>, 
         val ssid = row.primary.ssid
         val open = (row.primary as? ScannedNetwork.Real)?.isOpen ?: true
         // Only an open SSID with several APs has a choice worth expanding; a single AP is joined directly.
-        val expandable = ctx.viewModel.labMode && open && row.accessPoints.size > 1
+        val expandable = ctx.viewModel.labMode && open && row.accessPoints.size > 1 &&
+            ctx.matchOf(row.primary) !is AdvertisedMatch.Mismatch
         val expanded = expandable && ctx.isExpanded(ssid, registered)
         item(key = "$title:$ssid:${row.primary.bssid}") {
             NetworkListItem(
                 row = row,
                 registered = registered,
                 registrant = if (registered) ctx.registrantOf(ssid) else null,
+                match = if (registered) ctx.matchOf(row.primary) else null,
                 // An expanded group shows each AP's own result instead.
                 latest = if (expanded) null else ctx.latestFor(row.accessPoints.ifEmpty { listOf(row.primary) }),
                 labMode = ctx.viewModel.labMode,
                 expandable = expandable,
                 expanded = expanded,
                 enabled = !ctx.busy,
-                onClick = { if (expandable) ctx.onToggle(ssid, registered) else ctx.onConnect(row.primary) }
+                onClick = { if (expandable) ctx.onToggle(ssid, registered) else ctx.open(row.primary) }
             )
         }
         if (expanded) {
             items(row.accessPoints, key = { "$title:$ssid:ap:${it.bssid}" }) { ap ->
-                AccessPointItem(ap, ctx.latestFor(listOf(ap)), enabled = !ctx.busy, onClick = { ctx.onConnect(ap) })
+                AccessPointItem(ap, ctx.latestFor(listOf(ap)), enabled = !ctx.busy, onClick = { ctx.open(ap) })
             }
         }
     }
@@ -248,6 +300,7 @@ private fun NetworkListItem(
     row: NetworkRow,
     registered: Boolean,
     registrant: String?,
+    match: AdvertisedMatch?,
     latest: CheckDetail?,
     labMode: Boolean,
     expandable: Boolean,
@@ -269,6 +322,7 @@ private fun NetworkListItem(
             .padding(horizontal = Space.lg, vertical = Space.md)
             .semantics {
                 if (!checkable) stateDescription = "Can't be checked"
+                else if (match is AdvertisedMatch.Mismatch) stateDescription = "Doesn't match its registration"
                 else if (expandable) stateDescription = if (expanded) "Expanded" else "Collapsed"
             },
         verticalAlignment = Alignment.CenterVertically,
@@ -277,7 +331,7 @@ private fun NetworkListItem(
         Icon(signalIcon(real?.rssi), contentDescription = null, tint = content)
         Column(Modifier.weight(1f)) {
             Text(network.ssid, style = MaterialTheme.typography.bodyLarge, color = content)
-            val supporting = supportingText(row, labMode, registered)
+            val supporting = supportingText(row, labMode, registered, match)
             if (supporting.isNotEmpty()) {
                 val mono = labMode && real != null && real.isOpen && row.accessPoints.size == 1
                 Text(
@@ -288,16 +342,27 @@ private fun NetworkListItem(
                 )
             }
             if (registered) {
-                Text("Registered with GECKO" + registrant?.let { " by $it" }.orEmpty(), style = MaterialTheme.typography.labelMedium, color = colors.primary)
+                // Neutral, not the theme's green: registration is information, not a verification.
+                Text(
+                    "Registered with GECKO" + registrant?.let { " by $it" }.orEmpty(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.onSurfaceVariant
+                )
             }
         }
         when {
             !checkable -> Icon(Icons.Outlined.Lock, contentDescription = null, tint = colors.onSurfaceVariant)
+            // Judged from the scan, before anyone connects: shown until a check says otherwise.
+            match is AdvertisedMatch.Mismatch && latest?.result?.state != VerificationState.VERIFIED ->
+                VerdictBadge(Tone.DANGER, "Doesn't match", Icons.Outlined.GppBad)
             // Only results worth remembering in the list: a confirmation and, above all, a warning.
             latest != null && latest.result.state in BADGED_STATES -> {
                 val v = latest.verdict()
                 VerdictBadge(v.tone, v.label, v.icon)
             }
+            // Tapping opens the registration, not a connection.
+            real != null && !real.isOpen ->
+                Icon(Icons.Outlined.ChevronRight, contentDescription = null, tint = colors.onSurfaceVariant)
         }
         if (expandable) {
             Icon(
@@ -310,12 +375,13 @@ private fun NetworkListItem(
     if (!expanded) HorizontalDivider(Modifier.padding(start = 56.dp), color = colors.outlineVariant)
 }
 
-/** Results worth remembering in the list: confirmations, a registration, and above all a warning. */
-private val BADGED_STATES = setOf(VerificationState.VERIFIED, VerificationState.REGISTERED, VerificationState.CONFLICT)
+/** Results worth remembering in the list: a confirmation and, above all, a warning. "Registered" is the label's job. */
+private val BADGED_STATES = setOf(VerificationState.VERIFIED, VerificationState.CONFLICT)
 
-private fun supportingText(row: NetworkRow, labMode: Boolean, registered: Boolean): String = when (val n = row.primary) {
+private fun supportingText(row: NetworkRow, labMode: Boolean, registered: Boolean, match: AdvertisedMatch?): String = when (val n = row.primary) {
     is ScannedNetwork.Real -> when {
-        !n.isOpen && registered -> "${n.securityLabel}. Checked without connecting"
+        match is AdvertisedMatch.Mismatch -> "Registered as ${match.registered.securityNames()}, but this one is ${match.advertised.securityNames()}"
+        !n.isOpen && registered -> n.securityLabel
         !n.isOpen -> "${n.securityLabel}. Can't be checked yet"
         labMode && row.accessPoints.size == 1 ->
             listOfNotNull(n.bssid, n.channel?.let { "ch $it" }, n.rssi.takeIf { it != Int.MIN_VALUE }?.let { "$it dBm" })

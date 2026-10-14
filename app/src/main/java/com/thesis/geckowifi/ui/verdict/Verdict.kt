@@ -6,7 +6,6 @@ import androidx.compose.material.icons.outlined.GppBad
 import androidx.compose.material.icons.outlined.GppGood
 import androidx.compose.material.icons.outlined.GppMaybe
 import androidx.compose.material.icons.outlined.LocationSearching
-import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -91,10 +90,8 @@ fun CheckDetail.verdict(): Verdict {
             when {
                 result.reason?.contains("visitor") == true ->
                     "This location's network is registered with GECKO, but you're a visitor: your own institution's login server can't be registered here, so GECKO can't check it."
-                !joined ->
-                    "Its operator registered it with GECKO, and its security type matches. GECKO can't check its login server without connecting, so this isn't a full verification."
                 else ->
-                    "Its operator registered it with GECKO, but its login server couldn't be checked."
+                    "Its operator registered it with GECKO and its security type matches, but the registration lists nothing else to verify it against, such as a login page. GECKO can't vouch for more than that."
             },
             Icons.Outlined.GppMaybe
         )
@@ -109,11 +106,6 @@ fun CheckDetail.verdict(): Verdict {
             Icons.Outlined.Shield
         )
         VerificationState.UNREACHABLE, VerificationState.CHECKING -> when (failure) {
-            CheckFailure.NOT_OPEN -> Verdict(
-                Tone.NEUTRAL, "Not checked", "Secured networks can't be checked yet",
-                "This prototype only joins open networks.",
-                Icons.Outlined.Lock
-            )
             CheckFailure.JOIN_FAILED -> Verdict(
                 Tone.NEUTRAL, "Not checked", "Couldn't join $name",
                 "The connection was declined or timed out. Nothing was checked.",
@@ -122,6 +114,11 @@ fun CheckDetail.verdict(): Verdict {
             CheckFailure.PORTAL_FAILED -> Verdict(
                 Tone.NEUTRAL, "Not checked", "Couldn't load the login page",
                 "The network's login page didn't respond, so there was nothing to compare.",
+                Icons.Outlined.CloudOff
+            )
+            CheckFailure.SERVER_UNREADABLE -> Verdict(
+                Tone.NEUTRAL, "Not checked", "Couldn't read the login server",
+                "No handshake with the login server was seen, or this device doesn't report its certificate. Reconnect to $name while the check is running and try again.",
                 Icons.Outlined.CloudOff
             )
             CheckFailure.LOW_ACCURACY -> Verdict(

@@ -137,6 +137,11 @@ class NetworkObserver(private val context: Context) {
     }
 
     /** Cellular network for GECKO queries, so the tested WiFi never carries them. */
+    /** SSID of the network the device itself is connected to (not the app's own join), or null. */
+    @Suppress("DEPRECATION")
+    fun connectedSsid(): String? =
+        wifi.connectionInfo?.ssid?.removeSurrounding("\"")?.takeIf { it.isNotBlank() && it != "<unknown ssid>" }
+
     fun cellularNetwork(): Network? = connectivity.allNetworks.firstOrNull { network ->
         connectivity.getNetworkCapabilities(network)
             ?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true

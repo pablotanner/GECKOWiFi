@@ -158,7 +158,8 @@ private val stepLabels = mapOf(
     CheckStep.JOIN to "Joining the network",
     CheckStep.LOOKUP to "Looking up what's registered here",
     CheckStep.PORTAL to "Following the login page",
-    CheckStep.COMPARE to "Comparing with the registration"
+    CheckStep.COMPARE to "Comparing with the registration",
+    CheckStep.SERVER to "Waiting for the login server. Reconnect to the network now"
 )
 
 @Composable

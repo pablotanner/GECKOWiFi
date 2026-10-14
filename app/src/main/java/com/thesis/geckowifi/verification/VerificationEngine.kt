@@ -6,6 +6,7 @@ import com.thesis.geckowifi.data.remote.GeckoResponse
 import com.thesis.geckowifi.discovery.ObservedHop
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.security.cert.X509Certificate
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 
@@ -213,10 +214,54 @@ class VerificationEngine(
         radiusMeters: Int,
         ssid: String? = null,
         observedAuthModes: Set<WiFiAuthMode>? = null
+    ): VerificationResult = verifyEnterpriseWith(
+        networkKey, "eap:${observed.leafSpkiSha256}:${userRealm.orEmpty()}", observed.displayName,
+        { observed }, userRealm, lat, lng, altitude, radiusMeters, ssid, observedAuthModes
+    )
+
+    /**
+     * [verifyEnterprise] for a real handshake: [chain] is the server's chain as
+     * the supplicant reported it (leaf first). Signatures are checked here, and
+     * the registered CA certificates of this location's candidates serve as
+     * anchors, because servers often don't send their root.
+     */
+    suspend fun verifyEnterpriseChain(
+        networkKey: String,
+        chain: List<X509Certificate>,
+        userRealm: String?,
+        lat: Double,
+        lng: Double,
+        altitude: Double?,
+        radiusMeters: Int,
+        ssid: String? = null,
+        observedAuthModes: Set<WiFiAuthMode>? = null
     ): VerificationResult {
-        val cacheKey = "eap:${observed.leafSpkiSha256}:${userRealm.orEmpty()}"
+        val unanchored = ObservedAuthServer.fromChain(chain)
+            ?: return VerificationResult(VerificationState.UNVERIFIED, "", reason = "no server certificate was presented")
+        return verifyEnterpriseWith(
+            networkKey, "eap-chain:${unanchored.leafSpkiSha256}:${userRealm.orEmpty()}", unanchored.displayName,
+            { certs ->
+                val anchors = certs.flatMap { it.wifi.enterprise?.aaa.orEmpty() }.flatMap { it.servers }.flatMap { it.pinnedCaCertificates() }
+                ObservedAuthServer.fromChain(chain, anchors) ?: unanchored
+            },
+            userRealm, lat, lng, altitude, radiusMeters, ssid, observedAuthModes
+        )
+    }
+
+    private suspend fun verifyEnterpriseWith(
+        networkKey: String,
+        cacheKey: String,
+        host: String,
+        observe: (candidates: List<GeoCertificate>) -> ObservedAuthServer,
+        userRealm: String?,
+        lat: Double,
+        lng: Double,
+        altitude: Double?,
+        radiusMeters: Int,
+        ssid: String?,
+        observedAuthModes: Set<WiFiAuthMode>?
+    ): VerificationResult {
         cache.get(networkKey, cacheKey)?.let { return it }
-        val host = observed.displayName
 
         val bitStrings = encoder.encodeQuery(lat, lng, radiusMeters)
         val (minAlt, maxAlt) = encoder.altitudeBounds(altitude, radiusMeters)
@@ -230,7 +275,7 @@ class VerificationEngine(
             is GeckoResponse.Success -> when (val c = candidatesFor(response, lat, lng, radiusMeters, ssid, host)) {
                 is Candidates.Done -> return c.result
                 is Candidates.Judge -> c.finish(
-                    evaluateEnterpriseNetwork(observed, userRealm, c.certs),
+                    evaluateEnterpriseNetwork(observe(c.certs), userRealm, c.certs),
                     authModeConflict(c, observedAuthModes, host)
                 ).withResponseMetadata(response)
             }
@@ -240,12 +285,13 @@ class VerificationEngine(
     }
 
     /**
-     * Checks a network without joining it, from what its scan result
-     * advertises ([observedAuthModes]) - for secured networks, whose login
-     * server can't be seen without credentials (and, for the server's
-     * certificate, root). Unregistered SSID: UNVERIFIED. Advertised modes not
-     * registered: CONFLICT (scenario A1). Otherwise REGISTERED: the
-     * registration exists and nothing contradicts it, nothing more.
+     * Judges a network whose registration lists nothing to verify its
+     * identity against (no portal domain, no login server): only its
+     * advertised auth modes ([observedAuthModes]) can be compared. Unregistered
+     * SSID: UNVERIFIED. Advertised modes not registered: CONFLICT (scenario
+     * A1). Otherwise REGISTERED: the registration exists and nothing
+     * contradicts it, nothing more. Before joining, the list makes the same
+     * comparison from the last lookup ([matchAdvertised]).
      */
     suspend fun checkAdvertised(
         networkKey: String,
@@ -272,7 +318,7 @@ class VerificationEngine(
                         VerificationState.REGISTERED, ssid,
                         matchedCertificateId = cert.certificateId,
                         reason = "registered here$operator; it advertises ${observedAuthModes.joinToString { it.wire }}, " +
-                            "as registered; its login server wasn't checked (not joined)"
+                            "as registered; the registration lists nothing else to compare"
                     )
                     c.finish(registered, authModeConflict(c, observedAuthModes, ssid)).withResponseMetadata(response)
                 }
@@ -357,8 +403,8 @@ class VerificationEngine(
      */
     private fun authModeConflict(c: Candidates.Judge, observed: Set<WiFiAuthMode>?, host: String): VerificationResult? {
         if (observed.isNullOrEmpty() || c.ssid == null) return null
+        if (c.certs.permitAdvertised(observed) != false) return null
         val registering = c.certs.filter { it.wifi.authModeNames.isNotEmpty() }
-        if (registering.isEmpty() || registering.any { it.wifi.permits(observed) }) return null
         val registered = registering.flatMap { it.wifi.authModeNames }.distinct()
         return VerificationResult(
             VerificationState.UNRECOGNIZED, host,

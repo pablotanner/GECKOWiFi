@@ -1,9 +1,18 @@
 package com.thesis.geckowifi.capability
 
-import java.security.cert.X509Certificate
-
+/** Where the RADIUS server's certificate chain of an 802.1X handshake comes from. */
 interface CertificateSource {
-    /** Certificate the RADIUS/AP actually presented, or null if unobservable. */
-    suspend fun presentedCertificate(ssid: String): X509Certificate?
-    val isGroundTruth: Boolean
+    /**
+     * Listens for up to [timeoutSeconds] for the next EAP handshake on this
+     * device and returns the server's chain, or null if none was seen. The
+     * user reconnects to the network meanwhile; the handshake happens either way.
+     */
+    suspend fun captureHandshake(timeoutSeconds: Int): PeerChain?
+
+    /**
+     * Realm of the account the device's current enterprise connection uses
+     * (`ethz.ch` from `anonymous@ethz.ch`), which tells a local user from a
+     * visitor. The OS knows it from the saved network; null if unknown.
+     */
+    suspend fun accountRealm(): String?
 }
