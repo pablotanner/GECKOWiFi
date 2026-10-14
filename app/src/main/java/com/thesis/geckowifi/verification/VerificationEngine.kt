@@ -69,12 +69,13 @@ class VerificationEngine(
         lng: Double,
         altitude: Double?,
         radiusMeters: Int,
-        ssid: String? = null
+        ssid: String? = null,
+        observedAuthModes: Set<WiFiAuthMode>? = null
     ): VerificationResult {
         cache.get(networkKey, host)?.let { return it }
         // Blocking TLS handshake - must not run on the caller's (UI) dispatcher.
         val spki = withContext(Dispatchers.IO) { probe.spkiHash(probe.fetchCertificate(host)) }
-        return verifyPresentedDomain(networkKey, host, spki, lat, lng, altitude, radiusMeters, ssid)
+        return verifyPresentedDomain(networkKey, host, spki, lat, lng, altitude, radiusMeters, ssid, observedAuthModes)
     }
 
     /**
@@ -95,6 +96,9 @@ class VerificationEngine(
      * unchanged either way - this is a pure pre-filter layered in front of
      * it. Passing `ssid = null` (the default) skips filtering entirely,
      * preserving the original behavior for existing callers.
+     *
+     * [observedAuthModes], when given with [ssid], are the modes the access
+     * point advertises; see [authModeConflict].
      */
     suspend fun verifyPresentedDomain(
         networkKey: String,
@@ -104,7 +108,8 @@ class VerificationEngine(
         lng: Double,
         altitude: Double?,
         radiusMeters: Int,
-        ssid: String? = null
+        ssid: String? = null,
+        observedAuthModes: Set<WiFiAuthMode>? = null
     ): VerificationResult {
         cache.get(networkKey, host)?.let { return it }
 
@@ -117,9 +122,12 @@ class VerificationEngine(
                 VerificationResult(VerificationState.UNREACHABLE, host, reason = response.cause)
             is GeckoResponse.ProofFailure ->
                 VerificationResult(VerificationState.CONFLICT, host, reason = response.cause) // failed proof = hostile, not absent
-            is GeckoResponse.Success -> {
-                val candidates = filterBySsid(response.validCertificates(lat, lng, radiusMeters), ssid) ?: return noMatchingSsid(host)
-                sessionFor(networkKey).observe(host, candidates, presentedSpkiHash).applyExclusivity(ssid).withResponseMetadata(response)
+            is GeckoResponse.Success -> when (val c = candidatesFor(response, lat, lng, radiusMeters, ssid, host)) {
+                is Candidates.Done -> return c.result
+                is Candidates.Judge -> c.finish(
+                    sessionFor(networkKey).observe(host, c.certs, presentedSpkiHash),
+                    authModeConflict(c, observedAuthModes, host)
+                ).withResponseMetadata(response)
             }
         }
         if (result.state != VerificationState.UNREACHABLE) cache.put(networkKey, host, result)
@@ -152,7 +160,8 @@ class VerificationEngine(
         lng: Double,
         altitude: Double?,
         radiusMeters: Int,
-        ssid: String? = null
+        ssid: String? = null,
+        observedAuthModes: Set<WiFiAuthMode>? = null
     ): PortalCheckResult {
         val judged = hops.filter { it.isHttps || (judgeFinalPlainHop && it === hops.lastOrNull()) }
         val unjudged = { overall: VerificationResult -> PortalCheckResult(overall, hops.map { HopVerdict(it, null) }) }
@@ -172,40 +181,42 @@ class VerificationEngine(
                 return unjudged(VerificationResult(VerificationState.CONFLICT, firstHost, reason = response.cause))
             is GeckoResponse.Success -> response
         }
-        val candidates = filterBySsid(success.validCertificates(lat, lng, radiusMeters), ssid) ?: return unjudged(noMatchingSsid(firstHost))
+        val c = when (val prepared = candidatesFor(success, lat, lng, radiusMeters, ssid, firstHost)) {
+            is Candidates.Done -> return unjudged(prepared.result)
+            is Candidates.Judge -> prepared
+        }
 
         val session = sessionFor(networkKey).also { it.reset() }
         val verdicts = hops.map { hop ->
-            HopVerdict(hop, if (hop in judged) session.observe(hop.host, candidates, hop.presentedSpkiHash).applyExclusivity(ssid) else null)
+            HopVerdict(hop, if (hop in judged) c.finish(session.observe(hop.host, c.certs, hop.presentedSpkiHash)) else null)
         }
         val results = verdicts.mapNotNull { v -> v.result?.let { v.hop to it } }
         val (decidingHop, decisive) = results.firstOrNull { it.second.state == VerificationState.CONFLICT } ?: results.last()
-        val overall = decisive.copy(
-            reason = "hop ${decidingHop.index} ${decidingHop.scheme}://${decidingHop.host}: ${decisive.reason}"
-        ).withResponseMetadata(success)
+        val fromHops = decisive.copy(reason = "hop ${decidingHop.index} ${decidingHop.scheme}://${decidingHop.host}: ${decisive.reason}")
+        val overall = c.finish(fromHops, authModeConflict(c, observedAuthModes, firstHost)).withResponseMetadata(success)
         return PortalCheckResult(overall, verdicts)
     }
 
     /**
-     * Enterprise (802.1X/eduroam-style) equivalent of [verify] - same
-     * location query, but compares against [evaluateEnterpriseNetwork]
-     * instead of [PortalSession] (no browsing-session anchor concept
-     * applies to an EAP handshake). See docs/prototype-decisions.md for what
-     * [observedAuthServerName]/[observedCaFingerprint] stand in for today,
-     * and docs/app-design.md for the [ssid] pre-filter (same semantics as
-     * [verifyPresentedDomain]'s).
+     * Enterprise (802.1X / eduroam) counterpart of [verifyPresentedDomain]:
+     * same location query and SSID handling, but the RADIUS server seen in the
+     * handshake ([observed]) is judged by [evaluateEnterpriseNetwork], with
+     * [userRealm] deciding local user vs. visitor.
      */
     suspend fun verifyEnterprise(
         networkKey: String,
-        observedAuthServerName: String,
-        observedCaFingerprint: String,
+        observed: ObservedAuthServer,
+        userRealm: String?,
         lat: Double,
         lng: Double,
         altitude: Double?,
         radiusMeters: Int,
-        ssid: String? = null
+        ssid: String? = null,
+        observedAuthModes: Set<WiFiAuthMode>? = null
     ): VerificationResult {
-        cache.get(networkKey, observedAuthServerName)?.let { return it }
+        val cacheKey = "eap:${observed.leafSpkiSha256}:${userRealm.orEmpty()}"
+        cache.get(networkKey, cacheKey)?.let { return it }
+        val host = observed.displayName
 
         val bitStrings = encoder.encodeQuery(lat, lng, radiusMeters)
         val (minAlt, maxAlt) = encoder.altitudeBounds(altitude, radiusMeters)
@@ -213,15 +224,18 @@ class VerificationEngine(
 
         val result = when (response) {
             is GeckoResponse.Unreachable ->
-                VerificationResult(VerificationState.UNREACHABLE, observedAuthServerName, reason = response.cause)
+                VerificationResult(VerificationState.UNREACHABLE, host, reason = response.cause)
             is GeckoResponse.ProofFailure ->
-                VerificationResult(VerificationState.CONFLICT, observedAuthServerName, reason = response.cause)
-            is GeckoResponse.Success -> {
-                val candidates = filterBySsid(response.validCertificates(lat, lng, radiusMeters), ssid) ?: return noMatchingSsid(observedAuthServerName)
-                evaluateEnterpriseNetwork(observedAuthServerName, observedCaFingerprint, candidates).applyExclusivity(ssid).withResponseMetadata(response)
+                VerificationResult(VerificationState.CONFLICT, host, reason = response.cause)
+            is GeckoResponse.Success -> when (val c = candidatesFor(response, lat, lng, radiusMeters, ssid, host)) {
+                is Candidates.Done -> return c.result
+                is Candidates.Judge -> c.finish(
+                    evaluateEnterpriseNetwork(observed, userRealm, c.certs),
+                    authModeConflict(c, observedAuthModes, host)
+                ).withResponseMetadata(response)
             }
         }
-        if (result.state != VerificationState.UNREACHABLE) cache.put(networkKey, observedAuthServerName, result)
+        if (result.state != VerificationState.UNREACHABLE) cache.put(networkKey, cacheKey, result)
         return result
     }
 
@@ -250,25 +264,90 @@ class VerificationEngine(
         return if (matching.isEmpty()) null else matching
     }
 
+    /** What a successful query leaves to judge: certificates, or already a final result. */
+    private sealed interface Candidates {
+        data class Done(val result: VerificationResult) : Candidates
+
+        /**
+         * [certs]: valid, covering, SSID-matched and evaluable. [skipped]: the
+         * SSID's certificates this client can't evaluate (unknown critical
+         * feature). [ssid]: the SSID the query was scoped to, if any.
+         */
+        data class Judge(val certs: List<GeoCertificate>, val skipped: List<GeoCertificate>, val ssid: String?) : Candidates
+    }
+
+    private fun candidatesFor(
+        response: GeckoResponse.Success, lat: Double, lng: Double, radiusMeters: Int, ssid: String?, host: String
+    ): Candidates {
+        val bySsid = filterBySsid(response.validCertificates(lat, lng, radiusMeters), ssid)
+            ?: return Candidates.Done(noMatchingSsid(host))
+        val (evaluable, skipped) = bySsid.partition { it.isEvaluable() }
+        if (evaluable.isEmpty()) {
+            val features = skipped.flatMap { it.critical }.distinct().joinToString()
+            return Candidates.Done(VerificationResult(VerificationState.UNVERIFIED, host,
+                reason = "registered here with features this app doesn't support ($features)").withResponseMetadata(response))
+        }
+        return Candidates.Judge(evaluable, skipped, ssid)
+    }
+
+    /**
+     * The rules on top of a single verdict: an auth-mode conflict (if any)
+     * wins over a non-conflicting verdict, SSID exclusivity escalates
+     * UNRECOGNIZED, and a CONFLICT is withheld while some of the SSID's
+     * certificates couldn't be evaluated - one of them might register exactly
+     * what was seen.
+     */
+    private fun Candidates.Judge.finish(verdict: VerificationResult, authConflict: VerificationResult? = null): VerificationResult {
+        val combined = if (authConflict != null && verdict.state != VerificationState.CONFLICT) authConflict else verdict
+        val result = combined.applyExclusivity(ssid, shared = certs.any { it.wifi.ssidShared })
+        return if (result.state == VerificationState.CONFLICT && skipped.isNotEmpty())
+            result.copy(state = VerificationState.UNVERIFIED,
+                reason = "would be a conflict (${result.reason}), but ${skipped.size} certificate(s) for this SSID use features this app doesn't support")
+        else result
+    }
+
+    /**
+     * Scenario A1: every mode the access point advertises ([observed], from the
+     * scan) must be registered for the SSID, else this network isn't what was
+     * registered (an open or personal clone of an enterprise SSID, a WPA2
+     * clone of a WPA3-only one). Only certificates that register auth modes
+     * take part (v2 certificates don't), and one permitting certificate is
+     * enough. Returns UNRECOGNIZED, which SSID exclusivity escalates.
+     */
+    private fun authModeConflict(c: Candidates.Judge, observed: Set<WiFiAuthMode>?, host: String): VerificationResult? {
+        if (observed.isNullOrEmpty() || c.ssid == null) return null
+        val registering = c.certs.filter { it.wifi.authModeNames.isNotEmpty() }
+        if (registering.isEmpty() || registering.any { it.wifi.permits(observed) }) return null
+        val registered = registering.flatMap { it.wifi.authModeNames }.distinct()
+        return VerificationResult(
+            VerificationState.UNRECOGNIZED, host,
+            matchedCertificateId = registering.first().certificateId,
+            reason = "network advertises ${observed.joinToString { it.wire }}, but is registered as ${registered.joinToString()}",
+            registeredIdentifier = registered.joinToString(),
+            presentedIdentifier = observed.joinToString { it.wire }
+        )
+    }
+
     /**
      * SSID exclusivity (see docs/design-decisions.md). A query is SSID-scoped
      * when [ssid] was given, which means the candidates were pre-filtered to
-     * that SSID - so reaching [PortalSession] at all proves the SSID *is*
-     * registered at this location. A network on a registered SSID that matches
-     * nothing registered there is not merely "unknown": it is presenting a
-     * registered SSID it has no claim to, which we treat as impersonation.
-     * So UNRECOGNIZED is escalated to CONFLICT in the SSID-scoped path.
+     * that SSID - so reaching the judge at all proves the SSID *is* registered
+     * at this location. A network on a registered SSID that matches nothing
+     * registered there is not merely "unknown": it is presenting a registered
+     * SSID it has no claim to, which we treat as impersonation. So
+     * UNRECOGNIZED is escalated to CONFLICT in the SSID-scoped path.
      *
-     * With [ssid] == null (no pre-filter, e.g. a typed-domain lookup that isn't
-     * asserting an SSID) the additive UNRECOGNIZED semantics are kept: certs
-     * may exist here for *other* SSIDs without claiming this domain's network.
+     * Not escalated with [ssid] == null (no pre-filter, e.g. a typed-domain
+     * lookup that isn't asserting an SSID), or when a registration marks the
+     * SSID as [shared][WiFiIdentity.ssidShared] between operators: then an
+     * unknown network on it may be legitimate.
      *
      * The matching registration-side rule (the map server must refuse a new
-     * GeoCert whose (SSID, area) overlaps an existing one) lives in geopki, not
-     * here; without it the client and the registry would disagree.
+     * GeoCert whose (SSID, area) overlaps one of another subject) lives in
+     * geopki, not here; without it the client and the registry would disagree.
      */
-    private fun VerificationResult.applyExclusivity(ssid: String?): VerificationResult =
-        if (ssid != null && state == VerificationState.UNRECOGNIZED)
+    private fun VerificationResult.applyExclusivity(ssid: String?, shared: Boolean): VerificationResult =
+        if (ssid != null && !shared && state == VerificationState.UNRECOGNIZED)
             copy(
                 state = VerificationState.CONFLICT,
                 reason = "unregistered identity on \"$ssid\", which is registered here (SSID exclusive): $reason"

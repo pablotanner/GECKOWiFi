@@ -18,7 +18,7 @@ class PortalSessionTest {
     private fun cert(id: String = "cert-1", vararg domains: PortalDomain) = GeoCertificate(
         schemaVersion = 2,
         certificateId = id,
-        wifi = WiFiIdentity(ssid = "TestNet", authMode = WiFiAuthMode.OPEN),
+        wifi = WiFiIdentity(ssid = "TestNet", authModeNames = listOf("open")),
         portal = PortalTLSIdentity(domains = domains.toList()),
         areas = emptyList(),
         notValidAfter = "2099-01-01T00:00:00Z"

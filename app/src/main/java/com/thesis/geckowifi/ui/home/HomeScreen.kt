@@ -313,7 +313,7 @@ private fun supportingText(row: NetworkRow, labMode: Boolean): String = when (va
         else -> "Open"
     }
     is ScannedNetwork.FakeCaptivePortal -> "Simulated ${n.label}" + if (labMode) ", presents ${n.presumedDomain}" else ""
-    is ScannedNetwork.FakeEduroam -> "Simulated ${n.label}" + if (labMode) ", login server ${n.presumedAuthServerName}" else ""
+    is ScannedNetwork.FakeEduroam -> "Simulated ${n.label}" + if (labMode) ", login server ${n.observed.displayName}" + (n.userRealm?.let { ", realm $it" } ?: "") else ""
 }
 
 private fun signalIcon(rssi: Int?): ImageVector = when {

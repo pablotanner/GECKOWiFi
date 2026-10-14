@@ -1,5 +1,8 @@
 package com.thesis.geckowifi.network
 
+import com.thesis.geckowifi.data.model.WiFiAuthMode
+import com.thesis.geckowifi.verification.ObservedAuthServer
+
 /**
  * A network to show in the prototype's "nearby networks" list - either a
  * real WifiManager scan result, or a hardcoded stand-in for a scenario that
@@ -28,6 +31,10 @@ sealed class ScannedNetwork {
         /** No WPA/WPA2/WPA3/WEP/802.1X in the scan's capability string - nothing to authenticate with. */
         val isOpen: Boolean
             get() = listOf("WPA", "RSN", "SAE", "WEP", "EAP", "OWE").none { capabilities.contains(it) }
+
+        /** What the access point advertises, compared with the registered `auth_modes`. */
+        val authModes: Set<WiFiAuthMode>
+            get() = parseAuthModes(capabilities)
 
         /** Short security label for list rows, instead of the raw capability string. */
         val securityLabel: String
@@ -73,16 +80,18 @@ sealed class ScannedNetwork {
     ) : ScannedNetwork()
 
     /**
-     * Stands in for the RADIUS/AAA auth server name + CA fingerprint that
-     * [com.thesis.geckowifi.capability.SupplicantCertSource] would read from
-     * a real EAP-TLS handshake (root-only). No real handshake is involved
-     * for this entry.
+     * Stands in for what an EAP probe would observe from a real 802.1X
+     * handshake (root-only, see [com.thesis.geckowifi.capability.SupplicantCertSource]):
+     * the RADIUS server's certificate chain, plus the realm of the user's own
+     * identity. No real handshake is involved for this entry.
      */
     data class FakeEduroam(
         override val ssid: String,
         override val bssid: String?,
         val label: String,
-        val presumedAuthServerName: String,
-        val presumedCaFingerprintBase64: String
+        val observed: ObservedAuthServer,
+        /** Realm of the user's eduroam identity (`user@realm`); decides local user vs. visitor. */
+        val userRealm: String?,
+        val authModes: Set<WiFiAuthMode> = setOf(WiFiAuthMode.WPA2_ENTERPRISE)
     ) : ScannedNetwork()
 }

@@ -19,11 +19,14 @@ import kotlin.math.sqrt
  * area check is exactly as lenient as the location query was and no more: a
  * registration whose own area is farther than that from the device is dropped.
  *
- * A certificate with **no** areas is treated as unscoped (covers everywhere),
- * which keeps legacy/area-less certificates working. The map server is assumed
- * to reject a certificate without an area, the same registration-side
- * assumption SSID exclusivity already relies on (see docs/design-decisions.md);
- * the client cannot geographically bound a claim that carries no geography.
+ * A certificate with **no** areas covers nothing and is dropped: a claim
+ * without geography can't be bounded. The map server is assumed to reject such
+ * certificates anyway (see docs/design-decisions.md).
+ *
+ * Areas use geopki's layout, not GeoJSON's (see [com.thesis.geckowifi.data.model.GeoCertArea]):
+ * each exterior ring is a polygon, interior rings are holes. The server ignores
+ * holes when indexing, so a device in a hole still receives the certificate;
+ * honouring them here follows what the operator registered.
  *
  * Geometry is planar (equirectangular, metres) around the device point:
  * accurate to well under a metre at the city-block scale GeoCert areas use,
@@ -31,26 +34,24 @@ import kotlin.math.sqrt
  * no real GeoCert area spans either.
  */
 fun GeoCertificate.coversLocation(lat: Double, lng: Double, radiusMeters: Int): Boolean {
-    // should never be empty, so reject
-    if (areas.isEmpty()) return false
     val r = radiusMeters.toDouble()
-    return areas.any { area -> area.coordinates.any { polygon -> circleIntersectsPolygon(lat, lng, r, polygon) } }
+    return areas.any { area -> circleIntersectsArea(lat, lng, r, area.exteriorRings, area.interiorRings) }
 }
 
-/** One GeoJSON polygon: ring 0 is the outer boundary, rings 1+ are holes. Each point is [lng, lat]. */
-private fun circleIntersectsPolygon(
-    lat: Double, lng: Double, radiusM: Double, polygon: List<List<List<Double>>>
+private fun circleIntersectsArea(
+    lat: Double, lng: Double, radiusM: Double,
+    exteriors: List<List<List<Double>>>, interiors: List<List<List<Double>>>
 ): Boolean {
-    val outer = polygon.firstOrNull()?.takeIf { it.size >= 3 } ?: return false
-    val holes = polygon.drop(1).filter { it.size >= 3 }
+    val outer = exteriors.filter { it.size >= 3 }
+    val holes = interiors.filter { it.size >= 3 }
+    if (outer.isEmpty()) return false
 
-    val insideRegion = pointInRing(lat, lng, outer) && holes.none { pointInRing(lat, lng, it) }
+    val insideRegion = outer.any { pointInRing(lat, lng, it) } && holes.none { pointInRing(lat, lng, it) }
     if (insideRegion) return true
 
     // Outside the region: the circle reaches it iff it reaches any boundary edge
-    // (the outer ring, or - if the device sits in a hole - the hole's ring).
-    val rings = listOf(outer) + holes
-    return rings.any { ring -> minDistanceToRingMeters(lat, lng, ring) <= radiusM }
+    // (an exterior ring, or - if the device sits in a hole - the hole's ring).
+    return (outer + holes).any { ring -> minDistanceToRingMeters(lat, lng, ring) <= radiusM }
 }
 
 /** Ray-casting point-in-polygon with x = lng, y = lat; the ring closes implicitly. */

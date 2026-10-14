@@ -55,12 +55,12 @@ class PortalSession(val networkKey: String) {
                 return if (entry.accepts(presentedSpkiHash)) {
                     VerificationResult(
                         VerificationState.VERIFIED, host, host, current.certificateId,
-                        "${entry.role.name.lowercase()} domain of anchor matched"
+                        "${entry.roleLabel} domain of anchor matched"
                     )
                 } else {
                     VerificationResult(
                         VerificationState.CONFLICT, host, host, current.certificateId,
-                        "${entry.role.name.lowercase()} domain of anchor presented unexpected key",
+                        "${entry.roleLabel} domain of anchor presented unexpected key",
                         registeredIdentifier = entry.pinnedSPKIHashes.firstOrNull(),
                         presentedIdentifier = presentedSpkiHash
                     )
@@ -76,7 +76,7 @@ class PortalSession(val networkKey: String) {
             return if (entry.role != PortalDomainRole.PRIMARY && entry.accepts(presentedSpkiHash)) {
                 VerificationResult(
                     VerificationState.UNRECOGNIZED, host, host, cert.certificateId,
-                    "${entry.role.name.lowercase()} domain seen before its portal's primary domain"
+                    "${entry.roleLabel} domain seen before its portal's primary domain"
                 )
             } else {
                 VerificationResult(

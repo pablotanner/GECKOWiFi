@@ -1,12 +1,12 @@
 package com.thesis.geckowifi.verification
 
+import com.thesis.geckowifi.ZURICH_AREA
 import com.thesis.geckowifi.data.model.GeoCertArea
 import com.thesis.geckowifi.data.model.GeoCertificate
 import com.thesis.geckowifi.data.model.PortalDomain
 import com.thesis.geckowifi.data.model.PortalDomainRole
 import com.thesis.geckowifi.data.model.PortalTLSIdentity
 import com.thesis.geckowifi.data.model.VerificationState
-import com.thesis.geckowifi.data.model.WiFiAuthMode
 import com.thesis.geckowifi.data.model.WiFiIdentity
 import com.thesis.geckowifi.data.remote.GeckoClient
 import com.thesis.geckowifi.data.remote.GeckoResponse
@@ -32,11 +32,12 @@ class PortalHopsVerificationTest {
     private val mangoA = GeoCertificate(
         schemaVersion = 2,
         certificateId = "mango-a",
-        wifi = WiFiIdentity(ssid = "GeckoTest", authMode = WiFiAuthMode.OPEN),
+        wifi = WiFiIdentity(ssid = "GeckoTest", authModeNames = listOf("open")),
         portal = PortalTLSIdentity(listOf(
             PortalDomain("portal.gecko-a.lab", PortalDomainRole.PRIMARY, listOf("keyPortal")),
             PortalDomain("pay.gecko-pay.lab", PortalDomainRole.DELEGATE, listOf("keyPay"))
         )),
+        areas = listOf(ZURICH_AREA),
         notValidAfter = "2031-01-01T00:00:00Z"
     )
 
@@ -275,10 +276,11 @@ class PortalHopsVerificationTest {
     private fun attackerCert() = GeoCertificate(
         schemaVersion = 2,
         certificateId = "attacker",
-        wifi = WiFiIdentity(ssid = "GeckoTest", authMode = WiFiAuthMode.OPEN),
+        wifi = WiFiIdentity(ssid = "GeckoTest", authModeNames = listOf("open")),
         portal = PortalTLSIdentity(listOf(
             PortalDomain("login.attacker.lab", PortalDomainRole.PRIMARY, listOf("keyAttacker"))
         )),
+        areas = listOf(ZURICH_AREA),
         notValidAfter = "2031-01-01T00:00:00Z"
     )
 

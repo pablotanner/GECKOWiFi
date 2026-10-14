@@ -2,7 +2,7 @@ package com.thesis.geckowifi.enterprise
 
 import android.net.wifi.WifiEnterpriseConfig
 import android.net.wifi.WifiNetworkSuggestion
-import com.thesis.geckowifi.data.model.EAPMethod
+import com.thesis.geckowifi.data.model.AAADomain
 import com.thesis.geckowifi.data.model.GeoCertificate
 import com.thesis.geckowifi.data.model.WiFiAuthMode
 
@@ -11,73 +11,64 @@ sealed class ConfigResult {
     data class Rejected(val reason: String) : ConfigResult()
 }
 
+/**
+ * Builds the connection profile for an enterprise network from its
+ * GeoCertificate, so the OS supplicant itself refuses a server that doesn't
+ * match (enforcement, not just detection). Not wired into a check yet.
+ *
+ * Without root this can only pin server *names* (`setDomainSuffixMatch`,
+ * validated against the device's trusted roots): a GeoCert carries key
+ * hashes, not the CA certificate `WifiEnterpriseConfig.caCertificate` needs.
+ * Key pinning (`ca_cert="hash://server/sha256/…"` in wpa_supplicant) is a
+ * root-path follow-up.
+ */
 class EnterpriseConfigurator {
 
-    /**
-     * FIXED (found while wiring the eduroam demo, see docs/prototype-decisions.md):
-     * this used to require `identity.authServerCAs` (a full CA certificate,
-     * base64 DER) and reject when it was empty - but the real server's
-     * `GeoCertificate.WiFiIdentity` struct has no such field, only
-     * `auth_server_names` and `trusted_ca_fingerprints` (a *hash*, not
-     * reversible to the certificate bytes `WifiEnterpriseConfig.caCertificate`
-     * needs). So this could never succeed against real data.
-     *
-     * Fixed by not requiring a pinned CA certificate at all: this now relies
-     * on `setDomainSuffixMatch` alone, validated against the device's normal
-     * trusted-root store. That's a real, meaningful weakening versus true CA
-     * pinning (an attacker holding *any* CA-issued certificate for a
-     * similar-looking name could still pass), but it's what's actually
-     * achievable from GECKO's real (fingerprint-only) data, and it's still a
-     * genuine prevention mechanism - Android's own supplicant refuses the
-     * handshake natively if the name doesn't match, no root needed. Root
-     * (`SupplicantCertSource`) remains for the fingerprint-based EVALUATION
-     * path, which only needs a hash-to-hash compare - see
-     * [expectedCaFingerprints] and `verification/EnterpriseVerification.kt`.
-     */
-    fun buildFrom(certificate: GeoCertificate, ssid: String): ConfigResult {
+    /** [userRealm] picks the `aaa` entry; null or a visitor realm falls back to the first entry. */
+    fun buildFrom(certificate: GeoCertificate, ssid: String, userRealm: String? = null): ConfigResult {
         val identity = certificate.wifi
-
-        if (!isEnterprise(identity.authMode)) {
-            return ConfigResult.Rejected("network is not enterprise: ${identity.authMode}")
+        val enterprise = identity.enterprise
+        if (enterprise == null || identity.authModes.none { it.isEnterprise }) {
+            return ConfigResult.Rejected("network is not enterprise: ${identity.authModeNames}")
         }
-        if (identity.authServerNames.isEmpty()) {
-            return ConfigResult.Rejected("no auth_server_names to pin")
+        val group = selectGroup(enterprise.aaa, userRealm)
+            ?: return ConfigResult.Rejected("no aaa entry to provision from")
+        val names = group.servers.flatMap { it.names }.distinct()
+        if (names.isEmpty()) {
+            return ConfigResult.Rejected("no server names to pin")
         }
 
+        val method = group.eapMethods.firstOrNull()
         val enterpriseConfig = WifiEnterpriseConfig().apply {
-            eapMethod = mapEap(identity.eap)
-            if (identity.eap != EAPMethod.EAP_TLS) {
-                phase2Method = WifiEnterpriseConfig.Phase2.MSCHAPV2
+            eapMethod = mapEap(method?.method)
+            if (eapMethod != WifiEnterpriseConfig.Eap.TLS) {
+                phase2Method = mapPhase2(method?.phase2?.firstOrNull())
             }
-            setDomainSuffixMatch(identity.authServerNames.first())
+            // Android accepts a ';'-separated list; each entry also matches its subdomains.
+            setDomainSuffixMatch(names.joinToString(";"))
         }
 
         val builder = WifiNetworkSuggestion.Builder().setSsid(ssid)
-        val suggestion = when (identity.authMode) {
-            WiFiAuthMode.WPA3_ENTERPRISE ->
-                builder.setWpa3Enterprise192BitModeConfig(enterpriseConfig).build()
-            else ->
-                builder.setWpa2EnterpriseConfig(enterpriseConfig).build()
-        }
+        val suggestion = if (WiFiAuthMode.WPA3_ENTERPRISE_192 in identity.authModes)
+            builder.setWpa3Enterprise192BitModeConfig(enterpriseConfig).build()
+        else
+            builder.setWpa2EnterpriseConfig(enterpriseConfig).build()
         return ConfigResult.Success(suggestion)
     }
 
-    /**
-     * The certificate fingerprints are a comparison value for the rooted
-     * ground-truth path (`SupplicantCertSource` + `evaluateEnterpriseNetwork`).
-     * Stock Android cannot expose the presented certificate, so this is used
-     * for evaluation rather than enforcement.
-     */
-    fun expectedCaFingerprints(certificate: GeoCertificate): List<String> =
-        certificate.wifi.trustedCAFingerprints
+    fun selectGroup(aaa: List<AAADomain>, userRealm: String?): AAADomain? =
+        userRealm?.let { realm -> aaa.firstOrNull { it.coversRealm(realm) } } ?: aaa.firstOrNull()
 
-    fun isEnterprise(mode: WiFiAuthMode?): Boolean =
-        mode == WiFiAuthMode.WPA2_ENTERPRISE || mode == WiFiAuthMode.WPA3_ENTERPRISE
+    fun mapEap(method: String?): Int = when (method) {
+        "peap" -> WifiEnterpriseConfig.Eap.PEAP
+        "ttls" -> WifiEnterpriseConfig.Eap.TTLS
+        else -> WifiEnterpriseConfig.Eap.TLS
+    }
 
-    fun mapEap(method: EAPMethod?): Int = when (method) {
-        EAPMethod.EAP_TLS -> WifiEnterpriseConfig.Eap.TLS
-        EAPMethod.PEAP -> WifiEnterpriseConfig.Eap.PEAP
-        EAPMethod.TTLS -> WifiEnterpriseConfig.Eap.TTLS
-        null -> WifiEnterpriseConfig.Eap.TLS
+    fun mapPhase2(method: String?): Int = when (method) {
+        "pap" -> WifiEnterpriseConfig.Phase2.PAP
+        "gtc" -> WifiEnterpriseConfig.Phase2.GTC
+        "mschap" -> WifiEnterpriseConfig.Phase2.MSCHAP
+        else -> WifiEnterpriseConfig.Phase2.MSCHAPV2
     }
 }

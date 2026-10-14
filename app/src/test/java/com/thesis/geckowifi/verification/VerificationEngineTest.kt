@@ -1,6 +1,9 @@
 package com.thesis.geckowifi.verification
 
-import com.thesis.geckowifi.data.model.EAPMethod
+import com.thesis.geckowifi.ZURICH_AREA
+import com.thesis.geckowifi.data.model.AAADomain
+import com.thesis.geckowifi.data.model.AuthServer
+import com.thesis.geckowifi.data.model.EnterpriseIdentity
 import com.thesis.geckowifi.data.model.GeoCertificate
 import com.thesis.geckowifi.data.model.PortalDomain
 import com.thesis.geckowifi.data.model.PortalDomainRole
@@ -59,8 +62,9 @@ class VerificationEngineTest {
 
     private fun sampleCertificate(domain: String, notValidAfter: String = "2099-01-01T00:00:00Z") = GeoCertificate(
         certificateId = "cert-1",
-        wifi = WiFiIdentity(authMode = WiFiAuthMode.OPEN),
+        wifi = WiFiIdentity(authModeNames = listOf("open")),
         portal = pinnedPortal(domain, "expected-hash"),
+        areas = listOf(ZURICH_AREA),
         notValidAfter = notValidAfter
     )
 
@@ -159,8 +163,9 @@ class VerificationEngineTest {
         // fetched - this is the prototype's fake-network path.
         val pinnedCert = GeoCertificate(
             certificateId = "cert-pinned",
-            wifi = WiFiIdentity(authMode = WiFiAuthMode.OPEN),
+            wifi = WiFiIdentity(authModeNames = listOf("open")),
             portal = pinnedPortal(host, "expected-hash"),
+            areas = listOf(ZURICH_AREA),
             notValidAfter = "2099-01-01T00:00:00Z"
         )
         val gecko = mockk<GeckoClient>()
@@ -174,8 +179,9 @@ class VerificationEngineTest {
     fun verifyPresentedDomain_mismatchedSpkiHashIsConflict() = runTest {
         val pinnedCert = GeoCertificate(
             certificateId = "cert-pinned",
-            wifi = WiFiIdentity(authMode = WiFiAuthMode.OPEN),
+            wifi = WiFiIdentity(authModeNames = listOf("open")),
             portal = pinnedPortal(host, "expected-hash"),
+            areas = listOf(ZURICH_AREA),
             notValidAfter = "2099-01-01T00:00:00Z"
         )
         val gecko = mockk<GeckoClient>()
@@ -185,39 +191,137 @@ class VerificationEngineTest {
         assertEquals(VerificationState.CONFLICT, result.state)
     }
 
+    private val genuineServer = ObservedAuthServer("leafKey", listOf("radius.example.org"), listOf("caKey"))
+
+    private fun enterpriseCert(ssid: String = "eduroam", critical: List<String> = emptyList()) = GeoCertificate(
+        schemaVersion = 3,
+        certificateId = "eduroam-cert",
+        critical = critical,
+        wifi = WiFiIdentity(
+            ssid = ssid,
+            authModeNames = listOf("wpa2-enterprise"),
+            enterprise = EnterpriseIdentity(
+                federation = "eduroam",
+                aaa = listOf(AAADomain(
+                    realms = listOf("example.org"),
+                    servers = listOf(AuthServer(names = listOf("radius.example.org"), caSPKIHashes = listOf("caKey")))
+                ))
+            )
+        ),
+        areas = listOf(ZURICH_AREA),
+        notValidAfter = "2099-01-01T00:00:00Z"
+    )
+
+    private fun geckoReturning(vararg certs: GeoCertificate) = mockk<GeckoClient> {
+        coEvery { queryLocation(any(), any(), any()) } returns GeckoResponse.Success(certs.toList())
+    }
+
     @Test
     fun verifyEnterprise_mapsProofFailureToConflict() = runTest {
         val gecko = mockk<GeckoClient>()
         coEvery { gecko.queryLocation(any(), any(), any()) } returns GeckoResponse.ProofFailure("bad signature")
 
-        val result = engine(gecko).verifyEnterprise(
-            networkKey, "radius.example.org", "abc123", lat, lng, null, radius
-        )
+        val result = engine(gecko).verifyEnterprise(networkKey, genuineServer, "example.org", lat, lng, null, radius)
 
         assertEquals(VerificationState.CONFLICT, result.state)
     }
 
     @Test
     fun verifyEnterprise_delegatesSuccessToEvaluateEnterpriseNetwork() = runTest {
-        val cert = GeoCertificate(
-            certificateId = "eduroam-cert",
-            wifi = WiFiIdentity(
-                authMode = WiFiAuthMode.WPA2_ENTERPRISE,
-                eap = EAPMethod.EAP_TLS,
-                authServerNames = listOf("radius.example.org"),
-                trustedCAFingerprints = listOf("abc123")
-            ),
-            notValidAfter = "2099-01-01T00:00:00Z"
-        )
-        val gecko = mockk<GeckoClient>()
-        coEvery { gecko.queryLocation(any(), any(), any()) } returns GeckoResponse.Success(listOf(cert))
+        val cert = enterpriseCert()
 
-        val result = engine(gecko).verifyEnterprise(
-            networkKey, "radius.example.org", "abc123", lat, lng, null, radius
+        val result = engine(geckoReturning(cert)).verifyEnterprise(
+            networkKey, genuineServer, "example.org", lat, lng, null, radius,
+            ssid = "eduroam", observedAuthModes = setOf(WiFiAuthMode.WPA2_ENTERPRISE)
         )
 
         assertEquals(VerificationState.VERIFIED, result.state)
         assertEquals(cert.certificateId, result.matchedCertificateId)
+    }
+
+    @Test
+    fun a1_openCloneOfEnterpriseSsid_isConflict() = runTest {
+        // An evil twin broadcasting "eduroam" as an open network with a captive
+        // portal of its own: nothing about the portal is registered, but the auth
+        // mode alone already gives it away.
+        val result = engine(geckoReturning(enterpriseCert())).verifyPresentedDomain(
+            networkKey, "login.evil.lab", "attackerKey", lat, lng, null, radius,
+            ssid = "eduroam", observedAuthModes = setOf(WiFiAuthMode.OPEN)
+        )
+
+        assertEquals(VerificationState.CONFLICT, result.state)
+        assertEquals("wpa2-enterprise", result.registeredIdentifier)
+        assertEquals("open", result.presentedIdentifier)
+    }
+
+    @Test
+    fun authModeMismatch_isConflictEvenIfThePortalVerifies() = runTest {
+        // Genuine portal key, but the AP is registered as WPA2-personal and advertises open.
+        val cert = sampleCertificate(host).copy(wifi = WiFiIdentity(ssid = "Cafe", authModeNames = listOf("wpa2-personal")))
+
+        val result = engine(geckoReturning(cert)).verifyPresentedDomain(
+            networkKey, host, "expected-hash", lat, lng, null, radius,
+            ssid = "Cafe", observedAuthModes = setOf(WiFiAuthMode.OPEN)
+        )
+
+        assertEquals(VerificationState.CONFLICT, result.state)
+    }
+
+    @Test
+    fun certificateWithoutAuthModes_skipsTheAuthModeCheck() = runTest {
+        // v2 certificates carry no auth_modes: nothing to compare, the portal decides.
+        val cert = sampleCertificate(host).copy(wifi = WiFiIdentity(ssid = "Cafe"))
+
+        val result = engine(geckoReturning(cert)).verifyPresentedDomain(
+            networkKey, host, "expected-hash", lat, lng, null, radius,
+            ssid = "Cafe", observedAuthModes = setOf(WiFiAuthMode.WPA2_PERSONAL)
+        )
+
+        assertEquals(VerificationState.VERIFIED, result.state)
+    }
+
+    @Test
+    fun onlyUnknownCriticalFeature_isSilentUnverified() = runTest {
+        val result = engine(geckoReturning(enterpriseCert(critical = listOf("future-feature")))).verifyEnterprise(
+            networkKey, genuineServer, "example.org", lat, lng, null, radius, ssid = "eduroam"
+        )
+
+        assertEquals(VerificationState.UNVERIFIED, result.state)
+        assertEquals(true, result.reason?.contains("future-feature"))
+    }
+
+    @Test
+    fun conflictIsWithheldWhileAnotherCertificateForTheSsidIsUnevaluable() = runTest {
+        // A rogue server against the evaluable certificate would be CONFLICT, but
+        // the second certificate's unknown critical feature might legitimise it.
+        val rogue = ObservedAuthServer("rogueKey", listOf("radius.example.org"), listOf("rogueCa"))
+        val other = enterpriseCert(critical = listOf("future-feature")).copy(certificateId = "other")
+
+        val result = engine(geckoReturning(enterpriseCert(), other)).verifyEnterprise(
+            networkKey, rogue, "example.org", lat, lng, null, radius, ssid = "eduroam"
+        )
+
+        assertEquals(VerificationState.UNVERIFIED, result.state)
+    }
+
+    @Test
+    fun sharedSsid_keepsUnknownNetworkUnrecognized() = runTest {
+        val shared = sampleCertificate(host).copy(wifi = WiFiIdentity(ssid = "FreeWiFi", ssidShared = true))
+
+        val result = engine(geckoReturning(shared)).verifyPresentedDomain(
+            networkKey, "other-venue.example", "otherKey", lat, lng, null, radius, ssid = "FreeWiFi"
+        )
+
+        assertEquals(VerificationState.UNRECOGNIZED, result.state)
+    }
+
+    @Test
+    fun certificateBeforeNotValidBefore_isIgnored() = runTest {
+        val future = sampleCertificate(host).copy(notValidBefore = "2027-01-01T00:00:00Z")
+
+        val result = engine(geckoReturning(future)).verifyPresentedDomain(networkKey, host, "expected-hash", lat, lng, null, radius)
+
+        assertEquals(VerificationState.UNVERIFIED, result.state)
     }
 
     @Test

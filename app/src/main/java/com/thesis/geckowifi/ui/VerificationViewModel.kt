@@ -330,10 +330,11 @@ class VerificationViewModel(
                     )
                     is ScannedNetwork.FakeEduroam -> engine.verifyEnterprise(
                         networkKey = "fake:${fake.ssid}:${fake.label}",
-                        observedAuthServerName = fake.presumedAuthServerName,
-                        observedCaFingerprint = fake.presumedCaFingerprintBase64,
+                        observed = fake.observed,
+                        userRealm = fake.userRealm,
                         lat = fix.latitude, lng = fix.longitude, altitude = null,
-                        radiusMeters = effectiveRadius(fix), ssid = fake.ssid
+                        radiusMeters = effectiveRadius(fix), ssid = fake.ssid,
+                        observedAuthModes = fake.authModes
                     )
                     is ScannedNetwork.Real -> return@launch
                 }
@@ -413,7 +414,8 @@ class VerificationViewModel(
                     Discovery.Outcome.PortalReached -> {
                         val check = engine.verifyPortalHops(
                             networkKey, discovery.hops, judgeFinalPlainHop = true,
-                            fix.latitude, fix.longitude, null, effectiveRadius(fix), network.ssid
+                            fix.latitude, fix.longitude, null, effectiveRadius(fix), network.ssid,
+                            observedAuthModes = network.authModes
                         )
                         finishCheck(network, networkKey, fix, check.overall, "discovery", outcome, check.hops)
                     }
@@ -435,7 +437,8 @@ class VerificationViewModel(
                         // Judge what was seen: a key mismatch before the failure is still a CONFLICT.
                         val partial = engine.verifyPortalHops(
                             networkKey, discovery.hops, judgeFinalPlainHop = false,
-                            fix.latitude, fix.longitude, null, effectiveRadius(fix), network.ssid
+                            fix.latitude, fix.longitude, null, effectiveRadius(fix), network.ssid,
+                            observedAuthModes = network.authModes
                         )
                         val conflict = partial.overall.state == VerificationState.CONFLICT
                         val result = if (conflict) partial.overall
@@ -457,7 +460,8 @@ class VerificationViewModel(
         networkKey = networkKey,
         host = host,
         lat = fix.latitude, lng = fix.longitude, altitude = null,
-        radiusMeters = effectiveRadius(fix), ssid = network.ssid
+        radiusMeters = effectiveRadius(fix), ssid = network.ssid,
+        observedAuthModes = network.authModes
     )
 
     private fun finishCheck(
