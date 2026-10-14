@@ -79,15 +79,15 @@ class EnterpriseVerificationTest {
         val c = cert(realms = listOf("*.gecko-a.lab"))
         assertEquals(VerificationState.VERIFIED, evaluateEnterpriseNetwork(genuine, "staff.gecko-a.lab", listOf(c)).state)
         // The bare realm isn't covered by "*.": that user counts as a visitor.
-        assertEquals(VerificationState.UNVERIFIED, evaluateEnterpriseNetwork(genuine, "gecko-a.lab", listOf(c)).state)
+        assertEquals(VerificationState.REGISTERED, evaluateEnterpriseNetwork(genuine, "gecko-a.lab", listOf(c)).state)
     }
 
     // --- visitors ---
 
     @Test
-    fun visitorInFederation_isUnverifiedNotConflict() {
+    fun visitorInFederation_isRegisteredNotConflict() {
         val result = evaluateEnterpriseNetwork(visitorServer, "uzh.ch", listOf(cert()))
-        assertEquals(VerificationState.UNVERIFIED, result.state)
+        assertEquals(VerificationState.REGISTERED, result.state)
         assertTrue(result.reason!!.contains("visitor"))
         assertTrue(result.reason!!.contains("GECKO Lab"))
     }
@@ -95,7 +95,7 @@ class EnterpriseVerificationTest {
     @Test
     fun unknownRealmInFederation_rogueServerIsNotAConflict() {
         // Without the realm the server could be a visitor's home server.
-        assertEquals(VerificationState.UNVERIFIED, evaluateEnterpriseNetwork(rogue, null, listOf(cert())).state)
+        assertEquals(VerificationState.REGISTERED, evaluateEnterpriseNetwork(rogue, null, listOf(cert())).state)
     }
 
     @Test
@@ -106,7 +106,7 @@ class EnterpriseVerificationTest {
     @Test
     fun federationSiteWithoutLocalUsers_everyoneIsAVisitor() {
         val c = cert().let { it.copy(wifi = it.wifi.copy(enterprise = EnterpriseIdentity("eduroam", emptyList()))) }
-        assertEquals(VerificationState.UNVERIFIED, evaluateEnterpriseNetwork(genuine, "gecko-a.lab", listOf(c)).state)
+        assertEquals(VerificationState.REGISTERED, evaluateEnterpriseNetwork(genuine, "gecko-a.lab", listOf(c)).state)
     }
 
     // --- closed networks ---
@@ -196,5 +196,31 @@ class EnterpriseVerificationTest {
     @Test
     fun fromChain_emptyChain_isNull() {
         assertEquals(null, ObservedAuthServer.fromChain(emptyList()))
+    }
+
+    // --- registered CA certificates as anchors (servers often omit their root) ---
+
+    private fun b64(name: String) = java.util.Base64.getEncoder().encodeToString(pem(name).encoded)
+
+    @Test
+    fun anchor_leafSentWithoutItsCa_verifiesAgainstTheRegisteredCa() {
+        val server = AuthServer(names = listOf("radius.gecko-a.lab"), caSPKIHashes = listOf(genuineCaKey), caCertificates = listOf(b64("genuine-ca")))
+        val observed = ObservedAuthServer.fromChain(listOf(pem("genuine-leaf")), server.pinnedCaCertificates())!!
+        assertEquals(listOf(genuineCaKey), observed.verifiedIssuerSpkiSha256)
+        assertTrue(server.accepts(observed))
+    }
+
+    @Test
+    fun anchor_rogueLeafIsNotSignedByTheRegisteredCa() {
+        val server = AuthServer(names = listOf("radius.gecko-a.lab"), caSPKIHashes = listOf(genuineCaKey), caCertificates = listOf(b64("genuine-ca")))
+        val observed = ObservedAuthServer.fromChain(listOf(pem("rogue-leaf"), pem("rogue-ca")), server.pinnedCaCertificates())!!
+        assertFalse(server.accepts(observed))
+    }
+
+    @Test
+    fun pinnedCaCertificates_dropsCertificatesWhoseKeyIsNotPinned() {
+        // The hashes are the trust anchor: a certificate riding along without a matching pin is ignored.
+        val server = AuthServer(caSPKIHashes = listOf(genuineCaKey), caCertificates = listOf(b64("rogue-ca"), b64("genuine-ca"), "not base64!"))
+        assertEquals(listOf(genuineCaKey), server.pinnedCaCertificates().map { ObservedAuthServer.spkiSha256(it) })
     }
 }

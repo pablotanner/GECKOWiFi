@@ -1,0 +1,119 @@
+[
+  {
+    "schema_version": 3,
+    "certificate_id": "ethz-eduroam-2026a",
+    "subject": {
+      "id": "ethz.ch",
+      "name": "ETH Zürich"
+    },
+    "critical": [],
+    "wifi": {
+      "ssid": "eduroam",
+      "auth_modes": [
+        "wpa2-enterprise",
+        "wpa3-enterprise"
+      ],
+      "enterprise": {
+        "federation": "eduroam",
+        "aaa": [
+          {
+            "realms": [
+              "ethz.ch",
+              "*.ethz.ch"
+            ],
+            "eap_methods": [
+              {
+                "method": "peap",
+                "phase2": [
+                  "mschapv2"
+                ]
+              },
+              {
+                "method": "ttls",
+                "phase2": [
+                  "mschapv2"
+                ]
+              }
+            ],
+            "servers": [
+              {
+                "names": [
+                  "radius-service.ethz.ch"
+                ],
+                "ca_spki_sha256": [
+                  "db3yWQzHMGfyc1koolMw/LaVYsNkuS+bA5bGmvNdlAw=",
+                  "VDBYr0GHrqUCETl9htyhvbt6zvt/Wh0sqhQVhXp3h3M="
+                ],
+                "ca_certificates": [
+                  "MIIFfDCCA2SgAwIBAgIQVo0mDkfh6oxK+3cFw8mxnjANBgkqhkiG9w0BAQsFADA+MQswCQYDVQQGEwJDSDETMBEGA1UEChMKRVRIIFp1cmljaDEaMBgGA1UEAxMRRVRIWiBSb290IENBIDIwMjAwHhcNMjAxMTAzMDc0MzUzWhcNNDEwNjI0MDUwNDI3WjA+MQswCQYDVQQGEwJDSDETMBEGA1UEChMKRVRIIFp1cmljaDEaMBgGA1UEAxMRRVRIWiBSb290IENBIDIwMjAwggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIKAoICAQDFFyn3A37laBYs+JqIAFBDVA1XfYTWvPnqJ+KgIIhJW76xTFJm2tok55b5gZYXyNYUKW9ovuExiwptuNhl2/2tDvvBduDD/Tw9DgsvXPup/jOXnFgSt3ylEKymADN5JyWvJT4Q8YlCdfRfihLG6jui8GAJRoZmoApQrzq8eTnDF46d1wR1g0IMk9pAj9Fp0lpj+zQukfTtOGXiXuat8cTHaVit688V/9CYF0TPs6ugYFjhECQgY/6fgAtNWsq+kzKbYnXXDNqYkgu2k9gnRynXGN5UkBxHIt+wiTIaSbxi3ZjQjHetRSr5FsTG+/B8eq4QdKYHvN4P/ow33GU5Y1gZ+vff4bOUqDX++/lXX087pB9WLsBhFd4ligr8cjFSxEBFriqz/95qJazr4n/plnrkyi+5LCERYZDRLtZ5onPFgj/6HeutDZ4cEtP59FXX41NByMC/cTbh2M3TzA+RM6XvuteWtd03fSVxjstWz8PQGw7naLKvs8uXVonPsN5GuhhCCdTPA9gFhInVKjAv+YqefzNusr9qM/h2YhI7ve3UT2acmYPTHgBSwzdrIOzyhatUJurlEqW38A174LXKkxZN3mTaE3UxAqUhuPCdZZnDLI02KMS+4Gzzy9idmQwc4pFciNZApbbBGMD+0jE/1iVK4AFO4YnU79iQ2c/23zqh9QIDAQABo3YwdDALBgNVHQ8EBAMCAYYwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQUn1D7adnSk6gf38k1q/1mivgWMWowEAYJKwYBBAGCNxUBBAMCAQEwIwYJKwYBBAGCNxUCBBYEFOQFcgb/H7zKoVo4HgaQuz0DbV+aMA0GCSqGSIb3DQEBCwUAA4ICAQA5zQxMyC6lq6af+9MDQ1b8xRFXIm+ofjGMP81qxeMuE/bFdm4RhGNnfYZmAxEjl6kXkhr+y4QaiivFT8zsgZL+UAtXa7nBCnpMBZ0wPrPxXwKhKAwdP3My3nthA1T/fHixvzall8d7T2hulZwYsjiJQ8EFAEaI1NC8mz81ivKxOjUZruXhAK714+yrKigXCjqRk2Rhbm0VG8gRx57ZTfxT+X1S+FxOoGkidZ6YXAKerzUCuwPaNOVBC0NnNLQogxE7I5gS0LtF7ELeColD5F9rEz6oz9WoqF1ecrGiJ3YJyE/E7mmf0UWcOYic2YAEO3VqBtxuOHu7GNFqKLmu2j8MEMvQaiyG+TWyHXCpQqP9aCWoAEsR+B+0RAisuiF1HWHtJbDTAoqauMePdyYeHV4Afd3sqr6FVwvkXsiN+CYLCbLsjYyW7ClncSRt3FZ5a+8RCz3a/2E1+gXAu2Wqy+6S7/kv1mPkKpXHMFFJVYqzUfjIcdsPUcuFO60LN3Ghe55DMFwSyCzA6rZbOpyC9gqQIPeY8XoXdpbGCuTk026UMI49cYbBHlE+hyqOIaJa//CLwYAJN/svVdVP4xhpBZOlQyvu7Adx2z6EYc588nz4Pqbm6sBKGtKwLsLqM1vUlpILEilYOPqCHm8LFFL0wje0ZXdfCbVRurtESSBo/EV0Cg==",
+                  "MIIGijCCBHKgAwIBAgITRgAAAASuvnlsxBUhlAABAAAABDANBgkqhkiG9w0BAQsFADA+MQswCQYDVQQGEwJDSDETMBEGA1UEChMKRVRIIFp1cmljaDEaMBgGA1UEAxMRRVRIWiBSb290IENBIDIwMjAwHhcNMjEwNjI0MDUwMzU4WhcNNDEwNjI0MDUwNDI3WjBBMQswCQYDVQQGEwJDSDETMBEGA1UEChMKRVRIIFp1cmljaDEdMBsGA1UEAxMURVRIWiBJc3N1aW5nIENBIDIwMjAwggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIKAoICAQCvc1bq059J4KCA7zNpHc9yEDiUP+UsngGoRO3q0k89Xn+JuRmgrynOiesBy8yjHPmkIiNQEqGg0R5zGDrY55zw55BzybQCIi0sJrDj8L0rKy4At6VR3wQSwLyWK8aBzV9y3Jd4xKNqWmhhf3meAYIPzu57mfEhFMQ46s6ywAa749R3cAQSFDVNqYmlxVhNPBs07vSmSYh/Py3JT/7c6jVozPcwcLDz3uw2VusrGZOCSIyQ9Belp8atZoRkYLHY48cD1sLhTzCsNZa7xKX7l453yGDGtuToLQtEhANvNTSslGhWu0MC7Qz/lT5jLfE/RrqbDJuUwXNWn8veCpAPdBKaa9/qiiIOrNlJusEDuTgccej3+Jm3IDv5bfyRWnL4FzC0R5WRwZ+3XhUPwlrm9yLek5UsEEq2ZP+dnMtAjgzGAq+xia3c+coFQcNG8xsJ7dsFhQGTLwz3XAY4WuuiuUEXMvf6UEoLfF7qFme779TzA5MlncOq64G6YdQwpiACNP9NPRkQfplXXmSi7obyZA485HSJDYnbnOJ+t0tYWLCJRn+dz1W1cRjlS+mF14BWcRE8u4qQShK5S+08aDRxgP4tOlR2F8dL+LPRtMntAlxB0alFPL1fWEJutPINg4Dwbx2FWHngvEuM2s16AKq8VtepHt4VpE43N+/aQ/N1NuYtrwIDAQABo4IBfDCCAXgwEAYJKwYBBAGCNxUBBAMCAQEwIwYJKwYBBAGCNxUCBBYEFLAsMakNyBnmY3IFd6HYqL7KH/XuMB0GA1UdDgQWBBQjT8Kw23HHvRpHNpA7y6mHVJM6nDA6BgNVHSAEMzAxMC8GBFUdIAAwJzAlBggrBgEFBQcCARYZaHR0cDovL3BraWNwcy5ldGh6LmNoL2NwczAZBgkrBgEEAYI3FAIEDB4KAFMAdQBiAEMAQTALBgNVHQ8EBAMCAYYwEgYDVR0TAQH/BAgwBgEB/wIBATAfBgNVHSMEGDAWgBSfUPtp2dKTqB/fyTWr/WaK+BYxajA9BgNVHR8ENjA0MDKgMKAuhixodHRwOi8vcGtpY3JsLmV0aHouY2gvQ1JML0VUSFpSb290Q0EyMDIwLmNybDBIBggrBgEFBQcBAQQ8MDowOAYIKwYBBQUHMAKGLGh0dHA6Ly9wa2lhaWEuZXRoei5jaC9BSUEvRVRIWlJvb3RDQTIwMjAuY3J0MA0GCSqGSIb3DQEBCwUAA4ICAQCS6tEA7tBXXoBLDLA3ScxsW6Oi455xa1iW+/DmGYL5u1rJd6CzJFtGJ353ANYy/PzdCjhwkjyWUQQ4GGd+4QFeNlslWl9h6YF7B29qHiKKPenfhBBMWChoLwtDyU/OMlNmZos/Gd3ki9RsxdEttTUugiYYH1BBqB1jXRAd+sfousnuhgz/i+vLsfh7IYYpx4LxZRg+fONVXhX0umwNd7Rwwy3Dan4ln/rzfnA8TPKkmk0eJtnIHS3E1AMWztWfJ7pM3Y8NC5srt2fx4N/4aIPpLhgBRIpwrYEn8BetvmaPnG/TEpK2lYVRKlHuXmfb6b/jApxhd9/lsYSo9uAsne3GdjRIKhq6dVzBTcGh5Sk4C77wBbp6UCp4JijpUkW3kojO5mYf21LXL9BgM6omIr3fI0MF78yKhcEjqVVf9HVyoLL2eEFligmoBJPIUSkJFKeNmBUMDckKiw2a+ZzzUZ1mJ9HaZWKf5WTEsNJd7V/67dQE8PF9tGgNAOveMAyeEjSX5/vwCR57nZv3Ou7DqcXKOCzwZbpOUa7tph9W8G+CpysmarOWjF+B0lefNnja/B17NZ4oUtlLsoGN+2zwu5Xcu/XKyfbnl8A2SFshsP6eYx5Hz7osB+ZNaAfoHsOb4PteUTBgxv1/NKX5wlA9i64c7Wq59UZZZnont4cVt0+idA=="
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "areas": [
+      {
+        "type": "MultiPolygon",
+        "coordinates": [
+          [
+            [
+              [
+                8.5435,
+                47.374
+              ],
+              [
+                8.5515,
+                47.374
+              ],
+              [
+                8.5515,
+                47.3805
+              ],
+              [
+                8.5435,
+                47.3805
+              ],
+              [
+                8.5435,
+                47.374
+              ]
+            ],
+            [
+              [
+                8.503,
+                47.406
+              ],
+              [
+                8.5125,
+                47.406
+              ],
+              [
+                8.5125,
+                47.4105
+              ],
+              [
+                8.503,
+                47.4105
+              ],
+              [
+                8.503,
+                47.406
+              ]
+            ]
+          ],
+          []
+        ]
+      }
+    ],
+    "areas_altitude": [
+      [
+        350,
+        650
+      ]
+    ],
+    "not_valid_after": "2027-10-14T00:00:00Z"
+  }
+]

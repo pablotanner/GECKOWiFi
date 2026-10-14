@@ -371,19 +371,14 @@ class VerificationViewModel(
         val networkKey = network.bssid ?: network.ssid
         val steps = CheckStep.entries.toList()
 
-        if (!network.isOpen) {
-            val result = VerificationResult(VerificationState.UNREACHABLE, "",
-                reason = "only open networks can be joined by this prototype")
-            publish(network.ssid, network.bssid, networkKey, result, fix, failure = CheckFailure.NOT_OPEN)
-            return null
-        }
-
         if (fix.accuracyMeters > MAX_QUERY_RADIUS_METERS) {
             val result = VerificationResult(VerificationState.UNREACHABLE, "",
                 reason = "location too imprecise (±${fix.accuracyMeters.toInt()} m); a reliable check needs it within $MAX_QUERY_RADIUS_METERS m")
             publish(network.ssid, network.bssid, networkKey, result, fix, failure = CheckFailure.LOW_ACCURACY)
             return null
         }
+
+        if (!network.isOpen) return checkSecured(network, networkKey, fix)
 
         step(network, steps, CheckStep.JOIN)
         return viewModelScope.launch {
@@ -448,6 +443,33 @@ class VerificationViewModel(
                             failure = if (conflict) null else CheckFailure.PORTAL_FAILED)
                     }
                 }
+            } finally {
+                activeCheck = null
+            }
+        }
+    }
+
+    /**
+     * A secured network is checked without joining it (that needs credentials,
+     * and seeing the login server's certificate needs root): its advertised
+     * auth modes are compared with the registration, over whatever connection
+     * the device has. See [VerificationEngine.checkAdvertised].
+     */
+    private fun checkSecured(network: ScannedNetwork.Real, networkKey: String, fix: LocationFix): Job {
+        val steps = listOf(CheckStep.LOOKUP, CheckStep.COMPARE)
+        step(network, steps, CheckStep.LOOKUP)
+        return viewModelScope.launch {
+            try {
+                rebindGeckoClient()
+                step(network, steps, CheckStep.COMPARE)
+                val modes = network.authModes
+                val result = engine.checkAdvertised(
+                    networkKey, network.ssid, modes,
+                    fix.latitude, fix.longitude, null, effectiveRadius(fix)
+                )
+                publish(network.ssid, network.bssid, networkKey, result, fix,
+                    modeDescription = "Not joined: security type compared",
+                    isEnterprise = modes.any { it.isEnterprise })
             } finally {
                 activeCheck = null
             }

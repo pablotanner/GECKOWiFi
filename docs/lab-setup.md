@@ -73,8 +73,8 @@ The server's public key is pinned in the app; if the server is ever set up
 with a new key, every check fails with `CONFLICT` until the pin is updated.
 
 ## GeoCertificates
-We use a modified GeoCertificate schema, a captive portal is a list of domains, each
-with a role and its own pinned keys:
+Certificates use schema v3, specified in [geocert-schema.md](geocert-schema.md).
+A captive portal is a list of domains, each with a role and its own pinned keys:
 
 - `primary`: the login page, the only valid entry point
 - `delegate`: only valid after the primary, e.g. a payment page
@@ -82,40 +82,32 @@ with a role and its own pinned keys:
 
 The pins are SHA-256 hashes of the certificate's public key (SPKI, base64). The
 app doesn't use Web PKI at all, so a domain without pins never verifies.
-Expired certificates are ignored.
+Expired certificates are ignored. `auth_modes` lists what the network
+advertises; a network on the SSID advertising anything else is a `CONFLICT`.
 
-The certificate for router A looks like this:
-```json
-[
-  {
-    "schema_version": 2,
-    "certificate_id": "mango-a",
-    "wifi": { "auth_mode": "open", "ssid": "GeckoTest" },
-    "portal": {
-      "domains": [
-        {
-          "name": "gecko-a.lab",
-          "role": "primary",
-          "pinned_spki_sha256": ["QwsHK0yXsUHme1g9/rqOHixTb8cCuCMBxYdaglLs1Q8="]
-        }
-      ]
-    },
-    "areas": [{
-      "type": "MultiPolygon",
-      "coordinates": [[[[8.54795,47.37715],[8.54895,47.37715],[8.54895,47.37815],[8.54795,47.37815],[8.54795,47.37715]]],[]]
-    }],
-    "areas_altitude": [[200,700]],
-    "not_valid_after": "2031-09-26T15:28:00Z"
-  }
-]
-```
-For testing I modified the area so it contains the central Zürich area, so I can work from anywhere in the city. 
-The app always queries the full altitude range, but keep generous altitude bounds anyway; indoor GPS
-altitude is often off by tens of metres.
+Router A's certificate is [`lab/certs/mango-a.json`](../lab/certs/mango-a.json):
+open, `GeckoTest`, the portal domains below, and an area covering central
+Zürich (longitude 8.515–8.565, latitude 47.360–47.390: HB, Central, ETH
+Zentrum, Bellevue, Paradeplatz, Stadelhofen) so lab work is possible anywhere
+there. Remove the old `mango-a` before inserting a new version; both would be
+valid at once otherwise.
+
+The simulated eduroam entries in the app's emulator flavor need
+[`lab/certs/demo-eduroam.json`](../lab/certs/demo-eduroam.json) (same area).
+
+[`lab/certs/ethz-eduroam.json`](../lab/certs/ethz-eduroam.json) registers ETH's
+real eduroam (server `radius-service.ethz.ch`, ETHZ Root and Issuing CA 2020,
+realm `ethz.ch`), built from ETH's eduroam CAT profile. Its areas are the two
+campuses (Zentrum around the main building, Hönggerberg), not the lab box.
+Replace `demo-eduroam.json` with it when testing near real eduroam: both
+register `eduroam`, so the demo certificate would otherwise also apply.
+
+The app always queries the full altitude range, but keep generous altitude
+bounds anyway; indoor GPS altitude is often off by tens of metres.
 
 The server used to hold six older test certificates (`eth-a`, `eth-b`, `hb`,
 `stack-low`, `stack-high`, `multi`). The golden tests
-in the app were generated from them. 
+in the app were generated from them.
 
 ## Captive portal
 

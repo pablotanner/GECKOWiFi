@@ -5,6 +5,7 @@ import android.net.wifi.WifiNetworkSuggestion
 import com.thesis.geckowifi.data.model.AAADomain
 import com.thesis.geckowifi.data.model.GeoCertificate
 import com.thesis.geckowifi.data.model.WiFiAuthMode
+import com.thesis.geckowifi.verification.pinnedCaCertificates
 
 sealed class ConfigResult {
     data class Success(val suggestion: WifiNetworkSuggestion) : ConfigResult()
@@ -16,11 +17,11 @@ sealed class ConfigResult {
  * GeoCertificate, so the OS supplicant itself refuses a server that doesn't
  * match (enforcement, not just detection). Not wired into a check yet.
  *
- * Without root this can only pin server *names* (`setDomainSuffixMatch`,
- * validated against the device's trusted roots): a GeoCert carries key
- * hashes, not the CA certificate `WifiEnterpriseConfig.caCertificate` needs.
- * Key pinning (`ca_cert="hash://server/sha256/…"` in wpa_supplicant) is a
- * root-path follow-up.
+ * No root needed: the profile pins the server name (`setDomainSuffixMatch`)
+ * and, when the GeoCert carries them (`ca_certificates`), the registered CA
+ * certificates, so the server must chain to the operator's own CA. Without
+ * them, the name is checked against the device's trusted roots, which a
+ * private CA like ETH's isn't in.
  */
 class EnterpriseConfigurator {
 
@@ -46,6 +47,8 @@ class EnterpriseConfigurator {
             }
             // Android accepts a ';'-separated list; each entry also matches its subdomains.
             setDomainSuffixMatch(names.joinToString(";"))
+            val cas = group.servers.flatMap { it.pinnedCaCertificates() }
+            if (cas.isNotEmpty()) caCertificates = cas.toTypedArray()
         }
 
         val builder = WifiNetworkSuggestion.Builder().setSsid(ssid)

@@ -105,8 +105,15 @@ data class AuthServer(
     /** SAN dNSName, falling back to the subject CN. Required for a CA pin to mean anything. */
     val names: List<String> = emptyList(),
     @SerialName("pinned_spki_sha256") val pinnedSPKIHashes: List<String> = emptyList(),
-    /** CA key; the CA certificate must be part of the chain the server sends. */
-    @SerialName("ca_spki_sha256") val caSPKIHashes: List<String> = emptyList()
+    /** CA key. Matched against the chain the server sends, or against [caCertificates]. */
+    @SerialName("ca_spki_sha256") val caSPKIHashes: List<String> = emptyList(),
+    /**
+     * The CA certificates themselves (base64 DER), optional. Lets the client
+     * check a chain whose root the server doesn't send, and lets Android's own
+     * supplicant pin the CA when the app provisions the network (no root
+     * needed). Only certificates whose key is in [caSPKIHashes] are used.
+     */
+    @SerialName("ca_certificates") val caCertificates: List<String> = emptyList()
 )
 
 /** What a domain may be in a captive-portal flow (schema v2). */

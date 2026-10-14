@@ -31,6 +31,8 @@ behaviour that is correct within GECKO's scope but does not stop the attacker.
 | AC10 | An expired certificate is ignored (not used to anchor or verify)                                                  | treated as absent | `verify_ignoresExpiredCertificates` | Pass |
 | AC11 | A domain with no pinned keys never verifies (fail closed; the app does no Web PKI)                                | not `VERIFIED` | `s9_domainWithoutPins_neverVerifies` | Pass |
 | AC12 | An unregistered SSID never surfaces a warning even if other certificates exist at this location (SSID pre-filter) | `UNVERIFIED` (silent) | `unregisteredSsid_isUnverified` | Pass |
+| AC12b | A network advertising an auth mode not registered for its SSID (e.g. an open clone of a WPA2 or enterprise SSID) is not what was registered | `CONFLICT` | `a1_openCloneOfEnterpriseSsid_isConflict`, `authModeMismatch_isConflictEvenIfThePortalVerifies`, `AuthModesTest`; HW: A1 | Pending (HW) |
+| AC12c | A certificate with a critical feature the client doesn't implement yields neither `VERIFIED` nor `CONFLICT` | `UNVERIFIED` (silent) | `onlyUnknownCriticalFeature_isSilentUnverified`, `conflictIsWithheldWhileAnotherCertificateForTheSsidIsUnevaluable` | Pass |
 
 ## C. Captive-portal chain and bait-and-switch
 

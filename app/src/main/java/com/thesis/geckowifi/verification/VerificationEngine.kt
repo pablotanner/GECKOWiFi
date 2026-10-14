@@ -240,6 +240,47 @@ class VerificationEngine(
     }
 
     /**
+     * Checks a network without joining it, from what its scan result
+     * advertises ([observedAuthModes]) - for secured networks, whose login
+     * server can't be seen without credentials (and, for the server's
+     * certificate, root). Unregistered SSID: UNVERIFIED. Advertised modes not
+     * registered: CONFLICT (scenario A1). Otherwise REGISTERED: the
+     * registration exists and nothing contradicts it, nothing more.
+     */
+    suspend fun checkAdvertised(
+        networkKey: String,
+        ssid: String,
+        observedAuthModes: Set<WiFiAuthMode>,
+        lat: Double,
+        lng: Double,
+        altitude: Double?,
+        radiusMeters: Int
+    ): VerificationResult {
+        val bitStrings = encoder.encodeQuery(lat, lng, radiusMeters)
+        val (minAlt, maxAlt) = encoder.altitudeBounds(altitude, radiusMeters)
+        return when (val response = gecko.queryLocation(bitStrings, minAlt, maxAlt)) {
+            is GeckoResponse.Unreachable ->
+                VerificationResult(VerificationState.UNREACHABLE, ssid, reason = response.cause)
+            is GeckoResponse.ProofFailure ->
+                VerificationResult(VerificationState.CONFLICT, ssid, reason = response.cause)
+            is GeckoResponse.Success -> when (val c = candidatesFor(response, lat, lng, radiusMeters, ssid, ssid)) {
+                is Candidates.Done -> c.result
+                is Candidates.Judge -> {
+                    val cert = c.certs.first()
+                    val operator = cert.subject?.name?.let { " by $it" }.orEmpty()
+                    val registered = VerificationResult(
+                        VerificationState.REGISTERED, ssid,
+                        matchedCertificateId = cert.certificateId,
+                        reason = "registered here$operator; it advertises ${observedAuthModes.joinToString { it.wire }}, " +
+                            "as registered; its login server wasn't checked (not joined)"
+                    )
+                    c.finish(registered, authModeConflict(c, observedAuthModes, ssid)).withResponseMetadata(response)
+                }
+            }
+        }.also { if (it.state != VerificationState.UNREACHABLE) cache.put(networkKey, "advertised:$ssid", it) }
+    }
+
+    /**
      * The certificates from this response that may actually be used to judge
      * the network: dropped if expired (their domains/keys must not anchor or
      * verify anything any more) or if their registered area does not reach the

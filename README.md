@@ -67,6 +67,7 @@ means updating that key.
 
 ## Documentation
 
+- [docs/geocert-schema.md](docs/geocert-schema.md) – the GeoCertificate format (v3)
 - [docs/lab-setup.md](docs/lab-setup.md) – the hardware testbed: routers,
   addresses, captive portal, running the app
 - [docs/portal-detection.md](docs/portal-detection.md) – how portals are

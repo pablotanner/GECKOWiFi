@@ -124,7 +124,9 @@ location app (no root needed).
 
 | # | Scenario | Expected | Testable | Result |
 |---|---|---|---|---|
-| A1 | SSID registered as WPA2; B clones it as open | Should be `CONFLICT`; `authMode` is not compared yet | 🛠 | |
+| A1 | SSID registered as WPA2 (or enterprise); B clones it as open | `CONFLICT`: B advertises `open`, which isn't in the registered `auth_modes`. Register a `GeckoTest` certificate with `auth_modes: ["wpa2-personal"]` and check B | ✅ | |
+| E0 | Real eduroam at ETH, `ethz-eduroam.json` registered, checked from the scan (not joined) | `REGISTERED` ("Registered with GECKO by ETH Zürich"); `CONFLICT` if it advertised a mode not registered | ✅ | |
+| E0o | Open "eduroam" (router B, low power, briefly) inside an ETH campus area | `CONFLICT`: advertises `open`, registered as enterprise | ✅ | |
 | E1 | Genuine RADIUS (hostapd WPA2-Enterprise + FreeRADIUS), GeoCert-provisioned `WifiNetworkSuggestion` | Connects | 🛠 | |
 | E2 | Rogue RADIUS with its own CA, same profile | OS refuses the connection | 🛠 | |
 | E2r | Server certificate hash from `wpa_supplicant` compared with the GeoCert | `CONFLICT` | 🔒 | |

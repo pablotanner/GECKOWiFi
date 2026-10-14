@@ -5,7 +5,9 @@ import com.thesis.geckowifi.data.model.AuthServer
 import com.thesis.geckowifi.data.model.GeoCertificate
 import com.thesis.geckowifi.data.model.VerificationResult
 import com.thesis.geckowifi.data.model.VerificationState
+import java.io.ByteArrayInputStream
 import java.security.MessageDigest
+import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import java.util.Base64
 
@@ -29,14 +31,25 @@ data class ObservedAuthServer(
     val displayName: String get() = leafNames.firstOrNull() ?: "authentication server"
 
     companion object {
-        /** [chain] is leaf first, as wpa_supplicant reports it (depth 0, 1, ...). */
-        fun fromChain(chain: List<X509Certificate>): ObservedAuthServer? {
+        /**
+         * [chain] is leaf first, as wpa_supplicant reports it (depth 0, 1, ...).
+         * [anchors] are registered CA certificates ([pinnedCaCertificates]):
+         * servers often don't send their root, so the last certificate that
+         * was reached is also checked against them.
+         */
+        fun fromChain(chain: List<X509Certificate>, anchors: List<X509Certificate> = emptyList()): ObservedAuthServer? {
             val leaf = chain.firstOrNull() ?: return null
             val issuers = mutableListOf<String>()
+            var top = leaf
             for (i in 1 until chain.size) {
-                val signedByNext = runCatching { chain[i - 1].verify(chain[i].publicKey) }.isSuccess
+                val signedByNext = runCatching { top.verify(chain[i].publicKey) }.isSuccess
                 if (!signedByNext) break
                 issuers += spkiSha256(chain[i])
+                top = chain[i]
+            }
+            for (anchor in anchors) {
+                val key = spkiSha256(anchor)
+                if (key !in issuers && runCatching { top.verify(anchor.publicKey) }.isSuccess) issuers += key
             }
             return ObservedAuthServer(spkiSha256(leaf), dnsNames(leaf), issuers)
         }
@@ -57,6 +70,18 @@ data class ObservedAuthServer(
                 .map { it.removePrefix("CN=") }
         }
     }
+}
+
+/**
+ * The registered CA certificates whose key is pinned in [AuthServer.caSPKIHashes].
+ * A certificate that doesn't parse, or whose key isn't pinned, is dropped: the
+ * hashes are the trust anchor, the certificates only carry them.
+ */
+fun AuthServer.pinnedCaCertificates(): List<X509Certificate> = caCertificates.mapNotNull { b64 ->
+    runCatching {
+        CertificateFactory.getInstance("X.509")
+            .generateCertificate(ByteArrayInputStream(Base64.getDecoder().decode(b64))) as X509Certificate
+    }.getOrNull()?.takeIf { ObservedAuthServer.spkiSha256(it) in caSPKIHashes }
 }
 
 /** Whether this registered server accepts [observed]. An entry without pins accepts nothing. */
@@ -80,7 +105,7 @@ fun AuthServer.accepts(observed: ObservedAuthServer): Boolean {
  *   be one of that entry's servers, else CONFLICT;
  * - in a federation (eduroam) with no matching entry: the user is a visitor
  *   whose EAP is proxied to their home institution. That server can't be
- *   registered here, so the result is UNVERIFIED with a reason, never a warning;
+ *   registered here, so the result is REGISTERED (the site is), never a warning;
  * - in a closed network (no federation): every user sees the registered
  *   servers, whatever the realm.
  *
@@ -131,7 +156,7 @@ fun evaluateEnterpriseNetwork(
 
     if (federation != null && userRealm == null) {
         // Could be a visitor's home server: without the realm there is nothing to compare it with.
-        return VerificationResult(VerificationState.UNVERIFIED, host,
+        return VerificationResult(VerificationState.REGISTERED, host,
             matchedCertificateId = enterprise.first().certificateId,
             reason = "$federation is registered here, but without your realm the authentication server can't be checked")
     }
@@ -146,7 +171,7 @@ fun evaluateEnterpriseNetwork(
 }
 
 private fun visitor(host: String, cert: GeoCertificate, federation: String, realm: String) = VerificationResult(
-    VerificationState.UNVERIFIED, host,
+    VerificationState.REGISTERED, host,
     matchedCertificateId = cert.certificateId,
     reason = "$federation site registered here" + (cert.subject?.name?.let { " by $it" } ?: "") +
         "; you are a visitor (realm $realm), so your home institution's server can't be checked here"

@@ -4,6 +4,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.GppBad
 import androidx.compose.material.icons.outlined.GppGood
+import androidx.compose.material.icons.outlined.GppMaybe
 import androidx.compose.material.icons.outlined.LocationSearching
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Shield
@@ -21,7 +22,7 @@ import com.thesis.geckowifi.ui.CheckFailure
 enum class Tone { POSITIVE, NEUTRAL, DANGER }
 
 /** What went wrong on a CONFLICT, read from data already on the check (never from guessing at URLs). */
-enum class ConflictCause { WRONG_KEY, UNREGISTERED_PAGE, NO_ENCRYPTION, TLS_FAILED, PROOF_FAILED, ENTERPRISE }
+enum class ConflictCause { AUTH_MODE, WRONG_KEY, UNREGISTERED_PAGE, NO_ENCRYPTION, TLS_FAILED, PROOF_FAILED, ENTERPRISE }
 
 /** The user-facing words for one check: a short [label] for badges, a [title] and a one- or two-sentence [body]. */
 data class Verdict(
@@ -38,6 +39,7 @@ const val SCOPE_NOTE = "GECKO confirms who runs the captive portal page."
 
 fun CheckDetail.conflictCause(): ConflictCause? {
     if (result.state != VerificationState.CONFLICT) return null
+    if (result.reason?.contains("network advertises") == true) return ConflictCause.AUTH_MODE
     if (isEnterprise) return ConflictCause.ENTERPRISE
     // A successful map-server answer always attaches its metadata; a CONFLICT without it is a failed proof.
     if (result.certificateCount == null) return ConflictCause.PROOF_FAILED
@@ -77,10 +79,24 @@ fun CheckDetail.verdict(): Verdict {
                     "The secure connection to the registered login page failed. Someone may be intercepting it, or the page is down."
                 ConflictCause.PROOF_FAILED ->
                     "The map server's answer failed its cryptographic check. The lookup may have been tampered with, so this network can't be trusted."
+                ConflictCause.AUTH_MODE ->
+                    "$name is registered here as a different kind of network (${result.registeredIdentifier}), but this one is ${result.presentedIdentifier}. Someone may be imitating it."
                 ConflictCause.ENTERPRISE, null ->
                     "The login server for $name isn't the one registered here. Someone may be imitating it."
             },
             Icons.Outlined.GppBad
+        )
+        VerificationState.REGISTERED -> Verdict(
+            Tone.NEUTRAL, "Registered", "$name is registered here",
+            when {
+                result.reason?.contains("visitor") == true ->
+                    "This location's network is registered with GECKO, but you're a visitor: your own institution's login server can't be registered here, so GECKO can't check it."
+                !joined ->
+                    "Its operator registered it with GECKO, and its security type matches. GECKO can't check its login server without connecting, so this isn't a full verification."
+                else ->
+                    "Its operator registered it with GECKO, but its login server couldn't be checked."
+            },
+            Icons.Outlined.GppMaybe
         )
         VerificationState.UNVERIFIED -> Verdict(
             Tone.NEUTRAL, "Not registered", "$name isn't registered here",
@@ -126,6 +142,7 @@ fun CheckDetail.verdict(): Verdict {
 fun VerificationState?.hopLabel(): String = when (this) {
     null -> "Passed through"
     VerificationState.VERIFIED -> "Matches registration"
+    VerificationState.REGISTERED -> "Registered"
     VerificationState.CONFLICT -> "Doesn't match"
     VerificationState.UNVERIFIED -> "Not registered"
     VerificationState.UNRECOGNIZED -> "Not recognized"
