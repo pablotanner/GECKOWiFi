@@ -45,18 +45,13 @@ A portal that looks genuine and then redirects to a malicious page.
 | AC15 | A failed TLS handshake on a registered portal domain counts as a wrong key; on a registered SSID, a failed hop to an unregistered domain is also impersonation (exclusivity) | both → `CONFLICT` | `failedTlsOnRegisteredPortalDomain_isConflict`, `failedTlsOnUnregisteredDomainOnRegisteredSsid_isConflict` | Pass |
 | AC16 | Each check starts a fresh session; a previous check's anchor never changes a later verdict | no stale anchor | `repeatedChecks_startFreshSessions`, `onNetworkChanged_resetsSessionAndCache` | Pass |
 
-## D. Documented limitations (correct verdict, attacker not stopped)
+## D. Documented Limitations 
+These are expected results that show the boundaries of what GECKO can guarantee.
 
-These are expected results that show the boundary of what GECKO guarantees, not
-failures. They belong in the limitations chapter.
 
 | # | Criterion | Expected | Verified by | Status |
 |---|---|---|---|---|
 | AC17 | A transparent relay of the genuine portal verifies — GECKO authenticates the portal, not the link | `VERIFIED` | HW: S0 | HW |
-| AC18 | An attacker with its own certificate registered for the same SSID at this location is indistinguishable from a second genuine operator | `VERIFIED` | `f1_attackerWithOwnCertificateForSameSsid_isVerified`, `f1s_switchToAnotherRegisteredPrimaryMidChain_reanchorsAndIsVerified` | Pass |
-| AC19 | A second certificate for the same SSID does not create a false positive against the genuine one | `VERIFIED` | `x1_secondCertificateForSameSsid_doesNotBreakGenuineChain` | Pass |
-| AC20 | A switch timed after the one-shot check (timer or User-Agent) is not caught by a single probe | single probe `VERIFIED`; re-probe catches the timer case | HW: S5a, S5b | Pending (HW) |
-| AC21 | A benign redirect to a processor the operator did not register is a false positive | `CONFLICT` | `p2_redirectToUnlistedPaymentProcessor_isConflict` | Pass |
 
 ## Gaps to close
 

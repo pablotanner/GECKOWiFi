@@ -1,90 +1,79 @@
 # Design decisions
 
-Decisions that shape how the client judges a network, and the assumptions they
-rest on. Each entry: the question, the options, the decision, and what it costs.
-Open sub-questions are called out explicitly.
+The choices that decide how the app judges a network, and what they assume.
 
-## 1. SSID exclusivity
+## 1. One SSID per area belongs to one operator
 
-**Question.** When a GeoCertificate is registered for an SSID at a location,
-what does another network claiming the same SSID there mean? Is registration
-*additive* (it only asserts the registered identity; anything else is merely
-"unknown") or *exclusive* (the SSID at that area is claimed, so a non-matching
-network is impersonation)?
+**Question.** A GeoCertificate is registered for an SSID in an area. Another
+network with the same SSID shows up there and matches nothing registered. Is
+that just unknown, or an impersonation?
 
-**Decision.** Exclusive, by default. If an SSID is registered at a location, a
-network on that SSID that matches nothing registered there is a `CONFLICT`, not
-a silent `UNRECOGNIZED`. A later `ssid_exclusive: false` flag could let a
-registration opt back into additive semantics for genuinely shared generic
-SSIDs (a mall where many tenants use `FreeWiFi`); not implemented yet.
+**Decision.** An impersonation: `CONFLICT`. An SSID registered in an area is
+claimed there. A certificate can opt out with `ssid_shared: true` for a generic
+name used by several operators in one place (a mall where many shops use
+`FreeWiFi`); then an unknown network stays `UNRECOGNIZED`.
 
-**Why.** SSIDs are treated as locally unique in practice — within one place you
-do not see two venues sharing an SSID. GECKO already scopes by location, so it
-needs only *local* uniqueness, not global: `eduroam` at ETH and `eduroam` at
-MIT are different `(SSID, area)` tuples and never collide. Exclusivity closes
-the gap where an evil twin using its *own* domain (a lookalike, S2) was silent.
+**Why.** In practice an SSID is unique within one place. GECKO only needs that
+local uniqueness: `eduroam` at ETH and `eduroam` at MIT are in different areas
+and never collide. Without this rule, an evil twin on the same SSID with its
+own lookalike domain (S2) would go unnoticed.
 
-**Cost / assumptions.**
-- A large single-operator deployment (campus, hotel, mesh, eduroam within one
-  institution) is **one identity over many radios** — one GeoCert with a wide
-  polygon, many BSSIDs — so exclusivity does not break it; it even catches a
-  rogue same-SSID AP presenting a different identity.
-- An operator must register **all** their portal domains and a polygon covering
-  their **whole** footprint, or they false-positive their own network. Exclusive
-  and accurate-area go together.
-- Genuinely shared generic SSIDs by distinct operators in one area are the one
-  case exclusivity gets wrong; that is what the future `ssid_exclusive: false`
-  opt-out is for.
-- eduroam **roaming** visitors are out of scope: a visitor validates their home
-  institution's RADIUS identity, which the visited area's GeoCert cannot name.
+**What it assumes.**
+- A large deployment (campus, hotel, mesh network) is one operator with one
+  certificate: a wide area and many access points. A rogue access point on
+  the same SSID with a different identity is caught.
+- The operator registers **all** its portal domains and an area covering its
+  **whole** site. Otherwise its own network is flagged.
+- An eduroam visitor checks their home institution's server, which the visited
+  site can't register. The app shows `REGISTERED` (site and auth mode match)
+  instead of a warning.
 
-**Where enforced.**
-- Client: `VerificationEngine.applyExclusivity` escalates `UNRECOGNIZED` to
-  `CONFLICT` in the SSID-scoped path (candidates were pre-filtered to the SSID,
-  so reaching the judge proves the SSID is registered here). The non-SSID path
-  (a typed-domain lookup, `ssid = null`) keeps additive `UNRECOGNIZED`.
-- **Registration (geopki, not this repo) — open requirement:** the map server
-  must refuse a new GeoCert whose `(SSID, area)` **polygon overlaps** an
-  existing one. Without this the client rule and the registry disagree.
+**Where it is enforced.**
+- App: `VerificationEngine.applyExclusivity` turns `UNRECOGNIZED` into
+  `CONFLICT` when the check was made for an SSID and no certificate sets
+  `ssid_shared`. A lookup without an SSID (a typed domain) stays `UNRECOGNIZED`.
+- Map server (geopki, not this repo): must refuse a certificate whose SSID and
+  area overlap one from a different `subject.id`, and allow it for the same
+  subject (key rotation). Not implemented there yet.
 
-**Open sub-questions.**
-- Geometric overlap at registration: partial overlaps, nested areas, boundaries
-  — a polygon-intersection test, not a string compare.
-- The `ssid_exclusive` opt-out flag: schema and client handling.
+**Open.** How to test area overlap (partial, nested, shared borders).
 
-## 2. Registration authority and accountability (resolves F1)
+## 2. Only the rightful operator can register an area
 
-**Question.** An attacker who can register its *own* valid GeoCert for the
-victim's SSID+area gets `VERIFIED` on its evil twin (scenario F1), because the
-client trusts any validly-signed cert. What stops that?
+**Question.** An attacker registers its own valid certificate for the victim's
+SSID and area. The app trusts any validly signed certificate, so the evil twin
+would show `VERIFIED`. What prevents this?
 
-**Decision / assumption.** GECKO assumes the registration authority binds each
-`(SSID, area)` claim to an **authorized, accountable real-world entity** — you
-can only obtain a GeoCert for an area you legally own or are authorized at. This
-is the same trust model as Web PKI (a CA vouches for domain ownership), applied
-to physical areas. With it, F1 cannot happen: the attacker cannot register the
-victim's area, and any mis-registration is attributable and revocable.
+**Assumption.** The registration authority only issues a certificate for an
+area to someone who owns it or is authorized there, and that operator can be
+held accountable. This is the Web PKI model (a CA checks domain ownership)
+applied to physical places. The attacker can't register the victim's area, and
+a wrong registration can be traced and revoked.
 
-**Why it is a registration decision, not a client one.** The client's crypto
-only proves a cert is really in the signed map; it says nothing about whether
-that cert *should* have been admitted. So the trust root is the authorization
-policy, and the client can only be as trustworthy as that policy.
+**Why this belongs to registration, not the app.** The app's checks prove a
+certificate is in the signed map. They can't tell whether it should have been
+admitted. The app is only as trustworthy as the registration policy.
 
-**Cost / residual risk.** Authority mis-issuance or compromise — exactly the
-rogue-CA risk — handled by revocation and the accountability trail, not by the
-client. Belongs in the limitations chapter.
+**Remaining risk.** A mistaken or compromised authority, the same risk as a
+rogue CA. Handled by revocation and accountability, not by the app.
 
-**Open sub-questions.**
-- How the **first** claim is authorized (domain-ownership proof, location proof,
-  administrative vetting, first-come-first-served and its race risk).
-- Binding to an operator identity vs. BSSID: BSSID binding is weak (spoofable,
-  and it breaks multi-AP deployments); operator-identity binding just moves
-  trust to the authority, which is the right place for it.
+**Open.**
+- How the first claim for an area is checked (domain ownership, location proof,
+  manual vetting, or first come first served with its race).
+- Binding to an operator, not to BSSIDs: BSSIDs can be spoofed and break
+  deployments with many access points.
 
-## 3. Scope: portal identity, not link security (context for S0)
+## 3. GECKO checks the portal, not the connection
 
-**Decision.** GECKO authenticates the captive portal's (or RADIUS server's)
-identity, **not** the data path. A transparent relay of the genuine portal (S0)
-correctly verifies, even though the attacker still man-in-the-middles all other
-traffic. Post-authentication traffic security remains the job of TLS on the
-actual services, a VPN, etc. State this scope explicitly; do not claim more.
+GECKO checks the identity of the captive portal (or the RADIUS server), not the
+data path. If an attacker relays the genuine portal unchanged (S0), the check
+correctly says `VERIFIED`, although the attacker still sees all other traffic.
+Protecting that traffic is the job of TLS, a VPN and so on. The app says this
+next to every verified result.
+
+## 4. Root stands in for system privileges
+
+GECKO is meant to be part of the operating system's WiFi stack. The prototype
+is an app, so root takes the place of system privileges (for example reading
+the RADIUS server's certificates from `wpa_supplicant`). There is no fallback
+for unrooted devices, such as a VPN-based one.
