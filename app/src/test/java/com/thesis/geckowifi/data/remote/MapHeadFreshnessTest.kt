@@ -5,7 +5,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.time.Duration.Companion.hours
 
-/** [isMapHeadStale]: the G4 replay guard (see docs/experiments.md). */
+/** [isMapHeadStale]: the replay guard (see docs/experiments.md, R2). */
 class MapHeadFreshnessTest {
 
     private val maxAge = 24.hours.inWholeNanoseconds
@@ -21,7 +21,7 @@ class MapHeadFreshnessTest {
     @Test
     fun oldMapHead_isStale() {
         assertTrue(isMapHeadStale(now - 25 * hourNanos, now, maxAge))
-        assertTrue(isMapHeadStale(now - 100 * hourNanos, now, maxAge)) // a replayed old answer (G4)
+        assertTrue(isMapHeadStale(now - 100 * hourNanos, now, maxAge)) // a replayed old answer (R2)
     }
 
     @Test

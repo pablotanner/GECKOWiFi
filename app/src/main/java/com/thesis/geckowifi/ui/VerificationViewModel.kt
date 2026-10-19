@@ -60,7 +60,7 @@ enum class CheckFailure { SERVER_UNREADABLE, JOIN_FAILED, PORTAL_FAILED, LOW_ACC
  * The map query's hard radius cap (see [com.thesis.geckowifi.verification.GeoQueryEncoder]).
  * When the location fix is less accurate than this, the query can't be made wide
  * enough to be sure it covers the device, so a check is refused rather than risking
- * a silent miss (see docs/experiments.md, G5).
+ * a silent miss (see docs/experiments.md, L3).
  */
 const val MAX_QUERY_RADIUS_METERS = 253
 
@@ -183,7 +183,7 @@ class VerificationViewModel(
      * than the GPS uncertainty, capped at the protocol max. A fixed radius
      * narrower than the real uncertainty can miss the device's true position,
      * so the registration isn't returned and the check goes silently
-     * UNVERIFIED (see docs/experiments.md, G5). Widening to the accuracy keeps
+     * UNVERIFIED (see docs/experiments.md, L3). Widening to the accuracy keeps
      * the query honest about how precisely the device is actually located.
      */
     private fun effectiveRadius(fix: LocationFix): Int =
@@ -465,7 +465,7 @@ class VerificationViewModel(
                 }
                 // A cached verdict must never survive a (re)join: the BSSID a key is
                 // keyed on can be spoofed, so an attacker taking over that BSSID would
-                // otherwise inherit an earlier VERIFIED (see docs/experiments.md, G6).
+                // otherwise inherit an earlier VERIFIED (see docs/acceptance-criteria.md, AC22).
                 engine.onNetworkChanged(networkKey)
                 step(network, steps, CheckStep.LOOKUP)
                 rebindGeckoClient()

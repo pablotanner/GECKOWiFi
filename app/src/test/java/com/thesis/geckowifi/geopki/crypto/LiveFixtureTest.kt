@@ -75,7 +75,7 @@ class LiveFixtureTest {
     }
 
     /**
-     * G1 completeness (see docs/experiments.md and GeckoClient): the honest
+     * Completeness (see docs/acceptance-criteria.md AC3, and GeckoClient): the honest
      * captured response delivers every certificate its proof references, and a
      * stripped copy - same signed nodes, certificate bytes removed - is caught
      * as withholding. Replicates GeckoClient's referenced-vs-delivered check

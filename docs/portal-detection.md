@@ -42,16 +42,6 @@ walks the hops in order with a fresh `PortalSession`:
 - The overall result is the first `CONFLICT`, or otherwise the result of the
   last judged hop, which is the page the user ends up on.
 
-This catches the following attacks:
-
-| Attack | Result |
-|---|---|
-| Cloned portal with the attacker's key | `CONFLICT` |
-| Lookalike domain | `UNRECOGNIZED` |
-| Genuine portal first, then a redirect to the attacker | `CONFLICT` at the redirect |
-| Payment page with the attacker's key | `CONFLICT` |
-| Registered login page served over plain HTTP | `CONFLICT` |
-
 ## Limits
 
 - Only redirects are seen. Pages reached through a click (the payment page, or

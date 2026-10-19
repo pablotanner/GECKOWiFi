@@ -7,7 +7,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** [GeoCertificate.coversLocation]: the geographic bound that closes G2/G3 (docs/experiments.md). */
+/** [GeoCertificate.coversLocation]: the geographic bound that closes the gap in docs/experiments.md L2. */
 class GeoAreaTest {
 
     // A ~75 m x 55 m block in central Zurich; points are [lng, lat].

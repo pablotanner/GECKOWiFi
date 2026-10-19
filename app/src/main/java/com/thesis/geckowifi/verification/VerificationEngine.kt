@@ -332,7 +332,7 @@ class VerificationEngine(
      * verify anything any more) or if their registered area does not reach the
      * device ([GeoCertificate.coversLocation]). The area check closes the gap
      * where the map server's cell-based query returns a certificate registered
-     * for the same SSID at *another* place (see docs/experiments.md, G2/G3):
+     * for the same SSID at *another* place (see docs/experiments.md, L2):
      * the query cell is coarser than both the area and the search circle, so
      * presence in the response is not by itself proof the registration applies
      * where the device is.

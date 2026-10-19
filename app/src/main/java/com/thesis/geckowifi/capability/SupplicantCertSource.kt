@@ -18,7 +18,7 @@ private const val TAG = "SupplicantCertSource"
  * resets it) and stays attached as a monitor while the user reconnects.
  *
  * UNTESTED ON HARDWARE: socket paths, the `wpa_cli` binary and the
- * interface name vary by device; see docs/experiments.md (E2r).
+ * interface name vary by device; see docs/experiments.md (E1).
  */
 class SupplicantCertSource(private val iface: String = "wlan0") : CertificateSource {
 

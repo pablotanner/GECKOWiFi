@@ -15,8 +15,7 @@ name used by several operators in one place (a mall where many shops use
 
 **Why.** In practice an SSID is unique within one place. GECKO only needs that
 local uniqueness: `eduroam` at ETH and `eduroam` at MIT are in different areas
-and never collide. Without this rule, an evil twin on the same SSID with its
-own lookalike domain (S2) would go unnoticed.
+and never collide.
 
 **What it assumes.**
 - A large deployment (campus, hotel, mesh network) is one operator with one
@@ -29,12 +28,10 @@ own lookalike domain (S2) would go unnoticed.
   instead of a warning.
 
 **Where it is enforced.**
-- App: `VerificationEngine.applyExclusivity` turns `UNRECOGNIZED` into
+- App turns `UNRECOGNIZED` into
   `CONFLICT` when the check was made for an SSID and no certificate sets
-  `ssid_shared`. A lookup without an SSID (a typed domain) stays `UNRECOGNIZED`.
-- Map server (geopki, not this repo): must refuse a certificate whose SSID and
-  area overlap one from a different `subject.id`, and allow it for the same
-  subject (key rotation). Not implemented there yet.
+  `ssid_shared`. 
+- Map server must refuse a certificate whose SSID and area overlap one from a different subject and allow it for same subject.
 
 **Open.** How to test area overlap (partial, nested, shared borders).
 
@@ -45,35 +42,18 @@ SSID and area. The app trusts any validly signed certificate, so the evil twin
 would show `VERIFIED`. What prevents this?
 
 **Assumption.** The registration authority only issues a certificate for an
-area to someone who owns it or is authorized there, and that operator can be
-held accountable. This is the Web PKI model (a CA checks domain ownership)
-applied to physical places. The attacker can't register the victim's area, and
-a wrong registration can be traced and revoked.
+area to someone who owns it or is authorized there, and that operator can be 
+held accountable. Attacker can't trivially register victim's area and violations can be detected, traced and punished. 
 
-**Why this belongs to registration, not the app.** The app's checks prove a
-certificate is in the signed map. They can't tell whether it should have been
-admitted. The app is only as trustworthy as the registration policy.
-
-**Remaining risk.** A mistaken or compromised authority, the same risk as a
-rogue CA. Handled by revocation and accountability, not by the app.
-
-**Open.**
-- How the first claim for an area is checked (domain ownership, location proof,
-  manual vetting, or first come first served with its race).
-- Binding to an operator, not to BSSIDs: BSSIDs can be spoofed and break
-  deployments with many access points.
 
 ## 3. GECKO checks the portal, not the connection
 
 GECKO checks the identity of the captive portal (or the RADIUS server), not the
 data path. If an attacker relays the genuine portal unchanged (S0), the check
 correctly says `VERIFIED`, although the attacker still sees all other traffic.
-Protecting that traffic is the job of TLS, a VPN and so on. The app says this
-next to every verified result.
+Protecting that traffic is the job of TLS, a VPN and so on. 
 
 ## 4. Root stands in for system privileges
-
 GECKO is meant to be part of the operating system's WiFi stack. The prototype
 is an app, so root takes the place of system privileges (for example reading
-the RADIUS server's certificates from `wpa_supplicant`). There is no fallback
-for unrooted devices, such as a VPN-based one.
+the RADIUS server's certificates from `wpa_supplicant`). 

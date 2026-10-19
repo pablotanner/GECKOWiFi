@@ -102,7 +102,7 @@ class GeckoClient(
     private val fallbackClient: OkHttpClient? = if (network != null) OkHttpClient() else null,
     /**
      * If set, a signed map head older than this is rejected as a possible
-     * replay (see docs/experiments.md, G4 / R2): an attacker who replays an
+     * replay (see docs/experiments.md, R2): an attacker who replays an
      * older, still-validly-signed answer - one from before a certificate was
      * registered, revoked or re-keyed - would otherwise have it accepted.
      *
@@ -193,7 +193,7 @@ class GeckoClient(
                     return@withContext GeckoResponse.ProofFailure(e.message ?: "proof verification failed")
                 }
 
-                // Freshness (see docs/experiments.md, G4). Only meaningful when the
+                // Freshness (see docs/experiments.md, R2). Only meaningful when the
                 // server re-signs the map head on a schedule, so it is opt-in - see
                 // maxMapHeadAge's doc for why it is off by default on this testbed.
                 val maxAge = maxMapHeadAge
@@ -206,7 +206,7 @@ class GeckoClient(
                     }
                 }
 
-                // Completeness the other direction (see docs/experiments.md, G1).
+                // Completeness the other direction (see docs/acceptance-criteria.md, AC3).
                 // This query uses `?c`, so the server includes the full certificate
                 // for every certificate the signed tree references. A referenced
                 // hash with no certificate delivered means the certificate was
@@ -312,7 +312,7 @@ class GeckoClient(
  */
 /**
  * Whether a signed map head is too old to trust, given the current time and a
- * maximum age (all in nanoseconds; the map head's time base, see G4). A map
+ * maximum age (all in nanoseconds; the map head's time base, see R2 in docs/experiments.md). A map
  * head timestamped in the future (negative age, e.g. device-clock skew) is not
  * treated as stale.
  */

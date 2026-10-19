@@ -15,7 +15,7 @@ import kotlin.math.sqrt
  * query returns certificates whose polygon merely shares a (coarser) query
  * cell with the device, so an attacker who holds a valid certificate for the
  * same SSID registered at *another* place is accepted here (see
- * docs/experiments.md, G2/G3). [radiusMeters] mirrors the query radius, so the
+ * docs/experiments.md, L2). [radiusMeters] mirrors the query radius, so the
  * area check is exactly as lenient as the location query was and no more: a
  * registration whose own area is farther than that from the device is dropped.
  *
