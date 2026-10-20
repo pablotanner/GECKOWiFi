@@ -20,8 +20,8 @@ config dnsmasq
 	option ednspacket_max '1232'
 	option filter_aaaa '0'
 	option filter_a '0'
-	list address '/status.client/192.168.247.1'
 	list address '/portal.gecko-a.lab/192.168.137.20'
+	list address '/status.client/192.168.247.1'
 
 config dhcp 'lan'
 	option interface 'lan'
@@ -46,4 +46,16 @@ config odhcpd 'odhcpd'
 	option loglevel '4'
 	option piodir '/tmp/odhcpd-piodir'
 	option hostsdir '/tmp/hosts'
+
+config dhcp 'edu'
+	option interface 'edu'
+	option start '10'
+	option limit '100'
+	option leasetime '1h'
+
+config dhcp 'onboard'
+	option interface 'onboard'
+	option start '10'
+	option limit '100'
+	option leasetime '5m'
 

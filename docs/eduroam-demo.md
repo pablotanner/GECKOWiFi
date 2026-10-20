@@ -14,10 +14,10 @@ made while implementing it is in [eduroam-decisions.md](eduroam-decisions.md).
 | 0 Backups, inventory | Done. WSL distro exported before installing FreeRADIUS; router archives in `lab-secrets/router-backups/`, configs in `lab-configs/` |
 | 1 Test PKI | Done, `lab/eduroam/make-pki.sh` → `lab-secrets/` |
 | 2 FreeRADIUS | Done: legit + attacker B1 + attacker B2 in WSL, all 11 `eapol_test` checks pass, relay path tested |
-| 3 Router A | **Blocked on a decision**: GL's driver needs MediaTek's `8021xd`, which isn't installed and isn't in the feed, see [Routers](#routers) |
+| 3 Legit SP | **Done on Router B** (vanilla OpenWrt): WPA2-Enterprise + dynamic VLAN walled garden, scene 1 and the walled-garden negative test confirmed on hardware (below). Router A still on GL firmware |
 | 4 Map server side | Done: `eduroam-lab-sp` inserted, realm endpoint serving, live JVM tests pass |
 | 5 App | Done and unit-tested; on the Tab: onboarding request and pinned suggestion accepted by One UI 8.5. End-to-end needs phase 3 |
-| 6 Router B | Waits for phase 3 (same package question) |
+| 6 Router B | B flashed to vanilla OpenWrt; **B1 done**: scenes 2 and 4 confirmed on hardware (2026-10-20, see below). B2 still to set up |
 | 7 Demo script, evidence | This document; B1 evidence reproducible without hardware (`b1-evidence.sh`) |
 
 ## Components
@@ -196,6 +196,63 @@ Scenes 2 and 4 against the attacker's RADIUS, without radios:
 unpinned → alice's MSCHAPv2 exchange captured). Verified 2026-10-20.
 
 Logs: `adb logcat -s OnboardingSession EduroamOnboarding EduroamInstaller GeckoClient`.
+
+## Hardware results
+
+**2026-10-20, Router B as the legit SP** (`lab/eduroam/openwrt/sp-legit.sh`, legit RADIUS :1812):
+
+Scene 1, GECKO app, alice@homeuni.test: all six steps, "connected". App outcome:
+site `REGISTERED` (`eduroam-lab-sp`, queried over the onboarding session), no site
+servers for `homeuni.test` (visitor), realm record signature verified (pins
+PEAP/MSCHAPV2, `radius.homeuni.test`), decision Proceed, suggestion installed,
+`connected=true`. Onboarding join 3.7 s, map query + realm record 0.2 s, about 10 s
+to connected. RADIUS: `gecko@gecko.sp.test` accepted with VLAN 99 /
+Session-Timeout 60, then `anonymous@homeuni.test` (alice) accepted without VLAN;
+the tablet ended up in `br-edu` (10.98.0.14).
+
+Walled garden, negative test (tablet joined by hand with the GECKO identity,
+landed at 10.99.0.105, B logged `RADIUS: VLAN ID 99`, `AP-STA-CONNECTED ... vlanid=99`):
+
+| From the onboarding session | Result |
+|---|---|
+| map server 192.168.137.1:1234, realm endpoint :1235 | HTTP answers |
+| internet (1.1.1.1, example.com's IP), ICMP, DNS | refused / no answer / unresolvable |
+| other laptop ports, portal server, Router A, Router B (LAN, walled-garden gateway, `edu` gateway) | refused |
+
+B's firewall: 102 packets rejected in the onboard zone, 8 connections to the map/realm
+ports allowed. Session-Timeout enforced: `deauthenticated due to session timeout`
+exactly 60 s after the login.
+
+Evidence: `lab-secrets/evidence/scene1-legit-20261020.log`, `scene1-app-20261020.log`.
+
+Open UI point: reopening the setup screen loses the last result (the
+`EduroamViewModel` is scoped to the navigation entry).
+
+
+**2026-10-20, Router B in mode B1** (OpenWrt, `eduroam-lab` → attacker-b1 via relay), Galaxy Tab A11:
+
+| Scene | Tablet | Attacker log (`count-inner.sh`) |
+|---|---|---|
+| 2: GECKO app | Step 1 fails, "Not set up: password not sent" | only `gecko@gecko.sp.test`; **0 inner-tunnel requests**; client sent TLS alert `unknown_ca` (4 attempts) |
+| 4: manual profile, CA "Trust on first use", user taps "Trust" | Connection fails silently | `alice@homeuni.test` in the **inner tunnel** (outer only `anonymous@homeuni.test`), **2 MSCHAPv2 exchanges** captured |
+
+Evidence: `lab-secrets/evidence/scene2+4-attacker-b1-20261020.{log,summary.txt}`.
+
+Things that got in the way, for next time:
+- **The laptop's Thunderbolt controller went into power saving (RTD3)** every few
+  minutes and took the USB Ethernet adapter with it: A's WAN link dropped,
+  RADIUS packets were lost (attempts failed without reaching the attacker,
+  scene 4 got no certificate prompt). Fix: adapter on a non-Thunderbolt port,
+  or USB selective suspend off, laptop on mains. Check: `ssh mango-a "dmesg | grep 'port 0 link down'"`.
+- The tablet has no location indoors without internet; the app now times
+  out instead of hanging, and a mock location via adb gives the lab location:
+  `adb shell appops set com.android.shell android:mock_location allow`, then
+  `adb shell cmd location providers add-test-provider gps`,
+  `... set-test-provider-enabled gps true`,
+  `... set-test-provider-location gps --location 47.37643,8.54674 --accuracy 15`
+  (same for `network`; remove with `remove-test-provider`).
+- Android 16 has no "Don't validate" any more; scene 4 uses "Trust on first use".
+  Forget the network afterwards.
 
 ## Demo shortcuts (all documented in code too)
 

@@ -15,6 +15,7 @@ import com.thesis.geckowifi.eduroam.EduroamStep
 import com.thesis.geckowifi.eduroam.EduroamTarget
 import com.thesis.geckowifi.eduroam.EnterpriseProfileInstaller
 import com.thesis.geckowifi.eduroam.QueryArea
+import com.thesis.geckowifi.location.LocationFix
 import com.thesis.geckowifi.location.LocationProvider
 import com.thesis.geckowifi.network.NetworkObserver
 import com.thesis.geckowifi.network.ScannedNetwork
@@ -48,6 +49,13 @@ class EduroamViewModel(
         private set
     var outcome by mutableStateOf<EduroamOutcome?>(null)
         private set
+
+    /** A finished run not yet handed to History / the status card; see [takeFinishedRun]. */
+    private var finished: Triple<EduroamTarget, EduroamOutcome, LocationFix>? by mutableStateOf(null)
+    val hasFinishedRun: Boolean get() = finished != null
+
+    /** Hands the last finished run over once (to [com.thesis.geckowifi.ui.VerificationViewModel.recordEduroamOutcome]). */
+    fun takeFinishedRun(): Triple<EduroamTarget, EduroamOutcome, LocationFix>? = finished.also { finished = null }
     /** A failure before the flow could start (no location, no account). */
     var error by mutableStateOf<String?>(null)
         private set
@@ -120,6 +128,7 @@ class EduroamViewModel(
                 val result = onboarding.run(target, QueryArea(fix.latitude, fix.longitude, radius), account) { step = it }
                 Log.i(TAG, "outcome for ${target.ssid}: $result")
                 outcome = result
+                finished = Triple(target, result, fix)
             } finally {
                 step = null
                 job = null

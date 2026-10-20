@@ -20,7 +20,7 @@ config led 'led_wifi_led'
 	option sysfs 'red:wlan'
 	option trigger 'netdev'
 	option mode 'link tx rx'
-	option dev 'wlan0'
+	option dev 'phy0-ap0'
 
 config led 'led_wan'
 	option name 'wan'

@@ -52,6 +52,13 @@ fun GeckoWifiApp(
     onRequestLocationPermission: () -> Unit
 ) {
     val viewModel: VerificationViewModel = viewModel(factory = AppModule.verificationViewModelFactory)
+    // Activity-scoped like the main view model, so the setup screen keeps its
+    // last result when the user navigates away and back.
+    val eduroam: EduroamViewModel = viewModel(factory = AppModule.eduroamViewModelFactory)
+    // A finished eduroam setup becomes a check like any other (status card, History, warning).
+    LaunchedEffect(eduroam.hasFinishedRun) {
+        eduroam.takeFinishedRun()?.let { (target, outcome, fix) -> viewModel.recordEduroamOutcome(target, outcome, fix) }
+    }
     LaunchedEffect(hasLocationPermission) { viewModel.onPermissionResult(hasLocationPermission) }
 
     if (!hasLocationPermission) {
@@ -116,7 +123,6 @@ fun GeckoWifiApp(
             composable("eduroam/{ssid}?bssid={bssid}") { entry ->
                 val ssid = entry.arguments?.getString("ssid").orEmpty()
                 val bssid = entry.arguments?.getString("bssid")?.takeIf { it.isNotEmpty() }
-                val eduroam: EduroamViewModel = viewModel(factory = AppModule.eduroamViewModelFactory)
                 val network = viewModel.scannedNetworks.filterIsInstance<ScannedNetwork.Real>()
                     .firstOrNull { it.ssid == ssid && (bssid == null || it.bssid == bssid) }
                 LaunchedEffect(ssid, network) {

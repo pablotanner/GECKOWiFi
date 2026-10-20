@@ -19,8 +19,11 @@ echo "logging to $log"
 # -sfxx -l <file> is -X with the log in a file: through a pipe, -X output is
 # block-buffered and shows up late.
 if [ "${2:-}" = bg ]; then
-    sudo freeradius -sfxx -l "$log" -d "$BASE/$name" > /dev/null 2>&1 &
-    disown
+    # setsid: detached from this shell's session, so it survives the shell
+    # exiting (e.g. `wsl -e bash -c ...` returning right away).
+    sudo setsid freeradius -sfxx -l "$log" -d "$BASE/$name" > /dev/null 2>&1 < /dev/null &
+    sleep 3
+    pgrep -f "freeradius .*-d $BASE/$name\$" > /dev/null || { echo "$name did not start, see $log" >&2; exit 1; }
 else
     sudo freeradius -sfxx -l "$log" -d "$BASE/$name" &
     pid=$!

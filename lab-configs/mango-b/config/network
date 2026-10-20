@@ -16,7 +16,7 @@ config device
 config interface 'lan'
 	option device 'br-lan'
 	option proto 'static'
-	option ipaddr '192.168.247.1'
+	option ipaddr '192.168.247.1/24'
 	option ip6assign '60'
 
 config interface 'wan'
@@ -25,7 +25,7 @@ config interface 'wan'
 
 config interface 'wan6'
 	option device 'eth0.2'
-	option proto 'dhcpv6'
+	option proto 'none'
 
 config switch
 	option name 'switch0'
@@ -41,4 +41,26 @@ config switch_vlan
 	option device 'switch0'
 	option vlan '2'
 	option ports '0 6t'
+
+config device 'edu_dev'
+	option name 'br-edu'
+	option type 'bridge'
+	option bridge_empty '1'
+
+config interface 'edu'
+	option proto 'static'
+	option device 'br-edu'
+	option ipaddr '10.98.0.1'
+	option netmask '255.255.255.0'
+
+config device 'onboard_dev'
+	option name 'br-onboard'
+	option type 'bridge'
+	option bridge_empty '1'
+
+config interface 'onboard'
+	option proto 'static'
+	option device 'br-onboard'
+	option ipaddr '10.99.0.1'
+	option netmask '255.255.255.0'
 

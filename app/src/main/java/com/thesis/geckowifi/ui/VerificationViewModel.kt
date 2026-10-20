@@ -14,6 +14,11 @@ import com.thesis.geckowifi.data.model.VerificationResult
 import com.thesis.geckowifi.data.model.VerificationState
 import com.thesis.geckowifi.data.remote.GeckoClient
 import com.thesis.geckowifi.discovery.Discovery
+import com.thesis.geckowifi.eduroam.Decision
+import com.thesis.geckowifi.eduroam.EduroamOutcome
+import com.thesis.geckowifi.eduroam.EduroamTarget
+import com.thesis.geckowifi.eduroam.InstallOutcome
+import com.thesis.geckowifi.eduroam.RealmCheck
 import com.thesis.geckowifi.discovery.HopSource
 import com.thesis.geckowifi.discovery.RedirectProbeSource
 import com.thesis.geckowifi.location.LocationFix
@@ -570,6 +575,40 @@ class VerificationViewModel(
         }
         publish(network.ssid, network.bssid, networkKey, result, fix, hops, modeDescription,
             joined = failure != CheckFailure.JOIN_FAILED, failure = failure)
+    }
+
+    /**
+     * Records an eduroam setup (docs/eduroam-demo.md) like any other check, so
+     * the status card and History know about it. The connection is the
+     * device's own (a suggestion), not one this app holds, hence `joined = false`.
+     */
+    fun recordEduroamOutcome(target: EduroamTarget, outcome: EduroamOutcome, fix: LocationFix) {
+        val decision = outcome.decision
+        val pins = (decision as? Decision.Proceed)?.pins
+        val result = when {
+            decision is Decision.Block && decision.hostile ->
+                VerificationResult(VerificationState.CONFLICT, target.ssid, reason = decision.reason)
+            decision is Decision.Block -> VerificationResult(
+                if (outcome.onboardingFailure != null || outcome.realm is RealmCheck.Missing) VerificationState.UNREACHABLE
+                else VerificationState.UNVERIFIED,
+                target.ssid, reason = "${decision.reason}; your password was not sent"
+            )
+            outcome.connected == true -> VerificationResult(
+                VerificationState.VERIFIED, target.ssid,
+                matchedIdentifier = pins?.serverNames?.firstOrNull(),
+                matchedCertificateId = outcome.site?.matchedCertificateId,
+                reason = "connected with a profile pinned to ${pins?.serverNames?.joinToString()}: the login server " +
+                    "proved that identity in the handshake (${decision.let { (it as Decision.Proceed).why }})"
+            )
+            else -> VerificationResult(
+                VerificationState.REGISTERED, target.ssid,
+                matchedCertificateId = outcome.site?.matchedCertificateId,
+                reason = (outcome.install as? InstallOutcome.Failed)?.reason
+                    ?: "pinned profile installed; Android hasn't joined it yet"
+            )
+        }
+        publish(target.ssid, target.bssid, target.bssid ?: target.ssid, result, fix,
+            modeDescription = "eduroam setup with GECKO", isEnterprise = true)
     }
 
     private fun publish(

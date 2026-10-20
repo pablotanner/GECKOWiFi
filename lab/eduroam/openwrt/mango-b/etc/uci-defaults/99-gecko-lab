@@ -9,7 +9,9 @@ uci set system.@system[0].zonename='Europe/Zurich'
 uci set system.@system[0].timezone='CET-1CEST,M3.5.0,M10.5.0/3'
 
 # LAN as before; WAN stays DHCP from A, which reserves 192.168.8.115 for B's MAC.
-uci set network.lan.ipaddr='192.168.247.1'
+# 25.12 writes the LAN address in CIDR form; without /24 it becomes a /32.
+uci set network.lan.ipaddr='192.168.247.1/24'
+uci -q delete network.lan.netmask
 
 # SSH from A's LAN only (the laptop reaches B through A), keys only.
 uci set dropbear.@dropbear[0].PasswordAuth='off'
