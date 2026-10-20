@@ -1,0 +1,22 @@
+[
+  {
+    "schema_version": 3,
+    "certificate_id": "eduroam-lab-sp",
+    "subject": { "id": "sp.test", "name": "GECKO Lab eduroam SP" },
+    "critical": [],
+    "wifi": {
+      "ssid": "eduroam-lab",
+      "auth_modes": ["wpa2-enterprise"],
+      "enterprise": {
+        "federation": "eduroam",
+        "aaa": []
+      }
+    },
+    "areas": [{
+      "type": "MultiPolygon",
+      "coordinates": [[[[8.515,47.360],[8.565,47.360],[8.565,47.390],[8.515,47.390],[8.515,47.360]]],[]]
+    }],
+    "areas_altitude": [[200,700]],
+    "not_valid_after": "2031-09-26T15:28:00Z"
+  }
+]

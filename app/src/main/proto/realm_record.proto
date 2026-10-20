@@ -1,0 +1,29 @@
+syntax = "proto3";
+package gecko.realm;
+
+// The CAT payload of a home IdP (realm): what a supplicant needs to pin the
+// realm's RADIUS server. Keyed by realm, not by location: an eduroam visitor
+// authenticates against their own institution's server, which no site can
+// register (docs/eduroam-decisions.md, D6).
+//
+// DEMO SHORTCUT: served signed from a static endpoint (lab/realm), a stand-in
+// for a future realm keyspace in the GECKO map with inclusion proofs.
+message RealmRecord {
+  string realm = 1;                 // "homeuni.test"
+  string eap_method = 2;            // "PEAP" | "TTLS" | "TLS"
+  string phase2 = 3;                // "MSCHAPV2" | "PAP" | ...
+  string outer_identity = 4;        // "anonymous@homeuni.test"
+  repeated bytes ca_der = 5;        // raw DER CA certificates
+  repeated string server_names = 6; // for setDomainSuffixMatch
+  string rcoi = 7;                  // optional, eduroam uses 5A03BA0000 (not used yet)
+  string support_url = 8;
+  int64 issued_at = 9;              // Unix seconds
+  int64 expires_at = 10;            // Unix seconds
+}
+
+// ECDSA P-256 / SHA-256, ASN.1 DER, over the exact bytes of `record`
+// (docs/eduroam-decisions.md, D5).
+message SignedRealmRecord {
+  bytes record = 1;
+  bytes signature = 2;
+}

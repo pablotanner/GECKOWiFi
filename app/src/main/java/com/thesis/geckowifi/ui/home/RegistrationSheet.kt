@@ -74,7 +74,9 @@ fun RegistrationSheet(
     match: AdvertisedMatch,
     onDismiss: () -> Unit,
     onConnectAnyway: (() -> Unit)?,
-    loginServerCheck: LoginServerCheck? = null
+    loginServerCheck: LoginServerCheck? = null,
+    /** GECKO's eduroam setup (pinned profile from verified data); offered for enterprise networks that match. */
+    onSetup: (() -> Unit)? = null
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val mismatch = match as? AdvertisedMatch.Mismatch
@@ -147,6 +149,9 @@ fun RegistrationSheet(
             }
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.sm, Alignment.End)) {
+                if (onSetup != null) {
+                    TextButton(onClick = onSetup) { Text("Set up with GECKO") }
+                }
                 if (mismatch != null && onConnectAnyway != null) {
                     TextButton(onClick = onConnectAnyway) { Text("Connect anyway and check") }
                 }

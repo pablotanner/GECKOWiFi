@@ -36,6 +36,10 @@ sealed class ScannedNetwork {
         val authModes: Set<WiFiAuthMode>
             get() = parseAuthModes(capabilities)
 
+        /** 802.1X (WPA2/WPA3-Enterprise): joined with an account, e.g. eduroam. */
+        val isEnterprise: Boolean
+            get() = authModes.any { it.isEnterprise }
+
         /** Short security label for list rows, instead of the raw capability string. */
         val securityLabel: String
             get() = when {

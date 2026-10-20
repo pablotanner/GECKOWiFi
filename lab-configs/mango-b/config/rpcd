@@ -1,0 +1,10 @@
+config rpcd
+	option socket /var/run/ubus/ubus.sock
+	option timeout 30
+
+config login
+	option username 'root'
+	option password '<redacted, see lab-secrets/router-backups>'
+	list read '*'
+	list write '*'
+

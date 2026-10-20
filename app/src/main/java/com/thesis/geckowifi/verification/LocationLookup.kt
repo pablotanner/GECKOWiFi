@@ -14,3 +14,9 @@ enum class LookupStatus {
 
 /** Result of [VerificationEngine.registeredHere]: the status plus any certificates found. */
 data class LocationLookup(val status: LookupStatus, val certificates: List<GeoCertificate>)
+
+/**
+ * Result of [VerificationEngine.checkAdvertisedSite]: the site verdict plus the
+ * certificates it was judged on (empty when nothing was judged).
+ */
+data class SiteCheck(val result: com.thesis.geckowifi.data.model.VerificationResult, val certificates: List<GeoCertificate> = emptyList())

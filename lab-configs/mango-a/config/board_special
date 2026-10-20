@@ -1,0 +1,25 @@
+
+config service 'hardware'
+
+config switch 'switch'
+	option enable '1'
+	option wan '0'
+	option device 'eth0'
+	option cpu '6'
+	option lan '1'
+
+config network 'network'
+	option wan 'eth0.2'
+	option lan 'eth0.1'
+
+config roles 'lan'
+	option ports '1 6t'
+	option device 'eth0.1'
+	option vid '1'
+	option bak_vid '9'
+
+config roles 'wan'
+	option ports '0 6t'
+	option device 'eth0.2'
+	option vid '2'
+

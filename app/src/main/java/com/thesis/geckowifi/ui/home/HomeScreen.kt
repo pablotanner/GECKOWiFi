@@ -73,7 +73,9 @@ import com.thesis.geckowifi.verification.LookupStatus
 @Composable
 fun HomeScreen(
     viewModel: VerificationViewModel,
-    onOpenCheck: (String) -> Unit
+    onOpenCheck: (String) -> Unit,
+    /** Opens GECKO's eduroam setup (docs/eduroam-demo.md) for an enterprise network. */
+    onSetupEnterprise: (ScannedNetwork.Real) -> Unit = {}
 ) {
     LaunchedEffect(Unit) { viewModel.refresh() }
     // Lab mode: SSIDs expanded or collapsed by hand; otherwise registered ones start expanded.
@@ -98,6 +100,7 @@ fun HomeScreen(
         busy = busy,
         registrantOf = { ssid -> registrants[ssid.lowercase()] },
         onShowRegistration = { sheetFor = it },
+        onSetupEnterprise = onSetupEnterprise,
         isExpanded = { ssid, registered -> expandOverrides[ssid] ?: registered },
         onToggle = { ssid, registered -> expandOverrides[ssid] = !(expandOverrides[ssid] ?: registered) },
         onConnect = connect
@@ -113,6 +116,7 @@ fun HomeScreen(
                 match = match,
                 onDismiss = { sheetFor = null },
                 onConnectAnyway = if (network.isOpen && !busy) ({ sheetFor = null; connect(network) }) else null,
+                onSetup = if (network.isEnterprise && match !is AdvertisedMatch.Mismatch && !busy) ({ sheetFor = null; onSetupEnterprise(network) }) else null,
                 loginServerCheck = if (viewModel.rootAvailable && !network.isOpen && !busy) LoginServerCheck(
                     connected = viewModel.isConnectedTo(network.ssid),
                     onCheck = { sheetFor = null; viewModel.checkLoginServer(network) }
@@ -208,6 +212,7 @@ private class ListContext(
     val busy: Boolean,
     val registrantOf: (ssid: String) -> String?,
     val onShowRegistration: (ScannedNetwork.Real) -> Unit,
+    val onSetupEnterprise: (ScannedNetwork.Real) -> Unit,
     val isExpanded: (ssid: String, registered: Boolean) -> Boolean,
     val onToggle: (ssid: String, registered: Boolean) -> Unit,
     val onConnect: (ScannedNetwork) -> Unit
@@ -226,6 +231,8 @@ private fun ListContext.open(network: ScannedNetwork) {
     val real = network as? ScannedNetwork.Real
     val match = real?.let { matchOf(it) }
     if (real != null && match != null && (match is AdvertisedMatch.Mismatch || !real.isOpen)) onShowRegistration(real)
+    // Not known to be registered (often: a WiFi-only device can't ask before joining): GECKO's own setup finds out.
+    else if (real != null && real.isEnterprise) onSetupEnterprise(real)
     else onConnect(network)
 }
 

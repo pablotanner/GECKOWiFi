@@ -301,16 +301,32 @@ class VerificationEngine(
         lng: Double,
         altitude: Double?,
         radiusMeters: Int
-    ): VerificationResult {
+    ): VerificationResult = checkAdvertisedSite(networkKey, ssid, observedAuthModes, lat, lng, altitude, radiusMeters).result
+
+    /**
+     * [checkAdvertised] plus the certificates it judged ([SiteCheck.certificates]:
+     * valid, covering, SSID-matched, evaluable; empty unless a judgement was
+     * made). The eduroam onboarding flow reads a local user's EAP pins from
+     * their `aaa` entries, so they must come from this verified answer.
+     */
+    suspend fun checkAdvertisedSite(
+        networkKey: String,
+        ssid: String,
+        observedAuthModes: Set<WiFiAuthMode>,
+        lat: Double,
+        lng: Double,
+        altitude: Double?,
+        radiusMeters: Int
+    ): SiteCheck {
         val bitStrings = encoder.encodeQuery(lat, lng, radiusMeters)
         val (minAlt, maxAlt) = encoder.altitudeBounds(altitude, radiusMeters)
         return when (val response = gecko.queryLocation(bitStrings, minAlt, maxAlt)) {
             is GeckoResponse.Unreachable ->
-                VerificationResult(VerificationState.UNREACHABLE, ssid, reason = response.cause)
+                SiteCheck(VerificationResult(VerificationState.UNREACHABLE, ssid, reason = response.cause))
             is GeckoResponse.ProofFailure ->
-                VerificationResult(VerificationState.CONFLICT, ssid, reason = response.cause)
+                SiteCheck(VerificationResult(VerificationState.CONFLICT, ssid, reason = response.cause))
             is GeckoResponse.Success -> when (val c = candidatesFor(response, lat, lng, radiusMeters, ssid, ssid)) {
-                is Candidates.Done -> c.result
+                is Candidates.Done -> SiteCheck(c.result)
                 is Candidates.Judge -> {
                     val cert = c.certs.first()
                     val operator = cert.subject?.name?.let { " by $it" }.orEmpty()
@@ -320,10 +336,10 @@ class VerificationEngine(
                         reason = "registered here$operator; it advertises ${observedAuthModes.joinToString { it.wire }}, " +
                             "as registered; the registration lists nothing else to compare"
                     )
-                    c.finish(registered, authModeConflict(c, observedAuthModes, ssid)).withResponseMetadata(response)
+                    SiteCheck(c.finish(registered, authModeConflict(c, observedAuthModes, ssid)).withResponseMetadata(response), c.certs)
                 }
             }
-        }.also { if (it.state != VerificationState.UNREACHABLE) cache.put(networkKey, "advertised:$ssid", it) }
+        }.also { if (it.result.state != VerificationState.UNREACHABLE) cache.put(networkKey, "advertised:$ssid", it.result) }
     }
 
     /**

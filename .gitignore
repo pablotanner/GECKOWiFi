@@ -31,3 +31,6 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Test key material for the eduroam demo (lab/eduroam/make-pki.sh); back up separately
+lab-secrets/

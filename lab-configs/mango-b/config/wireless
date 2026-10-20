@@ -1,0 +1,18 @@
+
+config wifi-device 'radio0'
+	option type 'mac80211'
+	option path 'platform/10300000.wmac'
+	option band '2g'
+	option channel '11'
+	option htmode 'HT20'
+	option disabled '0'
+	option country 'DE'
+
+config wifi-iface 'wifi2g'
+	option device 'radio0'
+	option network 'lan'
+	option mode 'ap'
+	option ssid 'GeckoTest'
+	option encryption 'none'
+	option disabled '0'
+

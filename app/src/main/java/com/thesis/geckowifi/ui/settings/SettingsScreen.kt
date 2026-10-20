@@ -52,7 +52,7 @@ import com.thesis.geckowifi.verification.LookupStatus
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(viewModel: VerificationViewModel) {
+fun SettingsScreen(viewModel: VerificationViewModel, onOpenEduroamSetup: () -> Unit = {}) {
     Column(Modifier.fillMaxWidth()) {
         TopAppBar(title = { Text("Settings") })
         Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = Space.xxl)) {
@@ -91,7 +91,7 @@ fun SettingsScreen(viewModel: VerificationViewModel) {
                 Switch(checked = viewModel.labMode, onCheckedChange = null)
             }
 
-            if (viewModel.labMode) LabSection(viewModel)
+            if (viewModel.labMode) LabSection(viewModel, onOpenEduroamSetup)
         }
     }
 }
@@ -111,7 +111,7 @@ private fun ScopeLine(covered: Boolean, text: String) {
 }
 
 @Composable
-private fun LabSection(viewModel: VerificationViewModel) {
+private fun LabSection(viewModel: VerificationViewModel, onOpenEduroamSetup: () -> Unit) {
     val context = LocalContext.current
     Column(Modifier.padding(horizontal = Space.lg), verticalArrangement = Arrangement.spacedBy(Space.md)) {
         SectionHeader("Lab", Modifier.padding(start = 0.dp))
@@ -150,6 +150,17 @@ private fun LabSection(viewModel: VerificationViewModel) {
                 fix.provider?.let { DetailRow("Provider", it) }
             }
             DetailRow("Scan results", "${viewModel.scannedNetworks.size}")
+        }
+
+        SectionCard("eduroam onboarding") {
+            Text(
+                "GECKO's eduroam setup for the lab network, also when it isn't in the scan list (docs/eduroam-demo.md).",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            OutlinedButton(onClick = onOpenEduroamSetup, modifier = Modifier.padding(top = Space.md).heightIn(min = 48.dp)) {
+                Text("Set up eduroam-lab")
+            }
         }
 
         SectionCard("Check log") {

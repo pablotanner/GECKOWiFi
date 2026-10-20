@@ -192,6 +192,11 @@ Notes:
   failed with "Operation not permitted"). The old config is in
   `/root/mwan3-wan.backup`.
 
+## eduroam onboarding demo
+
+Setup, RADIUS instances, relay, realm server and demo scenes:
+[eduroam-demo.md](eduroam-demo.md).
+
 ## Running the app
 
 Build the `device` flavor and install it with `./gradlew installDeviceDebug`.
@@ -231,6 +236,10 @@ gone, try re-adding it as administrator:
 New-NetIPAddress -InterfaceAlias 'Ethernet 4' -IPAddress 192.168.137.1 -PrefixLength 24
 ```
 If this doesn't work, the service probably froze and a device (laptop) restart is necessary. 
+
+**Map server exits with `unable to create consistency client: failed to connect
+to 127.0.0.1:8090`.** Trillian isn't running: start Docker Desktop (its
+containers restart on their own), then the map server again.
 
 **Routers have no internet** (SSH and the map server work, `example.com`
 doesn't). ICS stopped forwarding. Re-enable sharing on the WLAN adapter

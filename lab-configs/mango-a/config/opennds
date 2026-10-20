@@ -1,0 +1,20 @@
+
+config opennds
+	list users_to_router 'allow tcp port 53'
+	list users_to_router 'allow udp port 53'
+	list users_to_router 'allow udp port 67'
+	list users_to_router 'allow tcp port 22'
+	list users_to_router 'allow tcp port 443'
+	option gatewayinterface 'br-lan'
+	option gatewayname 'GeckoTest'
+	option fasport '80'
+	option fasremoteip '192.168.137.10'
+	option fasremotefqdn 'portal.gecko-a.lab'
+	option faspath '/'
+	option fas_secure_enabled '0'
+	list preauthenticated_users 'allow tcp port 1234 to 192.168.137.1'
+	list preauthenticated_users 'allow tcp port 443 to 192.168.137.10'
+	option enabled '1'
+	option dhcp_default_url_enable '0'
+	list trustedmac '94:83:c4:97:c2:47'
+

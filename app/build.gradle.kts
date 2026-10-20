@@ -35,12 +35,15 @@ android {
         create("emulator") {
             dimension = "target"
             buildConfigField("String", "GEOPKI_URL", "\"http://10.0.2.2:1234\"")
+            // Signed realm records (lab/realm, docs/eduroam-demo.md).
+            buildConfigField("String", "REALM_URL", "\"http://10.0.2.2:1235\"")
             buildConfigField("boolean", "SHOW_DEMO_NETWORKS", "true")
         }
         create("device") {
             dimension = "target"
             // Laptop's ICS address on the USB-C Ethernet segment, behind Router A/B.
             buildConfigField("String", "GEOPKI_URL", "\"http://192.168.137.1:1234\"")
+            buildConfigField("String", "REALM_URL", "\"http://192.168.137.1:1235\"")
             buildConfigField("boolean", "SHOW_DEMO_NETWORKS", "false")
         }
     }
