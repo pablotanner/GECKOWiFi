@@ -36,6 +36,8 @@ uci set wireless.wifi2g.network='lan'
 uci set wireless.wifi2g.mode='ap'
 # Since 25.12 the generated interface section is disabled, not the radio.
 uci set wireless.wifi2g.disabled='0'
+# The Wi-Fi LED is generated for 'wlan0'; 25.12 names the interface phy0-ap0.
+uci -q set system.led_wifi_led.dev='phy0-ap0'
 
 # DNS overrides as before (lab/scenarios/reset.ps1 rewrites them per scenario).
 uci -q delete dhcp.@dnsmasq[0].address

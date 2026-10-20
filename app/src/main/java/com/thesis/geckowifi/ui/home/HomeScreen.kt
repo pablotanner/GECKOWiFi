@@ -317,7 +317,8 @@ private fun NetworkListItem(
 ) {
     val network = row.primary
     val real = network as? ScannedNetwork.Real
-    val checkable = real == null || real.isOpen || registered
+    // Enterprise networks open GECKO's eduroam setup (docs/eduroam-demo.md), registered or not.
+    val checkable = real == null || real.isOpen || real.isEnterprise || registered
     val colors = MaterialTheme.colorScheme
     val content = if (checkable) colors.onSurface else colors.onSurfaceVariant
 
@@ -389,6 +390,7 @@ private fun supportingText(row: NetworkRow, labMode: Boolean, registered: Boolea
     is ScannedNetwork.Real -> when {
         match is AdvertisedMatch.Mismatch -> "Registered as ${match.registered.securityNames()}, but this one is ${match.advertised.securityNames()}"
         !n.isOpen && registered -> n.securityLabel
+        n.isEnterprise -> "${n.securityLabel}. Set up with GECKO"
         !n.isOpen -> "${n.securityLabel}. Can't be checked yet"
         labMode && row.accessPoints.size == 1 ->
             listOfNotNull(n.bssid, n.channel?.let { "ch $it" }, n.rssi.takeIf { it != Int.MIN_VALUE }?.let { "$it dBm" })
