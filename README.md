@@ -140,13 +140,86 @@ ssh mango-b "nft list ruleset | grep -i gecko"     # S7 firewall block present?
 .\scenario.ps1 S3      # configure B (DNS/openNDS/firewall) + print the laptop portals to start
 .\reset.ps1            # return B to the evil-twin baseline (also clears S7 rule / N6 SSID)
 ```
+
+### eduroam demo: start the laptop side (every session)
+How the pieces fit together: [docs/eduroam-demo.md](docs/eduroam-demo.md). After a
+laptop restart, in this order (Docker + map server as in docs/lab-setup.md first):
+```powershell
+cd lab\realm; go run . serve -addr 192.168.137.1:1235 -dir ..\..\lab-secrets\realm\signed   # realm server (own window)
+python lab\eduroam\udp-relay.py                                                             # RADIUS relay to WSL (own window; restart after WSL restarts)
+```
+```bash
+# in WSL, from /mnt/c/Users/41763/AndroidStudioProjects/GECKOWiFi
+bash lab/eduroam/radius/run.sh legit          # legit RADIUS, live log in the terminal (Ctrl-C stops it)
+bash lab/eduroam/radius/run.sh legit bg       # ... or in the background
+bash lab/eduroam/radius/stop.sh all           # stop every instance
+```
+Is everything up? (`404`/`200` = reachable)
+```powershell
+curl.exe -s -o NUL -w "%{http_code}`n" http://192.168.137.1:1234/                        # map server
+curl.exe -s -o NUL -w "%{http_code}`n" http://192.168.137.1:1235/v1/realm/homeuni.test   # realm server
+wsl -e pgrep -ax freeradius                                                               # RADIUS instances
+```
+
+### eduroam demo: RADIUS
+```bash
+tail -f $(ls -t ~/gecko-radius/logs/legit-*.log | head -1) | grep --line-buffered -E 'Received Access-Request|User-Name|Tunnel-Private|Sent Access'   # who logs in, which VLAN
+bash lab/eduroam/radius/count-inner.sh $(ls -t ~/gecko-radius/logs/attacker-b1-*.log | head -1)   # what an attacker captured
+bash lab/eduroam/radius/test-radius.sh        # all instances up: 11 checks with eapol_test
+```
+Log files: `~/gecko-radius/logs/<instance>-<time>.log` in WSL. Test password for
+`alice@homeuni.test`: `ALICE_PASSWORD` in `lab-secrets/radius/secrets.env`.
+
+### eduroam demo: Router A (legit SP)
+```powershell
+ssh mango-a "iw dev | grep -E 'Interface|ssid'"                   # GeckoTest + eduroam-lab (+ phy0-ap1-onb = VLAN 99)
+ssh mango-a "logread -f | grep -E 'phy0-ap1|RADIUS'"              # live: logins, 'RADIUS: VLAN ID 99', session timeout
+ssh mango-a "cat /tmp/dhcp.leases"                                # 10.99.0.x = walled garden, 10.98.0.x = normal eduroam
+ssh mango-a "nft list ruleset | grep -E 'GECKO-onboard|reject onboard'"   # walled-garden counters (allowed / rejected)
+ssh mango-a "dmesg | grep 'link down' | tail"                     # port 0 = laptop, port 1 = Router B
+```
+
+### eduroam demo: Router B (attacker modes)
+```powershell
+ssh mango-b "uci show wireless | grep -E 'eduroam_(b1|b2|legit)\.(ssid|disabled|auth_port)'"   # which mode is configured/active
+ssh mango-b "uci set wireless.eduroam_b1.disabled=0; uci commit wireless; wifi reload"        # B1 on (radio on only while testing!)
+ssh mango-b "uci set wireless.eduroam_b1.disabled=1; uci commit wireless; wifi reload"        # B1 off
+```
+Never enable an attacker section without its RADIUS instance and the relay running,
+and never name anything `eduroam`.
+
+### eduroam demo: tablet
+```powershell
+adb logcat -s OnboardingSession EduroamOnboarding EduroamInstaller GeckoClient   # live, or afterwards (the buffer keeps it)
+adb logcat -d -s EduroamOnboarding | grep "outcome for"                          # the last result in one line
+adb shell "dumpsys wifi | grep -m1 mWifiInfo"                                    # which AP? see BSSIDs below
+adb shell cmd location providers set-test-provider-location gps --location 47.37643,8.54674 --accuracy 15   # fake lab location (see docs/eduroam-demo.md)
+```
+A manually saved `eduroam-lab` on the tablet wins over the app's profile: forget it after scene 4 / manual tests.
+
+| BSSID | Network |
+|---|---|
+| `94:83:c4:97:c2:3a` | A, `GeckoTest` (genuine portal) |
+| `96:83:c4:97:c2:3a` | A, `eduroam-lab` (legit SP) |
+| `94:83:c4:97:c2:47` | B, `GeckoTest` (attacker portal) |
+| `96:83:c4:97:c2:47` | B, `eduroam-lab` (attacker, only while testing) |
+
+### Routers: snapshots and recovery
+```bash
+bash lab/eduroam/pull-router-configs.sh            # before/after every router change; then commit lab-configs/
+```
+Full backups: `lab-secrets/router-backups/`. SSH to the routers needs the RSA key
+(`~/.ssh/id_mango_rsa`, OpenWrt's dropbear has no Ed25519). Flashing and recovery:
+[docs/flashing-openwrt.md](docs/flashing-openwrt.md).
 ## Status
 
 This is a research prototype. Working on real hardware: joining a specific
 access point, detecting the captive portal, verifying the map server's
-response, and telling a genuine portal from a cloned one. Not done yet:
-continuous monitoring after the initial check (needs root), real 802.1X /
-eduroam verification, and persistent history.
+response, and telling a genuine portal from a cloned one. For eduroam-style
+networks, the app sets up a pinned enterprise profile itself, from data it
+fetched and verified over a public onboarding session (no root needed;
+[docs/eduroam-demo.md](docs/eduroam-demo.md)). Not done yet: continuous
+monitoring after the initial check (needs root) and persistent history.
 
 The prototype assumes GECKO would eventually be part of the operating system,
 so the parts that need system privileges are written against root rather than
