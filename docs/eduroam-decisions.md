@@ -248,3 +248,51 @@ certificate `eduroam-lab-sp` (re-registered), the record
 deleted). The `govroam` record stays as the second federation for the scoping
 tests. A record the app saved before the rename is still validly signed for
 `eduroam`, so delete the saved data on devices that used the lab before.
+
+## D23. Questions are sheets, results are verdicts
+An enterprise attempt ends in one of three forms, each with its own UI:
+- **A result** (verdict on the status card, saved in History): connected,
+  a warning on signs of an attack, or a technical failure ("Couldn't check",
+  with Try again): onboarding failed, record server unreachable.
+- **A question** (bottom sheet, no verdict, nothing saved): no saved account
+  can be used. The sign-in sheet lists each saved account with why it can't
+  be used here (realm not accepted, home institution has no record in this
+  federation, record not saved and not fetchable here, registration without
+  the CA certificate) and offers Android's settings as the way out.
+- **A choice** (dialog): several accounts can be used.
+"Your password was not sent" only appears in warnings, where it reassures; in
+neutral outcomes it alarmed without helping. A missing record splits into
+`NO_RECORD` and `NOT_SAVED` (no retry helps, so ask for an account) and
+`UNREACHABLE` (retry may help, so a neutral result).
+
+## D24. Map server keeps `ca_certificates`
+The geopki server decodes certificates into its Go struct and stores the
+re-encoded struct, so fields it doesn't know are dropped. `AuthServer` lacked
+`ca_certificates`, so ETH's registration arrived without CA certificates and
+GECKO rightly refused to pin it. Added the field in geopki
+(`pkg/crypto/certificate.go`, one line) and re-registered
+`ethz-eduroam-2026a`. A comparison of every lab certificate with its stored
+version shows nothing else is lost.
+
+## D25. Network checks fall back to the saved answer
+A captive portal blocks the internet until login, so a check over the joined
+network can't reach the map server; a device without mobile data then can't
+check the network at all. When the live query is unreachable, every judging
+query (portal hops, portal domain, login server, advertised security) uses the
+saved answer (D21) instead, if it is at most 24 h old and either its area
+contains the whole query circle (so "nothing registered" holds as it did then)
+or it holds a valid certificate for the SSID reaching this position. Results
+say "Data from: saved registration from …" and are not put in the decision
+cache, so a live answer replaces them as soon as the server is reachable. A
+failed proof is never replaced. This also defeats withholding: a network that
+blocks the map server no longer hides its registration. Staleness and
+revocation (shorter age, revocation lists, map-head freshness) are left to a
+real deployment.
+
+`eth-visitors` was re-registered as `eth-visitors-2026a`
+(lab/certs/eth-visitors.json): the earlier registration named a placeholder
+portal (`guest.ethz.ch`, key `testXYZ=`). The new one pins the portal the
+tablet observed on 2026-10-21: `enter-guest-net.ethz.ch` (primary) and
+`login.enter.ethz.ch` (delegate), ETH campus areas. The pins are TLS leaf keys
+from one observation; when ETH renews its certificates with new keys the
+registration has to follow.

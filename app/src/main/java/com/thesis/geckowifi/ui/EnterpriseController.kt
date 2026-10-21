@@ -117,7 +117,9 @@ class EnterpriseController(
             onStep(target, EnterpriseStep.CHECK_NETWORK)
             val report = onboarding.checkSaved(target, saved.certificates, accounts, saved.record, saved.source)
             val decision = decideOn(report)
-            val missingRecord = decision is Decision.Block && !decision.hostile && report.checks.any { it is PinCheck.Missing }
+            // A visitor's record wasn't saved: onboarding can fetch it, where the network supports it.
+            val missingRecord = (decision is Decision.NeedAccount || decision is Decision.Block && !decision.hostile) &&
+                report.checks.any { it is PinCheck.Missing && it.cause == com.thesis.geckowifi.eduroam.MissingCause.NOT_SAVED }
             if (!missingRecord || !onboarding.supports(target.ssid)) return report to decision
         }
         if (!onboarding.supports(target.ssid)) {

@@ -92,7 +92,7 @@ fun checkSaved(
                 is PinResult.Rejected -> PinCheck.Rejected(m, r.reason, hostile = false)
             }
             is AccountMatch.Visitor -> when (val bytes = savedRecord(m.federation, realm)) {
-                null -> PinCheck.Missing(m, "no saved record for $realm in ${m.federation}")
+                null -> PinCheck.Missing(m, "no saved record for $realm in ${m.federation}", MissingCause.NOT_SAVED)
                 else -> when (val r = AuthenticatedEapPins.fromSignedRealmRecord(bytes, m.federation, realm, realmKey, now)) {
                     is PinResult.Ok -> PinCheck.Pinned(m, r.pins)
                     is PinResult.Rejected -> PinCheck.Rejected(m, r.reason, hostile = true)

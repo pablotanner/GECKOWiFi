@@ -55,7 +55,13 @@ sealed class GeckoResponse {
          */
         val usedPreferredNetwork: Boolean = false,
         /** When the map server signed the map head this answer is proven against (epoch millis). */
-        val mapHeadMillis: Long? = null
+        val mapHeadMillis: Long? = null,
+        /**
+         * Set when this isn't a live answer but a saved one standing in for an
+         * unreachable server (docs/eduroam-decisions.md, D21, D25): when it was
+         * fetched (epoch millis). Its proof was checked when it arrived.
+         */
+        val savedAt: Long? = null
     ) : GeckoResponse()
 
     /** Could not reach the server, or its response could not be parsed at all. Distinct from [ProofFailure]. */

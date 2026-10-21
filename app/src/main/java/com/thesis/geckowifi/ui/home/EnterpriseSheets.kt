@@ -3,6 +3,7 @@ package com.thesis.geckowifi.ui.home
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -44,6 +45,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.thesis.geckowifi.eduroam.PinSource
 import com.thesis.geckowifi.eduroam.SignInPrompt
+import com.thesis.geckowifi.eduroam.UnusableAccount
 import com.thesis.geckowifi.ui.ChoiceRequest
 import com.thesis.geckowifi.ui.theme.Space
 
@@ -59,21 +61,39 @@ fun SignInPrompt.explanation(): String {
         val realms = localRealms.joinToString(", ") { "@" + it.removePrefix("*.") }
         "$ssid is run by ${operatorName ?: "its operator"}. Sign in with your account" + (if (realms.isNotEmpty()) " ($realms)." else ".")
     }
-    val saved = when (notFitting.size) {
-        0 -> ""
-        1 -> " Your saved account ${notFitting.single().identity} can't be used here."
-        else -> " Your saved accounts can't be used here."
+    return who
+}
+
+/** Why a saved account can't sign in here, in one sentence. */
+fun SignInPrompt.reason(unusable: UnusableAccount): String {
+    val realm = unusable.account.realm ?: "its domain"
+    return when (unusable.why) {
+        UnusableAccount.Why.NOT_ACCEPTED -> "$ssid doesn't accept accounts from $realm."
+        UnusableAccount.Why.NO_RECORD ->
+            "$realm hasn't registered its login server with GECKO" + (federation?.let { " for $it" } ?: "") + ", so GECKO can't confirm it."
+        UnusableAccount.Why.NOT_SAVED ->
+            "GECKO has no login server details for $realm saved and can't fetch them on this network. Open GECKO once on a network with internet."
+        UnusableAccount.Why.INCOMPLETE_REGISTRATION ->
+            "The registration of $ssid doesn't include the login server certificate GECKO needs to protect this account."
     }
-    return who + saved
 }
 
 private fun SignInPrompt.identityHint(): String =
     localRealms.firstOrNull()?.takeIf { federation == null }?.let { "name@${it.removePrefix("*.")}" } ?: "name@institution"
 
-/** Asks for an account when none of the saved ones fits the network. */
+/**
+ * Asks for an account when none of the saved ones can be used at the network,
+ * saying why for each. A question, not a check result: dismissing it changes
+ * nothing. [onAndroidSettings] is the way out for networks GECKO can't help with.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SignInSheet(prompt: SignInPrompt, onSubmit: (identity: String, password: String) -> Unit, onDismiss: () -> Unit) {
+fun SignInSheet(
+    prompt: SignInPrompt,
+    onSubmit: (identity: String, password: String) -> Unit,
+    onDismiss: () -> Unit,
+    onAndroidSettings: () -> Unit
+) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var identity by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -93,6 +113,20 @@ fun SignInSheet(prompt: SignInPrompt, onSubmit: (identity: String, password: Str
         ) {
             Text("Sign in to ${prompt.ssid}", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
             Text(prompt.explanation(), style = MaterialTheme.typography.bodyLarge)
+            if (prompt.unusable.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.sm)) {
+                    Text(
+                        if (prompt.unusable.size == 1) "Your saved account can't be used here" else "Your saved accounts can't be used here",
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    prompt.unusable.forEach { u ->
+                        Column {
+                            Text(u.account.identity, style = MaterialTheme.typography.bodyMedium)
+                            Text(prompt.reason(u), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
             OutlinedTextField(
                 value = identity,
                 onValueChange = { identity = it },
@@ -127,7 +161,9 @@ fun SignInSheet(prompt: SignInPrompt, onSubmit: (identity: String, password: Str
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.sm, Alignment.End)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.sm), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onAndroidSettings, modifier = Modifier.heightIn(min = 48.dp)) { Text("Android settings") }
+                Spacer(Modifier.weight(1f))
                 TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp)) { Text("Cancel") }
                 Button(onClick = { onSubmit(identity.trim(), password) }, enabled = canSubmit, modifier = Modifier.heightIn(min = 48.dp)) {
                     Text("Connect")

@@ -113,7 +113,7 @@ class EnterpriseMatchingTest {
         assertNull(d.prompt.federation)
         assertEquals("Lab Operator", d.prompt.operatorName)
         assertEquals(listOf("site.test"), d.prompt.localRealms)
-        assertEquals(listOf(alice), d.prompt.notFitting)
+        assertEquals(listOf(UnusableAccount(alice, UnusableAccount.Why.NOT_ACCEPTED)), d.prompt.unusable)
     }
 
     @Test
@@ -124,17 +124,38 @@ class EnterpriseMatchingTest {
     }
 
     @Test
-    fun withheldRecord_blocksWithoutWarning() {
-        val missing = PinCheck.Missing(AccountMatch.Visitor(alice, "eduroam"), "record server not reachable")
+    fun unreachableRecordServer_blocksWithoutWarning() {
+        val missing = PinCheck.Missing(AccountMatch.Visitor(alice, "eduroam"), "record server not reachable", MissingCause.UNREACHABLE)
         val d = decide(registered, site("eduroam"), listOf(missing), listOf(alice), null) as Decision.Block
         assertTrue(!d.hostile)
     }
 
     @Test
-    fun registrationWithoutCaCertificate_blocksWithoutWarning() {
+    fun noRecordForTheHomeInstitution_asksForAnotherAccount_withTheReason() {
+        val missing = PinCheck.Missing(AccountMatch.Visitor(alice, "eduroam"), "no record", MissingCause.NO_RECORD)
+        val d = decide(registered, site("eduroam"), listOf(missing), listOf(alice), null) as Decision.NeedAccount
+        assertEquals(listOf(UnusableAccount(alice, UnusableAccount.Why.NO_RECORD)), d.prompt.unusable)
+    }
+
+    @Test
+    fun recordNotSaved_asksForAnotherAccount_withTheReason() {
+        val missing = PinCheck.Missing(AccountMatch.Visitor(alice, "eduroam"), "no saved record", MissingCause.NOT_SAVED)
+        val d = decide(registered, site("eduroam"), listOf(missing), listOf(alice), null) as Decision.NeedAccount
+        assertEquals(UnusableAccount.Why.NOT_SAVED, d.prompt.unusable.single().why)
+    }
+
+    @Test
+    fun registrationWithoutCaCertificate_asksForAnotherAccount_noWarning() {
         val incomplete = PinCheck.Rejected(AccountMatch.Local(staff), "nothing to pin", hostile = false)
-        val d = decide(registered, site(null, listOf("site.test")), listOf(incomplete), listOf(staff), null) as Decision.Block
-        assertTrue(!d.hostile)
+        val d = decide(registered, site(null, listOf("site.test")), listOf(incomplete), listOf(staff), null) as Decision.NeedAccount
+        assertEquals(listOf(UnusableAccount(staff, UnusableAccount.Why.INCOMPLETE_REGISTRATION)), d.prompt.unusable)
+    }
+
+    @Test
+    fun unreachableBeatsNoRecord_soTheUserCanRetry() {
+        val gone = PinCheck.Missing(AccountMatch.Visitor(alice, "eduroam"), "no record", MissingCause.NO_RECORD)
+        val down = PinCheck.Missing(AccountMatch.Visitor(bob, "eduroam"), "unreachable", MissingCause.UNREACHABLE)
+        assertTrue(decide(registered, site("eduroam"), listOf(gone, down), listOf(alice, bob), null) is Decision.Block)
     }
 
     // --- local pins from the registration ---

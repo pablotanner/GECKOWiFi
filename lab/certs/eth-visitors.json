@@ -1,0 +1,96 @@
+[
+  {
+    "schema_version": 3,
+    "certificate_id": "eth-visitors-2026a",
+    "subject": {
+      "id": "ethz.ch",
+      "name": "ETH Zürich"
+    },
+    "critical": [],
+    "wifi": {
+      "ssid": "eth-visitors",
+      "auth_modes": [
+        "open"
+      ]
+    },
+    "portal": {
+      "domains": [
+        {
+          "name": "enter-guest-net.ethz.ch",
+          "role": "primary",
+          "pinned_spki_sha256": [
+            "1JLMnB4O+fYncM/9u833rl2e53VhW7QuYmgPNQtztz0="
+          ]
+        },
+        {
+          "name": "login.enter.ethz.ch",
+          "role": "delegate",
+          "pinned_spki_sha256": [
+            "455kTIGc6ArF3GRB8dI7RvX6YOJSU+ksRMmwM7NNxP4="
+          ]
+        }
+      ]
+    },
+    "areas": [
+      {
+        "type": "MultiPolygon",
+        "coordinates": [
+          [
+            [
+              [
+                8.5435,
+                47.374
+              ],
+              [
+                8.5515,
+                47.374
+              ],
+              [
+                8.5515,
+                47.3805
+              ],
+              [
+                8.5435,
+                47.3805
+              ],
+              [
+                8.5435,
+                47.374
+              ]
+            ],
+            [
+              [
+                8.503,
+                47.406
+              ],
+              [
+                8.5125,
+                47.406
+              ],
+              [
+                8.5125,
+                47.4105
+              ],
+              [
+                8.503,
+                47.4105
+              ],
+              [
+                8.503,
+                47.406
+              ]
+            ]
+          ],
+          []
+        ]
+      }
+    ],
+    "areas_altitude": [
+      [
+        350,
+        650
+      ]
+    ],
+    "not_valid_after": "2027-10-14T00:00:00Z"
+  }
+]

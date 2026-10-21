@@ -97,9 +97,9 @@ class SavedRegistrationTest {
     fun visitor_noSavedRecord_missing_soTheCallerCanOnboard() {
         val report = checkSaved(target, listOf(cert()), store.accounts(), { _, _ -> null }, source, realmKey.public, now)
 
-        assertTrue(report.checks.single() is PinCheck.Missing)
-        val block = decideOn(report) as Decision.Block
-        assertEquals(false, block.hostile)
+        assertEquals(MissingCause.NOT_SAVED, (report.checks.single() as PinCheck.Missing).cause)
+        val ask = decideOn(report) as Decision.NeedAccount
+        assertEquals(UnusableAccount.Why.NOT_SAVED, ask.prompt.unusable.single().why)
     }
 
     @Test

@@ -27,6 +27,23 @@ class VerificationEngine(
     /** Injectable for tests; used to drop certificates past their `not_valid_after`. */
     private val clock: () -> Instant = Instant::now
 ) {
+    /**
+     * A saved answer for (lat, lng, radius, ssid) to judge with when the map
+     * server is unreachable (D25), or null if none applies. Typical on a
+     * captive portal before login: the network blocks the server. Only the
+     * judging queries use it, never [registeredHere] (which feeds the save).
+     */
+    var savedAnswer: ((lat: Double, lng: Double, radiusMeters: Int, ssid: String?) -> GeckoResponse.Success?)? = null
+
+    /** The map query of a judgement, with the saved answer standing in for an unreachable server. */
+    private suspend fun judgingQuery(lat: Double, lng: Double, altitude: Double?, radiusMeters: Int, ssid: String?): GeckoResponse {
+        val bitStrings = encoder.encodeQuery(lat, lng, radiusMeters)
+        val (minAlt, maxAlt) = encoder.altitudeBounds(altitude, radiusMeters)
+        val live = gecko.queryLocation(bitStrings, minAlt, maxAlt)
+        if (live !is GeckoResponse.Unreachable) return live
+        return savedAnswer?.invoke(lat, lng, radiusMeters, ssid) ?: live
+    }
+
     private val sessions = ConcurrentHashMap<String, PortalSession>()
 
     fun sessionFor(networkKey: String): PortalSession =
@@ -115,9 +132,7 @@ class VerificationEngine(
     ): VerificationResult {
         cache.get(networkKey, host)?.let { return it }
 
-        val bitStrings = encoder.encodeQuery(lat, lng, radiusMeters)
-        val (minAlt, maxAlt) = encoder.altitudeBounds(altitude, radiusMeters)
-        val response = gecko.queryLocation(bitStrings, minAlt, maxAlt)
+        val response = judgingQuery(lat, lng, altitude, radiusMeters, ssid)
 
         val result = when (response) {
             is GeckoResponse.Unreachable ->
@@ -132,7 +147,7 @@ class VerificationEngine(
                 ).withResponseMetadata(response)
             }
         }
-        if (result.state != VerificationState.UNREACHABLE) cache.put(networkKey, host, result)
+        if (result.state != VerificationState.UNREACHABLE && result.savedAt == null) cache.put(networkKey, host, result)
         return result
     }
 
@@ -172,9 +187,7 @@ class VerificationEngine(
                 reason = "no portal page to verify"))
         }
 
-        val bitStrings = encoder.encodeQuery(lat, lng, radiusMeters)
-        val (minAlt, maxAlt) = encoder.altitudeBounds(altitude, radiusMeters)
-        val response = gecko.queryLocation(bitStrings, minAlt, maxAlt)
+        val response = judgingQuery(lat, lng, altitude, radiusMeters, ssid)
         val firstHost = judged.first().host
         val success = when (response) {
             is GeckoResponse.Unreachable ->
@@ -264,9 +277,7 @@ class VerificationEngine(
     ): VerificationResult {
         cache.get(networkKey, cacheKey)?.let { return it }
 
-        val bitStrings = encoder.encodeQuery(lat, lng, radiusMeters)
-        val (minAlt, maxAlt) = encoder.altitudeBounds(altitude, radiusMeters)
-        val response = gecko.queryLocation(bitStrings, minAlt, maxAlt)
+        val response = judgingQuery(lat, lng, altitude, radiusMeters, ssid)
 
         val result = when (response) {
             is GeckoResponse.Unreachable ->
@@ -281,7 +292,7 @@ class VerificationEngine(
                 ).withResponseMetadata(response)
             }
         }
-        if (result.state != VerificationState.UNREACHABLE) cache.put(networkKey, cacheKey, result)
+        if (result.state != VerificationState.UNREACHABLE && result.savedAt == null) cache.put(networkKey, cacheKey, result)
         return result
     }
 
@@ -319,9 +330,7 @@ class VerificationEngine(
         altitude: Double?,
         radiusMeters: Int
     ): SiteCheck {
-        val bitStrings = encoder.encodeQuery(lat, lng, radiusMeters)
-        val (minAlt, maxAlt) = encoder.altitudeBounds(altitude, radiusMeters)
-        return when (val response = gecko.queryLocation(bitStrings, minAlt, maxAlt)) {
+        return when (val response = judgingQuery(lat, lng, altitude, radiusMeters, ssid)) {
             is GeckoResponse.Unreachable ->
                 SiteCheck(VerificationResult(VerificationState.UNREACHABLE, ssid, reason = response.cause))
             is GeckoResponse.ProofFailure ->
@@ -340,7 +349,7 @@ class VerificationEngine(
                     SiteCheck(c.finish(registered, authModeConflict(c, observedAuthModes, ssid)).withResponseMetadata(response), c.certs)
                 }
             }
-        }.also { if (it.result.state != VerificationState.UNREACHABLE) cache.put(networkKey, "advertised:$ssid", it.result) }
+        }.also { if (it.result.state != VerificationState.UNREACHABLE && it.result.savedAt == null) cache.put(networkKey, "advertised:$ssid", it.result) }
     }
 
     /**
@@ -467,6 +476,7 @@ class VerificationEngine(
     private fun VerificationResult.withResponseMetadata(response: GeckoResponse.Success) = copy(
         certificateCount = response.certificates.size,
         unparsedCount = response.unparsedCount,
-        usedPreferredNetwork = response.usedPreferredNetwork
+        usedPreferredNetwork = response.usedPreferredNetwork,
+        savedAt = response.savedAt
     )
 }

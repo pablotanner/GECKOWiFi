@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import com.thesis.geckowifi.ui.ActiveCheck
 import com.thesis.geckowifi.ui.CheckDetail
 import com.thesis.geckowifi.ui.CheckStep
+import com.thesis.geckowifi.ui.CheckFailure
 import com.thesis.geckowifi.ui.VerificationViewModel
 import com.thesis.geckowifi.ui.components.VerdictBadge
 import com.thesis.geckowifi.ui.components.colors
@@ -102,7 +103,8 @@ fun StatusCard(viewModel: VerificationViewModel, onOpenCheck: (String) -> Unit, 
                         onDetails = { onOpenCheck(s.check.id) },
                         onDisconnect = viewModel::disconnect,
                         onDismiss = viewModel::dismissCurrent,
-                        onForget = { s.check.ssid?.let(viewModel::forgetEnterpriseNetwork) }
+                        onForget = { s.check.ssid?.let(viewModel::forgetEnterpriseNetwork) },
+                        onRetry = { viewModel.retry(s.check) }
                     )
                     is CardState.Connected -> ConnectedContent(s.ssid, s.verdict, onDetails = { s.verdict?.let { onOpenCheck(it.id) } })
                 }
@@ -257,7 +259,8 @@ private fun ResultContent(
     onDetails: () -> Unit,
     onDisconnect: () -> Unit,
     onDismiss: () -> Unit,
-    onForget: () -> Unit
+    onForget: () -> Unit,
+    onRetry: () -> Unit
 ) {
     val v = check.verdict()
     val toneColors = v.tone.colors()
@@ -319,6 +322,15 @@ private fun ResultContent(
             ) { Text(leaveLabel) }
             TextButton(onClick = onDetails, modifier = Modifier.heightIn(min = 48.dp)) {
                 Text("What GECKO saw", color = toneColors.content)
+            }
+        } else if (check.failure == CheckFailure.SERVER_NOT_CONFIRMED || check.failure == CheckFailure.ONBOARDING_FAILED) {
+            // A technical failure: trying again is what helps.
+            Button(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) { Text("Try again") }
+            TextButton(onClick = onDetails, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text("Details", color = toneColors.content)
+            }
+            TextButton(onClick = leave, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(leaveLabel, color = toneColors.content)
             }
         } else {
             OutlinedButton(onClick = onDetails, modifier = Modifier.heightIn(min = 48.dp)) {

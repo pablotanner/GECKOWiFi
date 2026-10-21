@@ -86,8 +86,31 @@ sealed interface PinCheck {
      */
     data class Rejected(override val match: AccountMatch, val reason: String, val hostile: Boolean) : PinCheck
 
-    /** Nothing usable arrived (record endpoint unreachable, withheld, no record). */
-    data class Missing(override val match: AccountMatch, val reason: String) : PinCheck
+    /** Nothing usable arrived; [cause] says whether trying again could help. */
+    data class Missing(override val match: AccountMatch, val reason: String, val cause: MissingCause) : PinCheck
+}
+
+enum class MissingCause {
+    /** The record server answered: the home institution has no record in this federation. */
+    NO_RECORD,
+    /** Saved-data path (D21): no saved record, and nothing was fetched. */
+    NOT_SAVED,
+    /** The record server couldn't be reached: a connection problem, worth retrying. */
+    UNREACHABLE
+}
+
+/** A saved account that can't sign in at this network, and why (for the sign-in sheet). */
+data class UnusableAccount(val account: AccountInfo, val why: Why) {
+    enum class Why {
+        /** The network doesn't accept the account's realm (closed network, foreign realm). */
+        NOT_ACCEPTED,
+        /** The home institution hasn't registered its login server for the site's federation. */
+        NO_RECORD,
+        /** GECKO has no saved login-server details and can't fetch them on this network. */
+        NOT_SAVED,
+        /** The site's registration lacks what Android needs to pin the server (e.g. CA certificates). */
+        INCOMPLETE_REGISTRATION
+    }
 }
 
 /** Wording for the sign-in sheet, taken from the registration (never "eduroam" by default). */
@@ -96,8 +119,8 @@ data class SignInPrompt(
     val federation: String?,
     val operatorName: String?,
     val localRealms: List<String>,
-    /** Saved accounts that don't fit here, so the sheet can say so. */
-    val notFitting: List<AccountInfo>
+    /** Saved accounts that can't be used here, with the reason, so the sheet can say so. */
+    val unusable: List<UnusableAccount>
 )
 
 sealed interface Decision {
@@ -106,7 +129,10 @@ sealed interface Decision {
     /** Several accounts have verified pins: the user picks one (remembered per network). */
     data class ChooseAccount(val options: List<PinCheck.Pinned>) : Decision
 
-    /** No saved account fits this network. */
+    /**
+     * No saved account can be used here (none fits, or none has confirmed
+     * login-server details): a question for the user, not a check result.
+     */
     data class NeedAccount(val prompt: SignInPrompt) : Decision
 
     /** [hostile]: something contradicted GECKO (a warning), rather than GECKO just not knowing. */
@@ -152,17 +178,23 @@ fun decide(
             return Decision.ChooseAccount(pinned)
         }
     }
-    if (checks.isEmpty()) {
-        return Decision.NeedAccount(SignInPrompt(site.ssid, site.federation, site.operatorName, site.localRealms, accounts))
+    // A connection problem: trying again may help, so it is a (neutral) result.
+    checks.filterIsInstance<PinCheck.Missing>().filter { it.cause == MissingCause.UNREACHABLE }.takeIf { it.isNotEmpty() }?.let { missing ->
+        return Decision.Block(
+            "GECKO couldn't confirm the login server (" + missing.joinToString("; ") { "${it.match.account.identity}: ${it.reason}" } + ")",
+            hostile = false
+        )
     }
-    val reasons = checks.joinToString("; ") {
-        when (it) {
-            is PinCheck.Missing -> "${it.match.account.identity}: ${it.reason}"
-            is PinCheck.Rejected -> "${it.match.account.identity}: ${it.reason}"
-            is PinCheck.Pinned -> ""
+    // Otherwise nothing will change by retrying: the user needs another account.
+    val unusable = accounts.map { account ->
+        val why = when (val check = checks.firstOrNull { it.match.account.id == account.id }) {
+            null, is PinCheck.Pinned -> UnusableAccount.Why.NOT_ACCEPTED
+            is PinCheck.Rejected -> UnusableAccount.Why.INCOMPLETE_REGISTRATION
+            is PinCheck.Missing -> if (check.cause == MissingCause.NO_RECORD) UnusableAccount.Why.NO_RECORD else UnusableAccount.Why.NOT_SAVED
         }
+        UnusableAccount(account, why)
     }
-    return Decision.Block("GECKO couldn't confirm the login server ($reasons)", hostile = false)
+    return Decision.NeedAccount(SignInPrompt(site.ssid, site.federation, site.operatorName, site.localRealms, unusable))
 }
 
 private fun why(check: PinCheck.Pinned): String = when (val source = check.pins.source) {

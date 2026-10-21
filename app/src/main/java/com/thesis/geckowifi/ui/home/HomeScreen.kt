@@ -130,7 +130,12 @@ fun HomeScreen(
 
     // The enterprise flow's questions: an account when none fits, a choice when several do.
     viewModel.enterprise?.let { flow ->
-        flow.signIn?.let { SignInSheet(it.prompt, onSubmit = flow::submitSignIn, onDismiss = flow::dismissSignIn) }
+        flow.signIn?.let {
+            SignInSheet(
+                it.prompt, onSubmit = flow::submitSignIn, onDismiss = flow::dismissSignIn,
+                onAndroidSettings = { flow.dismissSignIn(); context.startActivity(Intent(Settings.Panel.ACTION_WIFI)) }
+            )
+        }
         flow.choice?.let { AccountChooser(it, onChoose = flow::choose, onDismiss = flow::dismissChoice) }
     }
     LaunchedEffect(viewModel.pendingNotice) {

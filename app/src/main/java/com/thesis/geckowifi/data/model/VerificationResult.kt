@@ -25,5 +25,7 @@ data class VerificationResult(
      */
     val certificateCount: Int? = null,
     val unparsedCount: Int? = null,
-    val usedPreferredNetwork: Boolean? = null
+    val usedPreferredNetwork: Boolean? = null,
+    /** Judged from a saved answer fetched at this time (epoch millis), not a live one (D25). */
+    val savedAt: Long? = null
 )

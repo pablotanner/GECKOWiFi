@@ -141,13 +141,13 @@ fun CheckDetail.verdict(): Verdict {
                 Icons.Outlined.CloudOff
             )
             CheckFailure.SERVER_NOT_CONFIRMED -> Verdict(
-                Tone.NEUTRAL, "Not connected", "Your password was not sent",
-                "GECKO couldn't confirm the login server of $name, so it didn't connect. On its own this isn't a sign of an attack.",
+                Tone.NEUTRAL, "Not connected", "Couldn't check $name",
+                "GECKO couldn't confirm the login server of $name, so it didn't connect. This is usually a connection problem, not an attack. Try again, or join it in Android's settings.",
                 Icons.Outlined.Shield
             )
             CheckFailure.ONBOARDING_FAILED -> Verdict(
                 Tone.NEUTRAL, "Not connected", "GECKO couldn't check $name",
-                "The check connection was declined, the network was out of range, or it doesn't support GECKO. Your password was not sent.",
+                "The check connection was declined, the network was out of range, or it doesn't support GECKO. Try again, or join it in Android's settings.",
                 Icons.Outlined.WifiOff
             )
             CheckFailure.LOW_ACCURACY -> Verdict(

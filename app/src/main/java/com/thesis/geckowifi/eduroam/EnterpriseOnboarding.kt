@@ -137,8 +137,8 @@ class EnterpriseOnboarding(
                     is PinResult.Ok -> PinCheck.Pinned(match, r.pins).also { fetched[match.federation to realm] = f.bytes }
                     is PinResult.Rejected -> PinCheck.Rejected(match, r.reason, hostile = true)
                 }
-                RealmFetch.NotFound -> PinCheck.Missing(match, "no record for $realm in ${match.federation}")
-                is RealmFetch.Unreachable -> PinCheck.Missing(match, "record server not reachable over this network: ${f.cause}")
+                RealmFetch.NotFound -> PinCheck.Missing(match, "no record for $realm in ${match.federation}", MissingCause.NO_RECORD)
+                is RealmFetch.Unreachable -> PinCheck.Missing(match, "record server not reachable over this network: ${f.cause}", MissingCause.UNREACHABLE)
             }
         }
     }

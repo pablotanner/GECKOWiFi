@@ -21,6 +21,7 @@ import com.thesis.geckowifi.data.local.StoredVerdict
 import com.thesis.geckowifi.eduroam.DataSource
 import com.thesis.geckowifi.eduroam.usableSavedRegistration
 import com.thesis.geckowifi.verification.coversLocation
+import com.thesis.geckowifi.verification.savedAnswer
 import com.thesis.geckowifi.data.local.VerdictStore
 import com.thesis.geckowifi.eduroam.AccountStore
 import com.thesis.geckowifi.eduroam.Decision
@@ -217,7 +218,10 @@ class VerificationViewModel(
         probe = certProbe,
         cache = decisionCache,
         encoder = geoQueryEncoder
-    )
+    ).also { e ->
+        // A portal network blocks the map server until login: judge with the saved answer then (D25).
+        e.savedAnswer = { lat, lng, radius, ssid -> savedAnswer(savedLookup, lat, lng, radius, ssid, java.time.Instant.now()) }
+    }
 
     var hasLocationPermission by mutableStateOf(false)
         private set
@@ -595,6 +599,18 @@ class VerificationViewModel(
         current = null
     }
 
+    /** "Try again" on a check that failed for a technical reason: the same network, if it is still in range. */
+    fun retry(check: CheckDetail) {
+        val real = scannedNetworks.filterIsInstance<ScannedNetwork.Real>().filter { it.ssid == check.ssid }
+        val network = real.firstOrNull { it.bssid == check.bssid } ?: real.firstOrNull()
+        if (network == null) {
+            showNotice("${check.ssid ?: "The network"} is out of range")
+            return
+        }
+        current = null
+        startCheck(network)
+    }
+
     fun checkById(id: String): CheckDetail? = checks.firstOrNull { it.id == id }
 
     /** Most recent check of the access point [networkKey] (BSSID, or SSID if unknown), for the list badge. */
@@ -827,7 +843,7 @@ class VerificationViewModel(
             decision is Decision.Block && decision.hostile -> Triple(VerificationState.CONFLICT, null, decision.reason)
             decision is Decision.Block -> Triple(VerificationState.UNREACHABLE,
                 if (run.report.onboardingFailure != null) CheckFailure.ONBOARDING_FAILED else CheckFailure.SERVER_NOT_CONFIRMED,
-                "${decision.reason}; your password was not sent")
+                decision.reason)
             run.refused != null -> Triple(VerificationState.UNREACHABLE, CheckFailure.SERVER_NOT_CONFIRMED, run.refused)
             run.connected -> Triple(VerificationState.VERIFIED, null,
                 "connected as ${run.account?.identity}; the login server proved it is ${pins?.serverNames?.joinToString()} " +
@@ -918,7 +934,10 @@ class VerificationViewModel(
                 null -> null
             },
             enterprise = enterprise,
-            dataSource = dataSource ?: result.certificateCount?.let {
+            dataSource = dataSource ?: result.savedAt?.let {
+                "Saved registration from ${timeText(it)}" + (savedLookup?.let { s -> ", fetched over ${s.viaDescription()}" } ?: "") +
+                    ". The map server wasn't reachable over this network"
+            } ?: result.certificateCount?.let {
                 "Fetched live at ${timeText(result.timestamp)} over ${boundRoute.label()}" +
                     (ssid?.takeIf { boundRoute == QueryRoute.JOINED_WIFI }?.let { " ($it)" } ?: "")
             }
