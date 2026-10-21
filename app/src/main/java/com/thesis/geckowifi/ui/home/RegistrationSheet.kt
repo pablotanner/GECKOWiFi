@@ -96,10 +96,11 @@ fun RegistrationSheet(
             verticalArrangement = Arrangement.spacedBy(Space.md)
         ) {
             Text(network.ssid, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
+            // TODO, WHEN IS THIS SHOWN?
             if (mismatch != null) {
                 VerdictBadge(Tone.DANGER, "Doesn't match its registration", Icons.Outlined.GppBad)
             } else {
-                VerdictBadge(Tone.NEUTRAL, "Registered, not verified", Icons.Outlined.Shield)
+                VerdictBadge(Tone.NEUTRAL, "Registered", Icons.Outlined.Shield)
             }
 
             Text(
@@ -114,8 +115,7 @@ fun RegistrationSheet(
                             "A fake network can look the same from outside, so when you connect, GECKO first confirms the login server; " +
                             "your password only goes to a server it has verified."
                     else ->
-                        "GECKO hasn't verified this network. It only confirms that ${operator ?: "an operator"} registered ${network.ssid} here " +
-                            "and that this network uses the registered security type."
+                        "GECKO correctly reports a registration for ${network.ssid} by ${operator ?: "an operator"}, for the given security type. We will verify the authenticity as soon as you attempt to connect."
                 },
                 style = MaterialTheme.typography.bodyLarge
             )

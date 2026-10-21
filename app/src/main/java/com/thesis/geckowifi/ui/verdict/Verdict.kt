@@ -33,11 +33,11 @@ data class Verdict(
 )
 
 /** What GECKO does and doesn't vouch for (design-decisions.md, section 3). Shown with every verified result. */
-const val SCOPE_NOTE = "GECKO confirms who runs the captive portal page."
+const val SCOPE_NOTE = "GECKO confirmed who operates the captive portal page."
     //"GECKO confirms who runs the login page. It doesn't protect what you do after logging in."
 
 /** The same for an enterprise network: GECKO vouches for the login server, which protects the password. */
-const val ENTERPRISE_SCOPE_NOTE = "GECKO confirmed the login server before your password was sent, so it only went to your provider."
+const val ENTERPRISE_SCOPE_NOTE = "GECKO confirmed the login server." //before your password was sent, so it only went to your provider."
 
 /** The scope note that fits [this] check. */
 val CheckDetail.scopeNote: String get() = if (enterprise != null) ENTERPRISE_SCOPE_NOTE else SCOPE_NOTE
@@ -68,12 +68,12 @@ fun CheckDetail.verdict(): Verdict {
         VerificationState.VERIFIED -> when {
             enterprise != null -> Verdict(
                 Tone.POSITIVE, "Verified", "Connected to $name",
-                "Signed in as ${enterprise.account ?: "your account"}. The login server proved it is " +
-                    "${enterprise.serverNames.firstOrNull() ?: "your provider's server"} before your password was sent.",
+                "Signed in as ${enterprise.account ?: "your account"}. The login server was confirmed to be " +
+                    "${enterprise.serverNames.firstOrNull() ?: "your provider's server"}.",
                 Icons.Outlined.GppGood
             )
             else -> Verdict(
-                Tone.POSITIVE, "Verified", "This is the registered $name",
+                Tone.POSITIVE, "Verified", "Connected to $name",
                 if (isEnterprise) "Its login server matches the one registered for this location."
                 else "Its login page matches what the operator registered for this location.",
                 Icons.Outlined.GppGood
