@@ -1,5 +1,19 @@
 package com.thesis.geckowifi.ui.settings
 
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import com.thesis.geckowifi.eduroam.AccountInfo
+import com.thesis.geckowifi.ui.EnterpriseController
 import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
@@ -52,10 +66,12 @@ import com.thesis.geckowifi.verification.LookupStatus
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(viewModel: VerificationViewModel, onOpenEduroamSetup: () -> Unit = {}) {
+fun SettingsScreen(viewModel: VerificationViewModel) {
     Column(Modifier.fillMaxWidth()) {
         TopAppBar(title = { Text("Settings") })
         Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = Space.xxl)) {
+            viewModel.enterprise?.let { AccountsSection(it) }
+
             SectionHeader("How GECKO protects you")
             SectionCard(null, Modifier.padding(horizontal = Space.lg)) {
                 Text(
@@ -66,8 +82,9 @@ fun SettingsScreen(viewModel: VerificationViewModel, onOpenEduroamSetup: () -> U
                 )
                 ScopeLine(true, "Fake networks with a copied name and login page")
                 ScopeLine(true, "Login or payment pages swapped for someone else's")
-                ScopeLine(false, "Networks nobody registered (most of them, for now)")
-                ScopeLine(false, "What happens to your traffic after you log in")
+                ScopeLine(true, "Fake enterprise networks (e.g. eduroam clones) trying to steal your password")
+                ScopeLine(false, "Networks not certified by GECKO")
+                ScopeLine(false, "What happens to your traffic after you log in (TODO; requires Root)")
             }
 
             Row(
@@ -91,7 +108,7 @@ fun SettingsScreen(viewModel: VerificationViewModel, onOpenEduroamSetup: () -> U
                 Switch(checked = viewModel.labMode, onCheckedChange = null)
             }
 
-            if (viewModel.labMode) LabSection(viewModel, onOpenEduroamSetup)
+            if (viewModel.labMode) LabSection(viewModel)
         }
     }
 }
@@ -111,7 +128,7 @@ private fun ScopeLine(covered: Boolean, text: String) {
 }
 
 @Composable
-private fun LabSection(viewModel: VerificationViewModel, onOpenEduroamSetup: () -> Unit) {
+private fun LabSection(viewModel: VerificationViewModel) {
     val context = LocalContext.current
     Column(Modifier.padding(horizontal = Space.lg), verticalArrangement = Arrangement.spacedBy(Space.md)) {
         SectionHeader("Lab", Modifier.padding(start = 0.dp))
@@ -152,17 +169,6 @@ private fun LabSection(viewModel: VerificationViewModel, onOpenEduroamSetup: () 
             DetailRow("Scan results", "${viewModel.scannedNetworks.size}")
         }
 
-        SectionCard("eduroam onboarding") {
-            Text(
-                "GECKO's eduroam setup for the lab network, also when it isn't in the scan list (docs/eduroam-demo.md).",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            OutlinedButton(onClick = onOpenEduroamSetup, modifier = Modifier.padding(top = Space.md).heightIn(min = 48.dp)) {
-                Text("Set up eduroam-lab")
-            }
-        }
-
         SectionCard("Check log") {
             Text(
                 "Every check is written as one JSON line with all login-page hops and verdicts.",
@@ -188,4 +194,95 @@ private fun LabSection(viewModel: VerificationViewModel, onOpenEduroamSetup: () 
             ) { Text("Share latest log") }
         }
     }
+}
+
+/**
+ * The user's enterprise accounts (docs/eduroam-decisions.md, D19): one per home
+ * provider, used on every network that accepts it. Normally added from the
+ * sign-in sheet when a network needs one; here they can be added and removed.
+ */
+@Composable
+private fun AccountsSection(flow: EnterpriseController) {
+    var adding by remember { mutableStateOf(false) }
+    var removing by remember { mutableStateOf<AccountInfo?>(null) }
+
+    SectionHeader("Accounts")
+    SectionCard(null, Modifier.padding(horizontal = Space.lg)) {
+        Text(
+            "Accounts GECKO can sign you in with, such as your eduroam account. For each network, GECKO picks the account it accepts " +
+                "and only gives your password to a login server it has verified.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        if (flow.accounts.isEmpty()) {
+            Text(
+                "No accounts yet. GECKO asks for one the first time you connect to a network that needs it.",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = Space.md)
+            )
+        }
+        flow.accounts.forEach { account ->
+            Row(
+                Modifier.fillMaxWidth().padding(top = Space.sm).heightIn(min = 48.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(account.identity, style = MaterialTheme.typography.bodyLarge)
+                    Text(account.label ?: account.realm ?: "", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onClick = { removing = account }) {
+                    Icon(Icons.Outlined.Delete, contentDescription = "Remove ${account.identity}", tint = MaterialTheme.colorScheme.error)
+                }
+            }
+        }
+        OutlinedButton(onClick = { adding = true }, modifier = Modifier.padding(top = Space.md).heightIn(min = 48.dp)) {
+            Text("Add account")
+        }
+    }
+
+    if (adding) AddAccountDialog(onAdd = { id, pw -> flow.addAccount(id, pw); adding = false }, onDismiss = { adding = false })
+    removing?.let { account ->
+        AlertDialog(
+            onDismissRequest = { removing = null },
+            title = { Text("Remove ${account.identity}?") },
+            text = { Text("GECKO forgets this account and its password. Networks that are already set up keep working until you forget them.") },
+            confirmButton = {
+                Button(
+                    onClick = { flow.removeAccount(account.id); removing = null },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError)
+                ) { Text("Remove") }
+            },
+            dismissButton = { TextButton(onClick = { removing = null }) { Text("Cancel") } }
+        )
+    }
+}
+
+@Composable
+private fun AddAccountDialog(onAdd: (identity: String, password: String) -> Unit, onDismiss: () -> Unit) {
+    var identity by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    val valid = identity.trim().substringAfterLast('@', "").contains('.') && password.isNotEmpty()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add account") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.sm)) {
+                OutlinedTextField(
+                    value = identity, onValueChange = { identity = it },
+                    label = { Text("Account") }, placeholder = { Text("name@institution") }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = password, onValueChange = { password = it },
+                    label = { Text("Password") }, singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = { Button(onClick = { onAdd(identity.trim(), password) }, enabled = valid) { Text("Add") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
 }

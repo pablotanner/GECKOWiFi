@@ -3,15 +3,23 @@ package com.thesis.geckowifi.eduroam
 import java.security.cert.X509Certificate
 
 /**
- * The user's eduroam account. The password can't be read from outside this
- * class: the only code that can is the nested [EnterpriseProfileBuilder], and
- * it only hands it out together with a [ProfilePlan] made from
+ * One of the user's enterprise accounts (eduroam, govroam, an operator's own
+ * accounts...): identity and password of one home provider, i.e. one realm
+ * (docs/eduroam-decisions.md, D19). The password can't be read from outside
+ * this class: the only code that can is the nested [EnterpriseProfileBuilder],
+ * and it only hands it out together with a [ProfilePlan] made from
  * [AuthenticatedEapPins] for the account's own realm. That is the credential
- * invariant of the eduroam flow (eduroam-brief.md, section 2): credentials
- * are only ever attached to an enterprise configuration whose CA and
- * server-name pins came from an authenticated source.
+ * invariant (eduroam-brief.md, section 2): credentials are only ever attached
+ * to an enterprise configuration whose CA and server-name pins came from an
+ * authenticated source.
  */
-class EduroamCredentials(identity: String, password: String) {
+class EnterpriseAccount(
+    val id: String,
+    identity: String,
+    password: String,
+    /** Display name of the home provider ("Home University"), if known. */
+    val label: String? = null
+) {
     val identity: String = identity.trim()
     private val password: String = password
 
@@ -20,24 +28,28 @@ class EduroamCredentials(identity: String, password: String) {
 
     val hasPassword: Boolean get() = password.isNotEmpty()
 
-    override fun toString() = "EduroamCredentials($identity, password=***)"
+    override fun toString() = "EnterpriseAccount($identity, password=***)"
 
     /**
      * The single code path where credentials meet an enterprise config. Nested
-     * so it is the only code outside [EduroamCredentials] that can read the
+     * so it is the only code outside [EnterpriseAccount] that can read the
      * password (Kotlin lets a nested class see its outer class's private members).
      */
     object EnterpriseProfileBuilder {
         /**
          * What would be installed, without the password. Throws
-         * [CredentialsRefused] unless [pins] are for [credentials]' realm: pins
-         * for another realm say nothing about where this account's password
-         * may go.
+         * [CredentialsRefused] unless [pins] are for [credentials]' realm and,
+         * for a realm record, for [network]'s federation: pins for another realm
+         * or another federation say nothing about where this account's password
+         * may go here (D19).
          */
-        fun plan(pins: AuthenticatedEapPins, credentials: EduroamCredentials, network: TargetNetwork): ProfilePlan {
+        fun plan(pins: AuthenticatedEapPins, credentials: EnterpriseAccount, network: TargetNetwork): ProfilePlan {
             val realm = credentials.realm ?: throw CredentialsRefused("the identity ${credentials.identity} has no realm")
             if (!realm.equals(pins.realm, ignoreCase = true)) {
                 throw CredentialsRefused("pins are for realm ${pins.realm}, the account is in $realm")
+            }
+            if (pins.source is PinSource.RealmRecord && !pins.federation.equals(network.federation, ignoreCase = true)) {
+                throw CredentialsRefused("pins are for federation ${pins.federation}, the network is in ${network.federation ?: "no federation"}")
             }
             if (!credentials.hasPassword) throw CredentialsRefused("no password")
             // AuthenticatedEapPins already guarantees these; checked again because
@@ -62,19 +74,23 @@ class EduroamCredentials(identity: String, password: String) {
         /** Builds the [plan] and gives it, with the password, to [installer]. Throws [CredentialsRefused] like [plan]. */
         suspend fun install(
             pins: AuthenticatedEapPins,
-            credentials: EduroamCredentials,
+            credentials: EnterpriseAccount,
             network: TargetNetwork,
             installer: EnterpriseProfileInstaller
         ): InstallOutcome = installer.install(plan(pins, credentials, network), credentials.password)
     }
 }
 
-typealias EnterpriseProfileBuilder = EduroamCredentials.EnterpriseProfileBuilder
+typealias EnterpriseProfileBuilder = EnterpriseAccount.EnterpriseProfileBuilder
 
 class CredentialsRefused(reason: String) : IllegalStateException("credentials refused: $reason")
 
-/** The network the profile is for. No BSSID: a pinned profile is safe on every access point of the SSID. */
-data class TargetNetwork(val ssid: String, val wpa3: Boolean = false)
+/**
+ * The network the profile is for, with the federation its verified
+ * registration names (null = closed network). No BSSID: a pinned profile is
+ * safe on every access point of the SSID.
+ */
+data class TargetNetwork(val ssid: String, val wpa3: Boolean = false, val federation: String? = null)
 
 /** Everything an installer writes into the supplicant's configuration, except the password. */
 data class ProfilePlan(

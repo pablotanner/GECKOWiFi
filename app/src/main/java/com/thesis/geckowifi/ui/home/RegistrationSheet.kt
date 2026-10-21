@@ -74,9 +74,7 @@ fun RegistrationSheet(
     match: AdvertisedMatch,
     onDismiss: () -> Unit,
     onConnectAnyway: (() -> Unit)?,
-    loginServerCheck: LoginServerCheck? = null,
-    /** GECKO's eduroam setup (pinned profile from verified data); offered for enterprise networks that match. */
-    onSetup: (() -> Unit)? = null
+    loginServerCheck: LoginServerCheck? = null
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val mismatch = match as? AdvertisedMatch.Mismatch
@@ -112,8 +110,9 @@ fun RegistrationSheet(
                     match is AdvertisedMatch.Undecided ->
                         "${network.ssid} is registered here, but GECKO can't compare this network with the registration: ${match.reason}."
                     enterprise != null ->
-                        "GECKO hasn't verified this network. It only confirms that ${operator ?: "an operator"} registered ${network.ssid} here " +
-                            "and that this network uses the registered security type. A fake network can look the same from outside."
+                        "${operator ?: "An operator"} registered ${network.ssid} here, and this network uses the registered security type. " +
+                            "A fake network can look the same from outside, so when you connect, GECKO first confirms the login server; " +
+                            "your password only goes to a server it has verified."
                     else ->
                         "GECKO hasn't verified this network. It only confirms that ${operator ?: "an operator"} registered ${network.ssid} here " +
                             "and that this network uses the registered security type."
@@ -149,9 +148,6 @@ fun RegistrationSheet(
             }
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.sm, Alignment.End)) {
-                if (onSetup != null) {
-                    TextButton(onClick = onSetup) { Text("Set up with GECKO") }
-                }
                 if (mismatch != null && onConnectAnyway != null) {
                     TextButton(onClick = onConnectAnyway) { Text("Connect anyway and check") }
                 }

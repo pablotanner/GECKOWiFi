@@ -20,7 +20,7 @@ sealed interface RealmFetch {
 
 /**
  * Fetches a [gecko.realm.SignedRealmRecord] from the realm endpoint
- * (`GET /v1/realm/<realm>`, lab/realm). Transport only: the bytes are
+ * (`GET /v1/realm/<federation>/<realm>`, lab/realm). Transport only: the bytes are
  * trusted after [AuthenticatedEapPins.fromSignedRealmRecord], not before.
  *
  * Bound to [network] with no fallback to the default route: on the
@@ -42,9 +42,10 @@ class RealmRecordClient(
             }
         }.build()
 ) {
-    suspend fun fetch(realm: String): RealmFetch = withContext(Dispatchers.IO) {
+    /** The record of [realm] within [federation] (D19). */
+    suspend fun fetch(federation: String, realm: String): RealmFetch = withContext(Dispatchers.IO) {
         try {
-            client.newCall(Request.Builder().url("$baseUrl/v1/realm/${realm.lowercase()}").get().build()).execute().use { response ->
+            client.newCall(Request.Builder().url("$baseUrl/v1/realm/${federation.lowercase()}/${realm.lowercase()}").get().build()).execute().use { response ->
                 when {
                     response.code == 404 -> RealmFetch.NotFound
                     !response.isSuccessful -> RealmFetch.Unreachable("HTTP ${response.code}")

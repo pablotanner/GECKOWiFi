@@ -2,7 +2,7 @@ syntax = "proto3";
 package gecko.realm;
 
 // The CAT payload of a home IdP (realm): what a supplicant needs to pin the
-// realm's RADIUS server. Keyed by realm, not by location: an eduroam visitor
+// realm's RADIUS server. Keyed by (federation, realm), not by location: an eduroam visitor
 // authenticates against their own institution's server, which no site can
 // register (docs/eduroam-decisions.md, D6).
 //
@@ -19,6 +19,11 @@ message RealmRecord {
   string support_url = 8;
   int64 issued_at = 9;              // Unix seconds
   int64 expires_at = 10;            // Unix seconds
+  // The federation this record belongs to ("eduroam", "govroam"): a realm's
+  // binding to servers is per federation, so the client only accepts a record
+  // whose federation equals the site's (docs/eduroam-decisions.md, D19).
+  string federation = 11;
+  string display_name = 12;         // the home institution's name, for the UI
 }
 
 // ECDSA P-256 / SHA-256, ASN.1 DER, over the exact bytes of `record`

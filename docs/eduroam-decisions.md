@@ -24,7 +24,7 @@ exchange, whichever AP the device talks to. So the gate is:
 
 - **Authenticated pins for the user's realm**, from either
   - a `SignedRealmRecord` whose signature verifies against the pinned realm key,
-    for the requested realm, inside its validity window; or
+    for the requested realm **and the site's federation** (D19), inside its validity window; or
   - the site GeoCert's `wifi.enterprise.aaa[]` entry covering the realm (local
     user), which arrived with a verified Merkle proof, provided it carries
     `ca_certificates` (Android can only pin a CA certificate, not a hash) and
@@ -38,7 +38,10 @@ unreachable), bad signature, expired record, wrong realm, unsupported method,
 no CA certificate. The site state (`REGISTERED`, `UNVERIFIED`) is shown as
 plausibility, not used as the gate. `UNVERIFIED` site + verified realm
 record still proceeds: that is exactly CAT's behaviour at an unregistered
-eduroam site, and the pins protect the password.
+eduroam site, and the pins protect the password. **Changed by D19:** realm
+records are scoped to a federation, which only the site registration names, so
+an unregistered site now blocks visitors (local realms need the registration
+anyway).
 
 ## D3. EAP method: PEAP-MSCHAPv2
 What most eduroam IdPs use; scene 4 then shows a captured, crackable
@@ -58,14 +61,24 @@ version (minSdk 29), no new dependency. Ed25519 has no built-in support on
 older Android versions. The signature is ASN.1 DER over the exact `record` bytes;
 the client verifies first and decodes after.
 
-## D6. RealmRecord reuses the site schema's shape
-Schema v3 already has `aaa[]` (realms, EAP methods, server names, CA pins, CA
-certificates) for **local** users; the RealmRecord covers the **visitor** case,
-where the home realm can't appear in the site's GeoCert. Both are reduced to
-one internal type (`AuthenticatedEapPins`), so the profile builder has a single
-input and a single invariant. **Shortcut:** the RealmRecord comes from a
-signed static endpoint, a stand-in for a future realm keyspace in the map
-(with inclusion proofs). Open question for Pablo and his supervisor.
+## D6. Pins for visitors come from a realm record registered by the home institution
+Two sources of pins, one internal type (`AuthenticatedEapPins`):
+- **Local users / closed networks:** the site GeoCert lists its own realms in
+  `wifi.enterprise.aaa[]` with server names and CA certificates. Enough on its
+  own; nothing else needed.
+- **Visitors in a federation:** a visitor's password goes to their *home*
+  institution's server, so the pins must describe that server. The site can't
+  provide them (thousands of institutions) and **must not**: a site able to
+  register pins for other realms could enter its own server and collect
+  visitors' passwords. So the home institution registers a **realm record**.
+
+Assumption, phrased like D2's GeoCert assumption (design-decisions.md, 2):
+**every participating institution registers a realm record for its realm; the
+registration authority only issues it to whoever controls the realm** (a realm
+is a domain, so domain validation as in the Web PKI). Same trust model as a
+GeoCert, indexed by (federation, realm) instead of location (D19). In a real
+deployment it lives in the map with inclusion proofs. **Shortcut:** a signed
+static endpoint with one lab key stands in for that.
 
 ## D7. One CA for onboarding and homeuni.test (**shortcut**, as briefed)
 One FreeRADIUS EAP module serves both identities with one certificate
@@ -75,12 +88,26 @@ onboarding name only: it passes onboarding (the threat model assumes it can)
 and fails the realm pin on the name. In production the onboarding CA would be
 a separate, OS-bundled one.
 
-## D8. Onboarding identity is a fixed convention (**shortcut**)
-`gecko@gecko.sp.test` / `gecko` and `gecko-onboard.sp.test` are constants in the
-app. A WiFi-only device can't look anything up before joining, so in a real
-deployment these would have to be a federation-wide convention (e.g. a
-well-known realm every SP handles locally) plus an OS-bundled onboarding CA.
-Open design question.
+## D8. Onboarding convention: one global identity, no certificate check in the system model
+A device can't look anything up before joining, so the onboarding login must
+be known in advance, and every participating SP must handle it locally.
+- **Identity:** one reserved, global GECKO identity, the same at every network
+  and in every federation (not per site: the device doesn't know the site
+  before joining; not per federation: the SSID doesn't reliably say which). A
+  site that doesn't participate forwards it to its federation, which rejects
+  it, so the app learns "not supported here". Who reserves the realm is a
+  standardisation question.
+- **Certificate check:** none in the system-level model. The onboarding session
+  isn't trusted anyway; its answers protect themselves (proofs, signatures). The
+  prototype uses a bundled onboarding CA only because Android's public API
+  refuses enterprise configs without server validation (an artefact of the
+  non-root prototype, like the approval dialogs).
+- Precedent: Passpoint/Hotspot 2.0 Online Sign-Up joins a dedicated sign-up
+  network with an anonymous login to fetch credentials; Design A follows the
+  pattern with verifiable answers.
+
+**Shortcut:** `gecko@gecko.sp.test` / `gecko` / `gecko-onboard.sp.test` and the
+lab CA are app constants.
 
 ## D9. Cleartext HTTP stays app-wide
 The brief suggests a `network_security_config` scoped to the lab IP. The app
@@ -146,3 +173,36 @@ After proving the legit SP on B, it moved to Router A (flashed to vanilla
 OpenWrt too), matching the lab's existing roles (A genuine, B evil twin; B
 hangs behind A, so it can block the map server for its own clients in scene 3).
 B keeps its attacker sections, disabled while idle.
+
+## D19. Generic enterprise support: federations, accounts per realm
+Nothing is eduroam-specific; eduroam is one value of `federation`.
+- **Realm records are scoped to a federation:** a realm is a domain, but its
+  binding to servers, and who may vouch for it, is per federation. The record
+  carries `federation` (signed); the endpoint is `/v1/realm/<federation>/<realm>`;
+  the app only accepts a record whose federation equals the site's.
+- **Accounts** (identity + password) are stored per realm, any number. No
+  federation is stored on an account: which federation it serves is decided on
+  every connection from verified data.
+- **Matching** against the site registration: an account whose realm the site's
+  `aaa` lists is *local* (pins from the GeoCert); otherwise, if the site names a
+  federation, a *visitor* (pins from the realm record (federation, realm));
+  otherwise it doesn't fit. One account with verified pins: connect. Several:
+  ask once and remember the choice per network. None: sign-in sheet.
+- **Wording from the registration:** the sign-in sheet names the federation
+  (`federation`) or the operator (`subject.name`) and its realms, never "eduroam".
+- Because a WiFi-only device only learns the registration over the onboarding
+  session, matching happens after onboarding. A newly entered account needs its
+  realm record, so it costs one more onboarding (one more approval dialog in the
+  prototype).
+- Limits: password methods (PEAP, TTLS) only; no EAP-TLS client certificates, no
+  SIM-based methods.
+
+## D20. App flow: tap a network = connect
+Replaces the separate eduroam setup screen and its Settings entry. Tapping any
+network connects; the method follows from the network (portal check, GECKO
+onboarding, or Android's own dialog for password networks, which GECKO doesn't
+cover); an info button shows the registration. Accounts live in Settings. The
+status card shows the device's real Wi-Fi connection with GECKO's last verdict
+for it (persisted). Enterprise networks GECKO can't onboard on (in the
+prototype: everything but the lab SSID, D15) open Android's Wi-Fi settings with
+a note.

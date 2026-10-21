@@ -14,11 +14,17 @@ import com.thesis.geckowifi.data.model.VerificationResult
 import com.thesis.geckowifi.data.model.VerificationState
 import com.thesis.geckowifi.data.remote.GeckoClient
 import com.thesis.geckowifi.discovery.Discovery
+import com.thesis.geckowifi.data.local.StoredVerdict
+import com.thesis.geckowifi.data.local.VerdictStore
+import com.thesis.geckowifi.eduroam.AccountStore
 import com.thesis.geckowifi.eduroam.Decision
-import com.thesis.geckowifi.eduroam.EduroamOutcome
-import com.thesis.geckowifi.eduroam.EduroamTarget
-import com.thesis.geckowifi.eduroam.InstallOutcome
-import com.thesis.geckowifi.eduroam.RealmCheck
+import com.thesis.geckowifi.eduroam.EnterpriseOnboarding
+import com.thesis.geckowifi.eduroam.EnterpriseProfileInstaller
+import com.thesis.geckowifi.eduroam.EnterpriseStep
+import com.thesis.geckowifi.eduroam.EnterpriseTarget
+import com.thesis.geckowifi.eduroam.PinCheck
+import com.thesis.geckowifi.eduroam.PinSource
+import com.thesis.geckowifi.eduroam.QueryArea
 import com.thesis.geckowifi.discovery.HopSource
 import com.thesis.geckowifi.discovery.RedirectProbeSource
 import com.thesis.geckowifi.location.LocationFix
@@ -59,7 +65,33 @@ const val SERVER_URL = BuildConfig.GEOPKI_URL
 enum class QueryRoute { MOBILE_DATA, JOINED_WIFI, DEFAULT_ROUTE }
 
 /** Why a check ended without a verdict from the map server, so the UI can say it in plain words. */
-enum class CheckFailure { SERVER_UNREADABLE, JOIN_FAILED, PORTAL_FAILED, LOW_ACCURACY }
+enum class CheckFailure {
+    SERVER_UNREADABLE, JOIN_FAILED, PORTAL_FAILED, LOW_ACCURACY,
+    /** Enterprise: GECKO couldn't confirm the login server for any fitting account, so no password went out. */
+    SERVER_NOT_CONFIRMED,
+    /** Enterprise: the GECKO onboarding session didn't come up (declined, out of range, server certificate). */
+    ONBOARDING_FAILED
+}
+
+/**
+ * What an enterprise connection was based on (docs/eduroam-decisions.md, D19),
+ * for the evidence screen: who logged in, where the pins came from, and what
+ * happened to each saved account that fitted.
+ */
+data class EnterpriseEvidence(
+    val account: String? = null,
+    val federation: String? = null,
+    val operatorName: String? = null,
+    /** "Signed record of Home University in eduroam" / "This network's registration (site-cert)". */
+    val pinsFrom: String? = null,
+    val serverNames: List<String> = emptyList(),
+    val caSubjects: List<String> = emptyList(),
+    val onboardingFailure: String? = null,
+    /** One line per fitting account: "alice@homeuni.test: server confirmed (eduroam record)". */
+    val accounts: List<String> = emptyList(),
+    /** Step name to milliseconds since the start. */
+    val timings: List<Pair<String, Long>> = emptyList()
+)
 
 /**
  * The map query's hard radius cap (see [com.thesis.geckowifi.verification.GeoQueryEncoder]).
@@ -99,11 +131,18 @@ data class CheckDetail(
     /** 802.1X check (login server compared) rather than a captive portal check. */
     val isEnterprise: Boolean = false,
     /** Null when no map-server answer was used (e.g. the query never got through). */
-    val queryRoute: QueryRoute? = null
+    val queryRoute: QueryRoute? = null,
+    /** Enterprise connection through GECKO's onboarding (null for every other check). */
+    val enterprise: EnterpriseEvidence? = null,
+    /** Restored from [VerdictStore] after a restart: a summary only, no hops. */
+    val restored: Boolean = false
 )
 
-/** The steps of a check, in the order the app runs them (README "How a check works"). */
-enum class CheckStep { JOIN, LOOKUP, PORTAL, SERVER, COMPARE }
+/**
+ * The steps of a check, in the order the app runs them (README "How a check works").
+ * Enterprise networks use [ONBOARD], [CONFIRM], [CONNECT] (docs/eduroam-decisions.md, D20).
+ */
+enum class CheckStep { JOIN, LOOKUP, PORTAL, SERVER, COMPARE, ONBOARD, CONFIRM, CONNECT }
 
 /** A check that is still running: which steps it has and which one is in progress. */
 data class ActiveCheck(val ssid: String, val bssid: String?, val steps: List<CheckStep>, val current: CheckStep)
@@ -118,8 +157,27 @@ class VerificationViewModel(
     private val trustPreferences: TrustPreferenceStore,
     private val checkLog: PortalCheckLog? = null,
     /** Where portal hops come from; the redirect probe until root traffic observation exists. */
-    private val hopSource: HopSource = RedirectProbeSource()
+    private val hopSource: HopSource = RedirectProbeSource(),
+    enterpriseOnboarding: EnterpriseOnboarding? = null,
+    accountStore: AccountStore? = null,
+    profileInstaller: EnterpriseProfileInstaller? = null,
+    private val verdictStore: VerdictStore? = null
 ) : ViewModel() {
+
+    /**
+     * The enterprise flow (accounts, sign-in sheet, account choice); null in
+     * tests that don't wire it. Its steps show in the status card like any check.
+     */
+    val enterprise: EnterpriseController? =
+        if (enterpriseOnboarding != null && accountStore != null && profileInstaller != null) EnterpriseController(
+            viewModelScope, enterpriseOnboarding, accountStore, profileInstaller,
+            onStep = { target, step -> enterpriseStep(target, step) },
+            onResult = { recordEnterprise(it) }
+        ) else null
+
+    /** SSID of the Wi-Fi the device itself is on (not the app's own temporary joins), or null. */
+    var deviceSsid by mutableStateOf<String?>(null)
+        private set
 
     /**
      * One long-lived engine for this ViewModel's lifetime, so [VerificationEngine.sessionFor]'s
@@ -209,7 +267,16 @@ class VerificationViewModel(
 
     init {
         viewModelScope.launch(Dispatchers.IO) { rootAvailable = Capabilities.hasRoot }
+        // Verdicts from earlier sessions: History and the status card know them after a restart.
+        checks = verdictStore?.all().orEmpty().map { it.toCheckDetail() }
+        runCatching {
+            networkObserver.watchDeviceWifi { ssid -> viewModelScope.launch(Dispatchers.Main) { deviceSsid = ssid } }
+        }
     }
+
+    /** The newest verdict GECKO has for [ssid], from this session or an earlier one. */
+    fun latestVerdictFor(ssid: String): CheckDetail? =
+        checks.firstOrNull { it.ssid.equals(ssid, ignoreCase = true) && !it.isDemo }
 
     /** Whether the device itself is connected to [ssid] (via its own settings, with the user's account). */
     fun isConnectedTo(ssid: String): Boolean = networkObserver.connectedSsid().equals(ssid, ignoreCase = true)
@@ -323,11 +390,26 @@ class VerificationViewModel(
     /** What [rebindGeckoClient] bound the map-server client to; read back when a check is published. */
     private var boundRoute = QueryRoute.DEFAULT_ROUTE
 
+    /**
+     * What tapping a network does (docs/eduroam-decisions.md, D20): open
+     * networks are joined and checked, enterprise networks GECKO can onboard on
+     * go through the enterprise flow, everything else is Android's to join.
+     */
+    enum class TapAction { CHECK, ENTERPRISE, ANDROID_SETTINGS }
+
+    fun tapActionFor(network: ScannedNetwork): TapAction = when {
+        network !is ScannedNetwork.Real -> TapAction.CHECK
+        network.isOpen -> TapAction.CHECK
+        network.isEnterprise && enterprise?.supports(network.ssid) == true -> TapAction.ENTERPRISE
+        else -> TapAction.ANDROID_SETTINGS
+    }
+
     /** The one entry point for the UI: joins and checks [network]. */
     fun startCheck(network: ScannedNetwork) {
         if (activeCheck != null) return
-        checkJob = when (network) {
-            is ScannedNetwork.Real -> checkReal(network)
+        checkJob = when {
+            network is ScannedNetwork.Real && tapActionFor(network) == TapAction.ENTERPRISE -> { startEnterprise(network); null }
+            network is ScannedNetwork.Real -> checkReal(network)
             else -> checkFake(network)
         }
     }
@@ -336,8 +418,57 @@ class VerificationViewModel(
     fun cancelCheck() {
         checkJob?.cancel()
         checkJob = null
+        enterprise?.cancel()
         activeCheck = null
         networkObserver.leave()
+    }
+
+    private fun startEnterprise(network: ScannedNetwork.Real) {
+        val controller = enterprise ?: return
+        val fix = location
+        if (fix == null) {
+            pendingNotice = "Waiting for your location. GECKO needs it to look up the network's registration."
+            return
+        }
+        if (fix.accuracyMeters > MAX_QUERY_RADIUS_METERS) {
+            publish(network.ssid, network.bssid, network.bssid ?: network.ssid,
+                VerificationResult(VerificationState.UNREACHABLE, network.ssid,
+                    reason = "location too imprecise (±${fix.accuracyMeters.toInt()} m)"),
+                fix, failure = CheckFailure.LOW_ACCURACY, isEnterprise = true)
+            return
+        }
+        // Android serves one app-requested network at a time; a portal check may still hold one.
+        networkObserver.leave()
+        controller.start(EnterpriseTarget(network.ssid, network.bssid, network.authModes), fix,
+            QueryArea(fix.latitude, fix.longitude, effectiveRadius(fix)))
+    }
+
+    private fun enterpriseStep(target: EnterpriseTarget, step: EnterpriseStep?) {
+        activeCheck = step?.let {
+            ActiveCheck(target.ssid, target.bssid, listOf(CheckStep.ONBOARD, CheckStep.CONFIRM, CheckStep.CONNECT), when (it) {
+                EnterpriseStep.CHECK_NETWORK -> CheckStep.ONBOARD
+                EnterpriseStep.CONFIRM_SERVER -> CheckStep.CONFIRM
+                EnterpriseStep.CONNECT -> CheckStep.CONNECT
+            })
+        }
+    }
+
+    /** A one-line message for the home screen (e.g. why a tap didn't start anything); the UI clears it. */
+    var pendingNotice by mutableStateOf<String?>(null)
+        private set
+
+    fun showNotice(text: String) {
+        pendingNotice = text
+    }
+
+    fun noticeShown() {
+        pendingNotice = null
+    }
+
+    /** Removes the pinned profile GECKO installed for [ssid]; the status card goes back to idle. */
+    fun forgetEnterpriseNetwork(ssid: String) {
+        enterprise?.forgetNetwork(ssid)
+        if (current?.ssid.equals(ssid, ignoreCase = true)) current = null
     }
 
     /** Leaves the network the app joined for the current check; the status card goes back to idle. */
@@ -578,37 +709,60 @@ class VerificationViewModel(
     }
 
     /**
-     * Records an eduroam setup (docs/eduroam-demo.md) like any other check, so
-     * the status card and History know about it. The connection is the
-     * device's own (a suggestion), not one this app holds, hence `joined = false`.
+     * Records an enterprise connection attempt (docs/eduroam-decisions.md, D19,
+     * D20) like any other check: status card, History, warning on attack signs.
+     * The connection is the device's own (a suggestion), so `joined = false`.
      */
-    fun recordEduroamOutcome(target: EduroamTarget, outcome: EduroamOutcome, fix: LocationFix) {
-        val decision = outcome.decision
+    private fun recordEnterprise(run: EnterpriseRun) {
+        val decision = run.decision
         val pins = (decision as? Decision.Proceed)?.pins
-        val result = when {
-            decision is Decision.Block && decision.hostile ->
-                VerificationResult(VerificationState.CONFLICT, target.ssid, reason = decision.reason)
-            decision is Decision.Block -> VerificationResult(
-                if (outcome.onboardingFailure != null || outcome.realm is RealmCheck.Missing) VerificationState.UNREACHABLE
-                else VerificationState.UNVERIFIED,
-                target.ssid, reason = "${decision.reason}; your password was not sent"
-            )
-            outcome.connected == true -> VerificationResult(
-                VerificationState.VERIFIED, target.ssid,
-                matchedIdentifier = pins?.serverNames?.firstOrNull(),
-                matchedCertificateId = outcome.site?.matchedCertificateId,
-                reason = "connected with a profile pinned to ${pins?.serverNames?.joinToString()}: the login server " +
-                    "proved that identity in the handshake (${decision.let { (it as Decision.Proceed).why }})"
-            )
-            else -> VerificationResult(
-                VerificationState.REGISTERED, target.ssid,
-                matchedCertificateId = outcome.site?.matchedCertificateId,
-                reason = (outcome.install as? InstallOutcome.Failed)?.reason
-                    ?: "pinned profile installed; Android hasn't joined it yet"
-            )
+        val site = run.report.siteResult
+        val (state, failure, reason) = when {
+            decision is Decision.Block && decision.hostile -> Triple(VerificationState.CONFLICT, null, decision.reason)
+            decision is Decision.Block -> Triple(VerificationState.UNREACHABLE,
+                if (run.report.onboardingFailure != null) CheckFailure.ONBOARDING_FAILED else CheckFailure.SERVER_NOT_CONFIRMED,
+                "${decision.reason}; your password was not sent")
+            run.refused != null -> Triple(VerificationState.UNREACHABLE, CheckFailure.SERVER_NOT_CONFIRMED, run.refused)
+            run.connected -> Triple(VerificationState.VERIFIED, null,
+                "connected as ${run.account?.identity}; the login server proved it is ${pins?.serverNames?.joinToString()} " +
+                    "before the password was sent (${(decision as Decision.Proceed).why})")
+            else -> Triple(VerificationState.REGISTERED, null,
+                run.installFailure ?: "pinned profile installed; Android hasn't joined it yet")
         }
-        publish(target.ssid, target.bssid, target.bssid ?: target.ssid, result, fix,
-            modeDescription = "eduroam setup with GECKO", isEnterprise = true)
+        val result = VerificationResult(
+            state, run.target.ssid,
+            matchedIdentifier = pins?.serverNames?.firstOrNull(),
+            matchedCertificateId = site?.matchedCertificateId,
+            reason = reason,
+            certificateCount = site?.certificateCount,
+            unparsedCount = site?.unparsedCount,
+            usedPreferredNetwork = site?.usedPreferredNetwork
+        )
+        val evidence = EnterpriseEvidence(
+            account = run.account?.identity,
+            federation = run.report.site?.federation,
+            operatorName = run.report.site?.operatorName,
+            pinsFrom = when (val source = pins?.source) {
+                is PinSource.RealmRecord -> "Signed record of ${source.displayName ?: pins.realm} in ${pins.federation}"
+                is PinSource.SiteCertificate -> "This network's registration (${source.certificateId})"
+                null -> null
+            },
+            serverNames = pins?.serverNames.orEmpty(),
+            caSubjects = pins?.caCertificates.orEmpty().map { it.subjectX500Principal.name },
+            onboardingFailure = run.report.onboardingFailure,
+            accounts = run.report.checks.map {
+                "${it.match.account.identity}: " + when (it) {
+                    is PinCheck.Pinned -> "server confirmed (" + (if (it.pins.source is PinSource.RealmRecord) "${it.pins.federation} record" else "registration") + ")"
+                    is PinCheck.Rejected -> "rejected, ${it.reason}"
+                    is PinCheck.Missing -> "not confirmed, ${it.reason}"
+                }
+            },
+            timings = run.report.timings.map { it.first.name to it.second }
+        )
+        publish(run.target.ssid, run.target.bssid, run.target.bssid ?: run.target.ssid, result, run.fix,
+            modeDescription = "Enterprise network: GECKO onboarding, then a profile pinned to the verified login server",
+            failure = failure, isEnterprise = true, enterprise = evidence,
+            queryRoute = if (site?.certificateCount != null) QueryRoute.JOINED_WIFI else null)
     }
 
     private fun publish(
@@ -622,7 +776,9 @@ class VerificationViewModel(
         joined: Boolean = false,
         failure: CheckFailure? = null,
         isDemo: Boolean = false,
-        isEnterprise: Boolean = false
+        isEnterprise: Boolean = false,
+        enterprise: EnterpriseEvidence? = null,
+        queryRoute: QueryRoute? = null
     ) {
         historyStore.record(networkKey, ssid, result, fix.latitude, fix.longitude)
         val detail = CheckDetail(
@@ -641,12 +797,14 @@ class VerificationViewModel(
             isDemo = isDemo,
             isEnterprise = isEnterprise,
             // usedPreferredNetwork = "the bound network served it", not "cellular".
-            queryRoute = when (result.usedPreferredNetwork) {
+            queryRoute = queryRoute ?: when (result.usedPreferredNetwork) {
                 true -> boundRoute
                 false -> QueryRoute.DEFAULT_ROUTE
                 null -> null
-            }
+            },
+            enterprise = enterprise
         )
+        if (ssid != null && !isDemo) verdictStore?.put(detail.toStoredVerdict())
         checks = listOf(detail) + checks
         current = detail
         if (result.state == VerificationState.CONFLICT) pendingWarning = detail.id
@@ -656,3 +814,23 @@ class VerificationViewModel(
         networkObserver.leave()
     }
 }
+
+private fun CheckDetail.toStoredVerdict() = StoredVerdict(
+    ssid = ssid.orEmpty(), bssid = bssid, state = result.state.name, reason = result.reason,
+    timestamp = result.timestamp, lat = lat, lng = lng, isEnterprise = isEnterprise,
+    modeDescription = modeDescription, failure = failure?.name,
+    account = enterprise?.account, serverNames = enterprise?.serverNames.orEmpty()
+)
+
+private fun StoredVerdict.toCheckDetail() = CheckDetail(
+    result = VerificationResult(
+        runCatching { VerificationState.valueOf(state) }.getOrDefault(VerificationState.UNVERIFIED),
+        ssid, reason = reason, timestamp = timestamp
+    ),
+    ssid = ssid, bssid = bssid, lat = lat, lng = lng, accuracyMeters = null, radiusMeters = 0, altitude = null,
+    modeDescription = modeDescription,
+    failure = failure?.let { runCatching { CheckFailure.valueOf(it) }.getOrNull() },
+    isEnterprise = isEnterprise,
+    enterprise = if (isEnterprise) EnterpriseEvidence(account = account, serverNames = serverNames) else null,
+    restored = true
+)

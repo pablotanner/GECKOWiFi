@@ -21,7 +21,13 @@ enum class Phase2 { PAP, MSCHAP, MSCHAPV2, GTC }
 /** Where a set of pins came from, for the UI and the evidence log. */
 sealed interface PinSource {
     /** A [SignedRealmRecord] whose signature verified against [PinnedRealmKey]. */
-    data class RealmRecord(val issuedAt: Instant, val expiresAt: Instant, val supportUrl: String?) : PinSource
+    data class RealmRecord(
+        val issuedAt: Instant,
+        val expiresAt: Instant,
+        val supportUrl: String?,
+        /** The home institution's name, from the record ("Home University"). */
+        val displayName: String?
+    ) : PinSource
 
     /** The `aaa` entry of a site GeoCert that arrived with a verified map proof (local user). */
     data class SiteCertificate(val certificateId: String) : PinSource
@@ -36,7 +42,7 @@ sealed interface PinResult {
 
 /**
  * The EAP settings of one realm, from an authenticated source: the only thing
- * credentials may ever be attached to (see [EduroamCredentials.EnterpriseProfileBuilder]).
+ * credentials may ever be attached to (see [EnterpriseAccount.EnterpriseProfileBuilder]).
  * The constructor is private; instances come only from the two factories
  * below, which check where the values came from:
  *
@@ -52,6 +58,12 @@ sealed interface PinResult {
  */
 class AuthenticatedEapPins private constructor(
     val realm: String,
+    /**
+     * The federation these pins are valid in: the record's (always set) for a
+     * realm record, the site's (null for a closed network) for site pins. A
+     * realm's servers are only defined within a federation (D19).
+     */
+    val federation: String?,
     val method: EapMethod,
     val phase2: Phase2,
     /** Sent in the clear before the tunnel is up; never the user's real identity. */
@@ -61,7 +73,7 @@ class AuthenticatedEapPins private constructor(
     val serverNames: List<String>,
     val source: PinSource
 ) {
-    override fun toString() = "AuthenticatedEapPins($realm, $method/$phase2, servers=$serverNames, source=$source)"
+    override fun toString() = "AuthenticatedEapPins(${federation?.let { "$it/" }.orEmpty()}$realm, $method/$phase2, servers=$serverNames, source=$source)"
 
     companion object {
         /** Tolerated device-clock skew for a record's `issued_at`. */
@@ -70,10 +82,13 @@ class AuthenticatedEapPins private constructor(
         /**
          * Verifies [bytes] (a binary [SignedRealmRecord]) against [key] first
          * and only then decodes the record: nothing unsigned is ever parsed
-         * into pins. [expectedRealm] is the realm of the user's identity.
+         * into pins. [expectedFederation] is the site's federation (from its
+         * verified registration), [expectedRealm] the realm of the user's
+         * identity: a record is only valid within its own federation (D19).
          */
         fun fromSignedRealmRecord(
             bytes: ByteArray,
+            expectedFederation: String,
             expectedRealm: String,
             key: PublicKey = PinnedRealmKey.publicKey,
             now: Instant = Instant.now()
@@ -92,6 +107,12 @@ class AuthenticatedEapPins private constructor(
 
             val record = runCatching { RealmRecord.ADAPTER.decode(recordBytes) }.getOrNull()
                 ?: return PinResult.Rejected("the signed realm record can't be decoded")
+            if (record.federation.isBlank()) {
+                return PinResult.Rejected("the realm record names no federation")
+            }
+            if (!record.federation.equals(expectedFederation, ignoreCase = true)) {
+                return PinResult.Rejected("the record is for federation ${record.federation}, this network is in $expectedFederation")
+            }
             if (!record.realm.equals(expectedRealm, ignoreCase = true)) {
                 return PinResult.Rejected("the record is for realm ${record.realm}, not $expectedRealm")
             }
@@ -111,8 +132,8 @@ class AuthenticatedEapPins private constructor(
             val cas = record.ca_der.map { der ->
                 parseCertificate(der.toByteArray()) ?: return PinResult.Rejected("a CA certificate in the record doesn't parse")
             }
-            return build(record.realm.lowercase(), method, phase2, outer, cas, record.server_names,
-                PinSource.RealmRecord(issuedAt, expiresAt, record.support_url.ifBlank { null }))
+            return build(record.realm.lowercase(), record.federation.lowercase(), method, phase2, outer, cas, record.server_names,
+                PinSource.RealmRecord(issuedAt, expiresAt, record.support_url.ifBlank { null }, record.display_name.ifBlank { null }))
         }
 
         /**
@@ -137,14 +158,15 @@ class AuthenticatedEapPins private constructor(
                 return PinResult.Rejected("${certificate.certificateId} registers no CA certificate for $userRealm, so Android has nothing to pin")
             }
             val realm = userRealm.lowercase()
-            return build(realm, method, phase2, "anonymous@$realm",
+            val federation = certificate.wifi.enterprise?.federation?.takeIf { it.isNotBlank() }?.lowercase()
+            return build(realm, federation, method, phase2, "anonymous@$realm",
                 pinnable.flatMap { it.second }.distinctBy { it.encoded.contentHashCode() },
                 pinnable.flatMap { it.first }.distinct(),
                 PinSource.SiteCertificate(certificate.certificateId))
         }
 
         private fun build(
-            realm: String, method: EapMethod, phase2: Phase2, outer: String,
+            realm: String, federation: String?, method: EapMethod, phase2: Phase2, outer: String,
             cas: List<X509Certificate>, names: List<String>, source: PinSource
         ): PinResult {
             if (cas.isEmpty()) return PinResult.Rejected("no CA certificate to pin")
@@ -153,7 +175,7 @@ class AuthenticatedEapPins private constructor(
             if (cas.any { it.basicConstraints < 0 }) return PinResult.Rejected("a pinned certificate is not a CA certificate")
             if (names.isEmpty()) return PinResult.Rejected("no server name to pin; a CA pin alone accepts every server that CA signed")
             if (names.any { !SERVER_NAME.matches(it) }) return PinResult.Rejected("invalid server name in ${names.joinToString()}")
-            return PinResult.Ok(AuthenticatedEapPins(realm, method, phase2, outer, cas, names.map { it.lowercase() }, source))
+            return PinResult.Ok(AuthenticatedEapPins(realm, federation, method, phase2, outer, cas, names.map { it.lowercase() }, source))
         }
 
         /** DNS name; notably no ';', which separates entries in `domain_suffix_match`. */

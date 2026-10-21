@@ -37,13 +37,13 @@ class SuggestionProfileInstallerTest {
         val key = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
         val now = Instant.now()
         val record = RealmRecord.ADAPTER.encode(RealmRecord(
-            realm = "homeuni.test", eap_method = "PEAP", phase2 = "MSCHAPV2", outer_identity = "anonymous@homeuni.test",
+            federation = "eduroam", realm = "homeuni.test", eap_method = "PEAP", phase2 = "MSCHAPV2", outer_identity = "anonymous@homeuni.test",
             ca_der = listOf(ca.encoded.toByteString()), server_names = listOf("radius.homeuni.test"),
             issued_at = now.epochSecond - 60, expires_at = now.epochSecond + 3600
         ))
         val signature = Signature.getInstance("SHA256withECDSA").run { initSign(key.private); update(record); sign() }
         val signed = SignedRealmRecord.ADAPTER.encode(SignedRealmRecord(record.toByteString(), signature.toByteString()))
-        return (AuthenticatedEapPins.fromSignedRealmRecord(signed, "homeuni.test", key.public, now) as PinResult.Ok).pins
+        return (AuthenticatedEapPins.fromSignedRealmRecord(signed, "eduroam", "homeuni.test", key.public, now) as PinResult.Ok).pins
     }
 
     @Test
@@ -51,7 +51,7 @@ class SuggestionProfileInstallerTest {
         val installer = SuggestionProfileInstaller(context)
         try {
             val outcome = EnterpriseProfileBuilder.install(
-                pins(), EduroamCredentials("alice@homeuni.test", "not-a-real-password"), TargetNetwork(ssid), installer
+                pins(), EnterpriseAccount("test", "alice@homeuni.test", "not-a-real-password"), TargetNetwork(ssid, federation = "eduroam"), installer
             )
             assertTrue("install outcome: $outcome", outcome is InstallOutcome.Installed)
         } finally {

@@ -46,7 +46,8 @@ import com.thesis.geckowifi.ui.components.colors
 import com.thesis.geckowifi.ui.theme.MonoFontFamily
 import com.thesis.geckowifi.ui.theme.Radius
 import com.thesis.geckowifi.ui.theme.Space
-import com.thesis.geckowifi.ui.verdict.SCOPE_NOTE
+import com.thesis.geckowifi.data.model.VerificationState
+import com.thesis.geckowifi.ui.verdict.scopeNote
 import com.thesis.geckowifi.ui.verdict.Tone
 import com.thesis.geckowifi.ui.verdict.verdict
 import com.thesis.geckowifi.verification.LookupStatus
@@ -60,9 +61,12 @@ import com.thesis.geckowifi.verification.LookupStatus
 fun StatusCard(viewModel: VerificationViewModel, onOpenCheck: (String) -> Unit, modifier: Modifier = Modifier) {
     val active = viewModel.activeCheck
     val current = viewModel.current
+    val device = viewModel.deviceSsid
     val state: CardState = when {
         active != null -> CardState.Checking(active)
         current != null -> CardState.Result(current)
+        // The device's own connection, with what GECKO last found for it (D20).
+        device != null -> CardState.Connected(device, viewModel.latestVerdictFor(device))
         else -> CardState.Idle
     }
     val tone = (state as? CardState.Result)?.check?.verdict()?.tone
@@ -97,8 +101,10 @@ fun StatusCard(viewModel: VerificationViewModel, onOpenCheck: (String) -> Unit, 
                         labMode = viewModel.labMode,
                         onDetails = { onOpenCheck(s.check.id) },
                         onDisconnect = viewModel::disconnect,
-                        onDismiss = viewModel::dismissCurrent
+                        onDismiss = viewModel::dismissCurrent,
+                        onForget = { s.check.ssid?.let(viewModel::forgetEnterpriseNetwork) }
                     )
+                    is CardState.Connected -> ConnectedContent(s.ssid, s.verdict, onDetails = { s.verdict?.let { onOpenCheck(it.id) } })
                 }
             }
         }
@@ -109,6 +115,30 @@ private sealed class CardState(val key: String) {
     data object Idle : CardState("idle")
     data class Checking(val check: ActiveCheck) : CardState("checking")
     data class Result(val check: CheckDetail) : CardState("result:${check.id}")
+    data class Connected(val ssid: String, val verdict: CheckDetail?) : CardState("connected:$ssid:${verdict?.id}")
+}
+
+/** The device is on [ssid] (joined through Android or an earlier GECKO setup); [verdict] is GECKO's latest for it. */
+@Composable
+private fun ConnectedContent(ssid: String, verdict: CheckDetail?, onDetails: () -> Unit) {
+    val v = verdict?.verdict()
+    val colors = MaterialTheme.colorScheme
+    Text("Connected to", style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant)
+    Text(ssid, style = MaterialTheme.typography.headlineLarge, modifier = Modifier.padding(top = Space.xs))
+    if (v == null) {
+        Text(
+            "GECKO hasn't checked this network. Tap it in the list below to check it.",
+            style = MaterialTheme.typography.bodyLarge,
+            color = colors.onSurfaceVariant,
+            modifier = Modifier.padding(top = Space.sm)
+        )
+    } else {
+        Row(Modifier.padding(top = Space.md), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
+            VerdictBadge(v.tone, v.label, v.icon)
+        }
+        Text(v.body, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = Space.sm))
+        OutlinedButton(onClick = onDetails, modifier = Modifier.padding(top = Space.lg).heightIn(min = 48.dp)) { Text("Details") }
+    }
 }
 
 @Composable
@@ -159,7 +189,10 @@ private val stepLabels = mapOf(
     CheckStep.LOOKUP to "Looking up what's registered here",
     CheckStep.PORTAL to "Following the login page",
     CheckStep.COMPARE to "Comparing with the registration",
-    CheckStep.SERVER to "Waiting for the login server. Reconnect to the network now"
+    CheckStep.SERVER to "Waiting for the login server. Reconnect to the network now",
+    CheckStep.ONBOARD to "Checking the network",
+    CheckStep.CONFIRM to "Confirming the login server",
+    CheckStep.CONNECT to "Connecting with your account"
 )
 
 @Composable
@@ -179,9 +212,14 @@ private fun CheckingContent(check: ActiveCheck, onCancel: () -> Unit) {
             StepRow(stepLabels.getValue(step), done = i < currentIndex, active = i == currentIndex)
         }
     }
-    if (check.current == CheckStep.JOIN) {
+    val hint = when (check.current) {
+        CheckStep.JOIN, CheckStep.ONBOARD -> "Android may ask you to allow the connection."
+        CheckStep.CONNECT -> "The first time, allow GECKO's suggested networks in Android's notification."
+        else -> null
+    }
+    if (hint != null) {
         Text(
-            "Android may ask you to allow the connection.",
+            hint,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = Space.md)
@@ -217,7 +255,8 @@ private fun ResultContent(
     labMode: Boolean,
     onDetails: () -> Unit,
     onDisconnect: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onForget: () -> Unit
 ) {
     val v = check.verdict()
     val toneColors = v.tone.colors()
@@ -247,7 +286,7 @@ private fun ResultContent(
     )
     if (v.tone == Tone.POSITIVE) {
         Text(
-            SCOPE_NOTE,
+            check.scopeNote,
             style = MaterialTheme.typography.bodySmall,
             color = toneColors.content,
             modifier = Modifier.padding(top = Space.md)
@@ -286,6 +325,12 @@ private fun ResultContent(
             }
             TextButton(onClick = leave, modifier = Modifier.heightIn(min = 48.dp)) {
                 Text(leaveLabel, color = toneColors.content)
+            }
+            // A profile GECKO installed stays until removed; this is the way to remove it.
+            if (check.enterprise != null && check.result.state in setOf(VerificationState.VERIFIED, VerificationState.REGISTERED)) {
+                TextButton(onClick = onForget, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text("Forget network", color = toneColors.content)
+                }
             }
         }
     }

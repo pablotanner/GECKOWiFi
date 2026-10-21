@@ -21,8 +21,8 @@ class RecordingInstaller(private val outcome: InstallOutcome = InstallOutcome.In
 
 /** The credential invariant (eduroam-brief.md, section 2) and its one code path. */
 class EnterpriseProfileBuilderTest {
-    private val alice = EduroamCredentials("alice@homeuni.test", "s3cret")
-    private val network = TargetNetwork("eduroam-lab")
+    private val alice = EnterpriseAccount("a1", "alice@homeuni.test", "s3cret")
+    private val network = TargetNetwork("eduroam-lab", federation = "eduroam")
 
     @Test
     fun install_passesThePasswordOnlyWithTheVerifiedPins() = runTest {
@@ -49,14 +49,27 @@ class EnterpriseProfileBuilderTest {
     }
 
     @Test
+    fun recordPinsOfAnotherFederation_areRefused() {
+        val govroamPins = pins(record(federation = "govroam"))
+        val thrown = runCatching { EnterpriseProfileBuilder.plan(govroamPins, alice, network) }.exceptionOrNull()
+        assertTrue(thrown is CredentialsRefused)
+    }
+
+    @Test
+    fun recordPinsOnAClosedNetwork_areRefused() {
+        val thrown = runCatching { EnterpriseProfileBuilder.plan(pins(), alice, network.copy(federation = null)) }.exceptionOrNull()
+        assertTrue(thrown is CredentialsRefused)
+    }
+
+    @Test
     fun identityWithoutRealm_isRefused() {
-        val thrown = runCatching { EnterpriseProfileBuilder.plan(pins(), EduroamCredentials("alice", "s3cret"), network) }.exceptionOrNull()
+        val thrown = runCatching { EnterpriseProfileBuilder.plan(pins(), EnterpriseAccount("a2", "alice", "s3cret"), network) }.exceptionOrNull()
         assertTrue(thrown is CredentialsRefused)
     }
 
     @Test
     fun emptyPassword_isRefused() {
-        val thrown = runCatching { EnterpriseProfileBuilder.plan(pins(), EduroamCredentials("alice@homeuni.test", ""), network) }.exceptionOrNull()
+        val thrown = runCatching { EnterpriseProfileBuilder.plan(pins(), EnterpriseAccount("a3", "alice@homeuni.test", ""), network) }.exceptionOrNull()
         assertTrue(thrown is CredentialsRefused)
     }
 
@@ -72,17 +85,17 @@ class EnterpriseProfileBuilderTest {
     }
 
     /**
-     * Structural half of the invariant: no public member of [EduroamCredentials]
+     * Structural half of the invariant: no public member of [EnterpriseAccount]
      * gives the password out. If this fails, someone added a getter; route it
      * through [EnterpriseProfileBuilder] instead.
      */
     @Test
     fun noPublicMemberOfTheCredentialsReturnsThePassword() {
-        val leaks = EduroamCredentials::class.java.methods
-            .filter { it.parameterCount == 0 && Modifier.isPublic(it.modifiers) && it.declaringClass == EduroamCredentials::class.java }
+        val leaks = EnterpriseAccount::class.java.methods
+            .filter { it.parameterCount == 0 && Modifier.isPublic(it.modifiers) && it.declaringClass == EnterpriseAccount::class.java }
             .filter { runCatching { it.invoke(alice) }.getOrNull()?.toString()?.contains("s3cret") == true }
         assertEquals(emptyList<String>(), leaks.map { it.name })
-        assertNull(EduroamCredentials::class.java.fields.firstOrNull { it.name == "password" })
+        assertNull(EnterpriseAccount::class.java.fields.firstOrNull { it.name == "password" })
     }
 
     /**

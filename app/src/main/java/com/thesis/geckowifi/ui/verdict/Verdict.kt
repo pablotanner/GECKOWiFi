@@ -36,6 +36,12 @@ data class Verdict(
 const val SCOPE_NOTE = "GECKO confirms who runs the captive portal page."
     //"GECKO confirms who runs the login page. It doesn't protect what you do after logging in."
 
+/** The same for an enterprise network: GECKO vouches for the login server, which protects the password. */
+const val ENTERPRISE_SCOPE_NOTE = "GECKO confirmed the login server before your password was sent, so it only went to your provider."
+
+/** The scope note that fits [this] check. */
+val CheckDetail.scopeNote: String get() = if (enterprise != null) ENTERPRISE_SCOPE_NOTE else SCOPE_NOTE
+
 fun CheckDetail.conflictCause(): ConflictCause? {
     if (result.state != VerificationState.CONFLICT) return null
     if (result.reason?.contains("network advertises") == true) return ConflictCause.AUTH_MODE
@@ -59,12 +65,20 @@ fun CheckDetail.decidingHop() =
 fun CheckDetail.verdict(): Verdict {
     val name = ssid ?: result.host.ifEmpty { "This network" }
     return when (result.state) {
-        VerificationState.VERIFIED -> Verdict(
-            Tone.POSITIVE, "Verified", "This is the registered $name",
-            if (isEnterprise) "Its login server matches the one registered for this location."
-            else "Its login page matches what the operator registered for this location.",
-            Icons.Outlined.GppGood
-        )
+        VerificationState.VERIFIED -> when {
+            enterprise != null -> Verdict(
+                Tone.POSITIVE, "Verified", "Connected to $name",
+                "Signed in as ${enterprise.account ?: "your account"}. The login server proved it is " +
+                    "${enterprise.serverNames.firstOrNull() ?: "your provider's server"} before your password was sent.",
+                Icons.Outlined.GppGood
+            )
+            else -> Verdict(
+                Tone.POSITIVE, "Verified", "This is the registered $name",
+                if (isEnterprise) "Its login server matches the one registered for this location."
+                else "Its login page matches what the operator registered for this location.",
+                Icons.Outlined.GppGood
+            )
+        }
         VerificationState.CONFLICT -> Verdict(
             Tone.DANGER, "Impersonation risk", "Don't use this network",
             when (conflictCause()) {
@@ -81,11 +95,16 @@ fun CheckDetail.verdict(): Verdict {
                 ConflictCause.AUTH_MODE ->
                     "$name is registered here as a different kind of network (${result.registeredIdentifier}), but this one is ${result.presentedIdentifier}. Someone may be imitating it."
                 ConflictCause.ENTERPRISE, null ->
-                    "The login server for $name isn't the one registered here. Someone may be imitating it."
+                    if (enterprise != null) "The login server details for $name didn't check out. Someone may be imitating it. Your password was not sent."
+                    else "The login server for $name isn't the one registered here. Someone may be imitating it."
             },
             Icons.Outlined.GppBad
         )
-        VerificationState.REGISTERED -> Verdict(
+        VerificationState.REGISTERED -> if (enterprise != null) Verdict(
+            Tone.NEUTRAL, "Set up", "$name is set up",
+            "The profile is installed. Android joins it on its own; your password only goes to the verified login server.",
+            Icons.Outlined.GppMaybe
+        ) else Verdict(
             Tone.NEUTRAL, "Registered", "$name is registered here",
             when {
                 result.reason?.contains("visitor") == true ->
@@ -120,6 +139,16 @@ fun CheckDetail.verdict(): Verdict {
                 Tone.NEUTRAL, "Not checked", "Couldn't read the login server",
                 "No handshake with the login server was seen, or this device doesn't report its certificate. Reconnect to $name while the check is running and try again.",
                 Icons.Outlined.CloudOff
+            )
+            CheckFailure.SERVER_NOT_CONFIRMED -> Verdict(
+                Tone.NEUTRAL, "Not connected", "Your password was not sent",
+                "GECKO couldn't confirm the login server of $name, so it didn't connect. On its own this isn't a sign of an attack.",
+                Icons.Outlined.Shield
+            )
+            CheckFailure.ONBOARDING_FAILED -> Verdict(
+                Tone.NEUTRAL, "Not connected", "GECKO couldn't check $name",
+                "The check connection was declined, the network was out of range, or it doesn't support GECKO. Your password was not sent.",
+                Icons.Outlined.WifiOff
             )
             CheckFailure.LOW_ACCURACY -> Verdict(
                 Tone.NEUTRAL, "Not checked", "Your location isn't precise enough",

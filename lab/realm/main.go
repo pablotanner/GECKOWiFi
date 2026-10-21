@@ -6,11 +6,12 @@
 // record because its signature verifies against a pinned key, not because of
 // where it came from; the server never holds the signing key.
 //
-//	go run . sign  -key ../../lab-secrets/realm/realm-signing.key -in records/homeuni.test.json -out ../../lab-secrets/realm/signed
+//	go run . sign  -key ../../lab-secrets/realm/realm-signing.key -in records/eduroam/homeuni.test.json -out ../../lab-secrets/realm/signed
 //	go run . serve -addr 192.168.137.1:1235 -dir ../../lab-secrets/realm/signed
 //
-// GET /v1/realm/<realm> returns a binary SignedRealmRecord
-// (app/src/main/proto/realm_record.proto).
+// GET /v1/realm/<federation>/<realm> returns a binary SignedRealmRecord
+// (app/src/main/proto/realm_record.proto). Records are scoped to a federation
+// (docs/eduroam-decisions.md, D19); signed files live in <dir>/<federation>/<realm>.bin.
 package main
 
 import (
@@ -33,6 +34,8 @@ import (
 
 // recordSpec is the human-written input; ca_files are PEM paths relative to the spec file.
 type recordSpec struct {
+	Federation    string   `json:"federation"`
+	DisplayName   string   `json:"display_name"`
 	Realm         string   `json:"realm"`
 	EapMethod     string   `json:"eap_method"`
 	Phase2        string   `json:"phase2"`
@@ -81,8 +84,11 @@ func sign(keyPath, specPath, outDir string) error {
 	if err := dec.Decode(&spec); err != nil {
 		return fmt.Errorf("%s: %w", specPath, err)
 	}
-	if spec.Realm == "" || len(spec.CaFiles) == 0 || len(spec.ServerNames) == 0 || spec.ValidDays <= 0 {
-		return fmt.Errorf("%s: realm, ca_files, server_names and valid_days are required", specPath)
+	if spec.Federation == "" || spec.Realm == "" || len(spec.CaFiles) == 0 || len(spec.ServerNames) == 0 || spec.ValidDays <= 0 {
+		return fmt.Errorf("%s: federation, realm, ca_files, server_names and valid_days are required", specPath)
+	}
+	if !nameRe.MatchString(spec.Federation) || !nameRe.MatchString(spec.Realm) {
+		return fmt.Errorf("%s: federation and realm must be lower-case names", specPath)
 	}
 
 	var cas [][]byte
@@ -122,14 +128,15 @@ func sign(keyPath, specPath, outDir string) error {
 	signed = appendBytes(signed, 1, record)
 	signed = appendBytes(signed, 2, sig)
 
-	if err := os.MkdirAll(outDir, 0o755); err != nil {
+	fedDir := filepath.Join(outDir, spec.Federation)
+	if err := os.MkdirAll(fedDir, 0o755); err != nil {
 		return err
 	}
-	out := filepath.Join(outDir, spec.Realm+".bin")
+	out := filepath.Join(fedDir, spec.Realm+".bin")
 	if err := os.WriteFile(out, signed, 0o644); err != nil {
 		return err
 	}
-	log.Printf("signed %s (%d bytes, valid %d days) -> %s", spec.Realm, len(signed), spec.ValidDays, out)
+	log.Printf("signed %s/%s (%d bytes, valid %d days) -> %s", spec.Federation, spec.Realm, len(signed), spec.ValidDays, out)
 	return nil
 }
 
@@ -164,6 +171,8 @@ func encodeRecord(s recordSpec, cas [][]byte, issuedAt, expiresAt int64) []byte 
 	b = appendString(b, 8, s.SupportURL)
 	b = appendVarintField(b, 9, uint64(issuedAt))
 	b = appendVarintField(b, 10, uint64(expiresAt))
+	b = appendString(b, 11, s.Federation)
+	b = appendString(b, 12, s.DisplayName)
 	return b
 }
 
@@ -193,25 +202,26 @@ func appendString(b []byte, field int, v string) []byte {
 	return appendBytes(b, field, []byte(v))
 }
 
-var realmName = regexp.MustCompile(`^[a-z0-9.-]+$`)
+var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*$`)
 
 func serve(addr, dir string) {
 	http.HandleFunc("/v1/realm/", func(w http.ResponseWriter, r *http.Request) {
-		realm := strings.ToLower(strings.TrimPrefix(r.URL.Path, "/v1/realm/"))
-		if r.Method != http.MethodGet || !realmName.MatchString(realm) {
+		parts := strings.Split(strings.ToLower(strings.TrimPrefix(r.URL.Path, "/v1/realm/")), "/")
+		if r.Method != http.MethodGet || len(parts) != 2 || !nameRe.MatchString(parts[0]) || !nameRe.MatchString(parts[1]) {
 			http.NotFound(w, r)
 			log.Printf("%s %s %s -> 404", r.RemoteAddr, r.Method, r.URL.Path)
 			return
 		}
-		body, err := os.ReadFile(filepath.Join(dir, realm+".bin"))
+		federation, realm := parts[0], parts[1]
+		body, err := os.ReadFile(filepath.Join(dir, federation, realm+".bin"))
 		if err != nil {
 			http.NotFound(w, r)
-			log.Printf("%s GET %s -> 404 (no record)", r.RemoteAddr, realm)
+			log.Printf("%s GET %s/%s -> 404 (no record)", r.RemoteAddr, federation, realm)
 			return
 		}
 		w.Header().Set("Content-Type", "application/x-protobuf")
 		w.Write(body)
-		log.Printf("%s GET %s -> 200 (%d bytes)", r.RemoteAddr, realm, len(body))
+		log.Printf("%s GET %s/%s -> 200 (%d bytes)", r.RemoteAddr, federation, realm, len(body))
 	})
 	log.Printf("realm server on http://%s, records from %s", addr, dir)
 	log.Fatal(http.ListenAndServe(addr, nil))

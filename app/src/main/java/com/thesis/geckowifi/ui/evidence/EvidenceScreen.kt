@@ -41,7 +41,7 @@ import com.thesis.geckowifi.ui.components.VerdictBadge
 import com.thesis.geckowifi.ui.components.colors
 import com.thesis.geckowifi.ui.theme.MonoFontFamily
 import com.thesis.geckowifi.ui.theme.Space
-import com.thesis.geckowifi.ui.verdict.SCOPE_NOTE
+import com.thesis.geckowifi.ui.verdict.scopeNote
 import com.thesis.geckowifi.ui.verdict.Tone
 import com.thesis.geckowifi.ui.verdict.hopLabel
 import com.thesis.geckowifi.ui.verdict.hopTone
@@ -106,12 +106,34 @@ fun EvidenceScreen(check: CheckDetail?, labMode: Boolean, onBack: () -> Unit) {
                 Text(v.body, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = Space.md))
                 if (v.tone == Tone.POSITIVE) {
                     Text(
-                        SCOPE_NOTE,
+                        check.scopeNote,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = Space.sm)
                     )
                 }
+            }
+
+            check.enterprise?.let { e ->
+                SectionCard("Login server") {
+                    e.account?.let { DetailRow("Signed in as", it) }
+                    (e.federation ?: e.operatorName)?.let { DetailRow(if (e.federation != null) "Federation" else "Operator", it, mono = false) }
+                    e.pinsFrom?.let { StackedValue("Server identity from", it) }
+                    if (e.serverNames.isNotEmpty()) StackedValue("Pinned server name", e.serverNames.joinToString("\n"))
+                    if (e.caSubjects.isNotEmpty()) StackedValue("Pinned CA", e.caSubjects.joinToString("\n"))
+                    e.onboardingFailure?.let { StackedValue("GECKO check connection", it) }
+                    if (e.accounts.isNotEmpty()) StackedValue("Your accounts here", e.accounts.joinToString("\n"))
+                    if (labMode && e.timings.isNotEmpty()) {
+                        StackedValue("Timings", e.timings.joinToString("\n") { (step, ms) -> "$step  +$ms ms" })
+                    }
+                }
+            }
+            if (check.restored) {
+                Text(
+                    "Summary from an earlier session: the full evidence is only kept while the app runs.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             if (result.registeredIdentifier != null || result.presentedIdentifier != null) {

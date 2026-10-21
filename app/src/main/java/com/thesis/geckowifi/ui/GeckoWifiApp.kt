@@ -26,9 +26,6 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.thesis.geckowifi.data.model.VerificationState
 import com.thesis.geckowifi.di.AppModule
-import com.thesis.geckowifi.ui.eduroam.EduroamScreen
-import com.thesis.geckowifi.ui.eduroam.EduroamViewModel
-import com.thesis.geckowifi.network.ScannedNetwork
 import com.thesis.geckowifi.ui.evidence.EvidenceScreen
 import com.thesis.geckowifi.ui.history.HistoryScreen
 import com.thesis.geckowifi.ui.home.HomeScreen
@@ -52,13 +49,6 @@ fun GeckoWifiApp(
     onRequestLocationPermission: () -> Unit
 ) {
     val viewModel: VerificationViewModel = viewModel(factory = AppModule.verificationViewModelFactory)
-    // Activity-scoped like the main view model, so the setup screen keeps its
-    // last result when the user navigates away and back.
-    val eduroam: EduroamViewModel = viewModel(factory = AppModule.eduroamViewModelFactory)
-    // A finished eduroam setup becomes a check like any other (status card, History, warning).
-    LaunchedEffect(eduroam.hasFinishedRun) {
-        eduroam.takeFinishedRun()?.let { (target, outcome, fix) -> viewModel.recordEduroamOutcome(target, outcome, fix) }
-    }
     LaunchedEffect(hasLocationPermission) { viewModel.onPermissionResult(hasLocationPermission) }
 
     if (!hasLocationPermission) {
@@ -108,28 +98,12 @@ fun GeckoWifiApp(
             modifier = if (currentRoute?.startsWith("warning") == true) Modifier else Modifier.padding(padding)
         ) {
             composable("home") {
-                HomeScreen(
-                    viewModel,
-                    onOpenCheck = { navController.navigate("check/$it") },
-                    onSetupEnterprise = { navController.navigate(eduroamRoute(it.ssid, it.bssid)) }
-                )
+                HomeScreen(viewModel, onOpenCheck = { navController.navigate("check/$it") })
             }
             composable("history") {
                 HistoryScreen(viewModel.checks, onOpenCheck = { navController.navigate("check/$it") })
             }
-            composable("settings") {
-                SettingsScreen(viewModel, onOpenEduroamSetup = { navController.navigate(eduroamRoute(LAB_EDUROAM_SSID, null)) })
-            }
-            composable("eduroam/{ssid}?bssid={bssid}") { entry ->
-                val ssid = entry.arguments?.getString("ssid").orEmpty()
-                val bssid = entry.arguments?.getString("bssid")?.takeIf { it.isNotEmpty() }
-                val network = viewModel.scannedNetworks.filterIsInstance<ScannedNetwork.Real>()
-                    .firstOrNull { it.ssid == ssid && (bssid == null || it.bssid == bssid) }
-                LaunchedEffect(ssid, network) {
-                    if (network != null) eduroam.setTarget(network) else eduroam.setUnscannedTarget(ssid, bssid)
-                }
-                EduroamScreen(eduroam, onBack = { navController.popBackStack() })
-            }
+            composable("settings") { SettingsScreen(viewModel) }
             composable("check/{id}") { entry ->
                 EvidenceScreen(
                     check = entry.arguments?.getString("id")?.let(viewModel::checkById),
@@ -157,12 +131,6 @@ fun GeckoWifiApp(
         }
     }
 }
-
-/** The demo's SSID (docs/eduroam-demo.md); never `eduroam` itself, see eduroam-brief.md 4.1. */
-private const val LAB_EDUROAM_SSID = "eduroam-lab"
-
-private fun eduroamRoute(ssid: String, bssid: String?) =
-    "eduroam/${android.net.Uri.encode(ssid)}" + (bssid?.let { "?bssid=${android.net.Uri.encode(it)}" } ?: "")
 
 private fun NavHostController.switchTab(route: String) = navigate(route) {
     popUpTo(graph.findStartDestination().id) { saveState = true }

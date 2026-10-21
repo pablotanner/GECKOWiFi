@@ -136,7 +136,50 @@ class NetworkObserver(private val context: Context) {
         joinedNetwork = null
     }
 
-    /** Cellular network for GECKO queries, so the tested WiFi never carries them. */
+    /** Held while [watchDeviceWifi] is active. */
+    private var deviceWifiCallback: ConnectivityManager.NetworkCallback? = null
+
+    /**
+     * Calls [onChange] (any thread) with the SSID of the Wi-Fi the device
+     * itself is connected to, or null, now and on every change. Only networks
+     * with the INTERNET capability count: the app's own joins (onboarding
+     * session, portal check) are requested without it, so they don't show up
+     * as "the device's connection".
+     */
+    @SuppressLint("MissingPermission")
+    fun watchDeviceWifi(onChange: (String?) -> Unit) {
+        if (deviceWifiCallback != null) return
+        val bySsid = java.util.concurrent.ConcurrentHashMap<Network, String>()
+        val report = { onChange(bySsid.values.firstOrNull()) }
+        val request = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+        val onCaps = { network: Network, caps: NetworkCapabilities ->
+            // Android 12+: the SSID comes with the capabilities (if the callback asked for
+            // location info); before that only WifiManager knows it.
+            @Suppress("DEPRECATION")
+            val raw = (caps.transportInfo as? android.net.wifi.WifiInfo)?.ssid ?: wifi.connectionInfo?.ssid
+            val ssid = raw?.removeSurrounding("\"")?.takeIf { it.isNotBlank() && it != "<unknown ssid>" }
+            if (ssid == null) bySsid.remove(network) else bySsid[network] = ssid
+            report()
+        }
+        val onLost = { network: Network -> bySsid.remove(network); report() }
+        val callback = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            object : ConnectivityManager.NetworkCallback(FLAG_INCLUDE_LOCATION_INFO) {
+                override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) = onCaps(network, caps)
+                override fun onLost(network: Network) { onLost(network) }
+            }
+        } else {
+            object : ConnectivityManager.NetworkCallback() {
+                override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) = onCaps(network, caps)
+                override fun onLost(network: Network) { onLost(network) }
+            }
+        }
+        deviceWifiCallback = callback
+        runCatching { connectivity.registerNetworkCallback(request, callback) }.onFailure { Log.w(TAG, "can't watch Wi-Fi: $it") }
+    }
+
     /** SSID of the network the device itself is connected to (not the app's own join), or null. */
     @Suppress("DEPRECATION")
     fun connectedSsid(): String? =

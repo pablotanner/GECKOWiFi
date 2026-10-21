@@ -27,8 +27,8 @@ import java.util.Base64
 /** Which realm records and site registrations yield pins, and which don't (docs/eduroam-decisions.md, D2). */
 class AuthenticatedEapPinsTest {
 
-    private fun verify(bytes: ByteArray, realm: String = "homeuni.test", at: Instant = now) =
-        AuthenticatedEapPins.fromSignedRealmRecord(bytes, realm, realmKey.public, at)
+    private fun verify(bytes: ByteArray, realm: String = "homeuni.test", at: Instant = now, federation: String = "eduroam") =
+        AuthenticatedEapPins.fromSignedRealmRecord(bytes, federation, realm, realmKey.public, at)
 
     private fun rejected(result: PinResult, containing: String) {
         assertTrue("expected rejection, got $result", result is PinResult.Rejected)
@@ -48,6 +48,27 @@ class AuthenticatedEapPinsTest {
         assertEquals(listOf(ca), pins.caCertificates)
         assertEquals(listOf("radius.homeuni.test"), pins.serverNames)
         assertTrue(pins.source is PinSource.RealmRecord)
+    }
+
+    // --- federation scoping (docs/eduroam-decisions.md, D19) ---
+
+    @Test
+    fun pinsCarryTheRecordsFederation() {
+        val pins = (verify(sign(record())) as PinResult.Ok).pins
+        assertEquals("eduroam", pins.federation)
+        assertEquals("Home University", (pins.source as PinSource.RealmRecord).displayName)
+    }
+
+    @Test
+    fun recordOfAnotherFederation_isRejected() =
+        rejected(verify(sign(record(federation = "govroam"))), "federation govroam, this network is in eduroam")
+
+    @Test
+    fun recordWithoutFederation_isRejected() = rejected(verify(sign(record(federation = ""))), "names no federation")
+
+    @Test
+    fun federationIsComparedCaseInsensitively() {
+        assertTrue(verify(sign(record(federation = "eduroam")), federation = "EduRoam") is PinResult.Ok)
     }
 
     @Test
@@ -128,9 +149,9 @@ class AuthenticatedEapPinsTest {
      */
     @Test
     fun labSignedRecord_verifiesAgainstThePinnedKey() {
-        val file = File("../lab-secrets/realm/signed/homeuni.test.bin")
+        val file = File("../lab-secrets/realm/signed/eduroam/homeuni.test.bin")
         assumeTrue("no lab-signed record at ${file.absolutePath}", file.exists())
-        val result = AuthenticatedEapPins.fromSignedRealmRecord(file.readBytes(), "homeuni.test", PinnedRealmKey.publicKey, Instant.now())
+        val result = AuthenticatedEapPins.fromSignedRealmRecord(file.readBytes(), "eduroam", "homeuni.test", PinnedRealmKey.publicKey, Instant.now())
         val pins = (result as? PinResult.Ok)?.pins ?: throw AssertionError("lab record rejected: $result")
         assertEquals(listOf("radius.homeuni.test"), pins.serverNames)
         assertEquals("GECKO-Lab-CA", pins.caCertificates.single().subjectX500Principal.name.substringAfter("CN=").substringBefore(','))
@@ -158,6 +179,7 @@ class AuthenticatedEapPinsTest {
         assertEquals(listOf("radius.gecko-a.lab"), pins.serverNames)
         assertEquals("anonymous@gecko-a.lab", pins.outerIdentity)
         assertEquals(PinSource.SiteCertificate("lab-eduroam"), pins.source)
+        assertEquals("eduroam", pins.federation)
     }
 
     @Test

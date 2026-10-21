@@ -9,17 +9,18 @@ import com.thesis.geckowifi.data.local.SharedPrefsTrustPreferenceStore
 import com.thesis.geckowifi.data.local.PortalCheckLog
 import com.thesis.geckowifi.data.local.TrustPreferenceStore
 import com.thesis.geckowifi.data.remote.GeckoClient
-import com.thesis.geckowifi.eduroam.CredentialStore
-import com.thesis.geckowifi.eduroam.EduroamOnboarding
+import com.thesis.geckowifi.data.local.SharedPrefsVerdictStore
+import com.thesis.geckowifi.data.local.VerdictStore
+import com.thesis.geckowifi.eduroam.AccountStore
+import com.thesis.geckowifi.eduroam.EnterpriseOnboarding
 import com.thesis.geckowifi.eduroam.EnterpriseProfileInstaller
-import com.thesis.geckowifi.eduroam.KeystoreCredentialStore
+import com.thesis.geckowifi.eduroam.KeystoreAccountStore
 import com.thesis.geckowifi.eduroam.RealmRecordClient
 import com.thesis.geckowifi.eduroam.SpecifierOnboardingSession
 import com.thesis.geckowifi.eduroam.SuggestionProfileInstaller
 import com.thesis.geckowifi.location.LocationProvider
 import com.thesis.geckowifi.network.NetworkObserver
 import com.thesis.geckowifi.ui.VerificationViewModel
-import com.thesis.geckowifi.ui.eduroam.EduroamViewModel
 import com.thesis.geckowifi.verification.VerificationEngine
 import com.thesis.geckowifi.verification.CertProbe
 import com.thesis.geckowifi.verification.DecisionCache
@@ -51,8 +52,13 @@ object AppModule {
         PortalCheckLog(File(appContext.getExternalFilesDir(null) ?: appContext.filesDir, "portal-checks"))
     }
 
-    val credentialStore: CredentialStore by lazy {
-        KeystoreCredentialStore(appContext.getSharedPreferences("gecko_eduroam", Context.MODE_PRIVATE))
+    /** The user's enterprise accounts (docs/eduroam-decisions.md, D19); the prefs file of the first prototype, so its account migrates. */
+    val accountStore: AccountStore by lazy {
+        KeystoreAccountStore(appContext.getSharedPreferences("gecko_eduroam", Context.MODE_PRIVATE))
+    }
+
+    val verdictStore: VerdictStore by lazy {
+        SharedPrefsVerdictStore(appContext.getSharedPreferences("gecko_verdicts", Context.MODE_PRIVATE))
     }
 
     /** Non-root for now (docs/eduroam-decisions.md, D1); a root installer would be chosen here. */
@@ -63,8 +69,8 @@ object AppModule {
      * fallback to the default route: a fresh engine and cache per session, so
      * no earlier answer can stand in for this network's.
      */
-    val eduroamOnboarding: EduroamOnboarding by lazy {
-        EduroamOnboarding(
+    val enterpriseOnboarding: EnterpriseOnboarding by lazy {
+        EnterpriseOnboarding(
             transport = SpecifierOnboardingSession(appContext),
             engineFor = { network ->
                 VerificationEngine(GeckoClient(network = network, fallbackClient = null), CertProbe(), DecisionCache(), geoQueryEncoder)
@@ -72,12 +78,6 @@ object AppModule {
             realmClientFor = { network -> RealmRecordClient(network = network) },
             installer = profileInstaller
         )
-    }
-
-    val eduroamViewModelFactory = viewModelFactory {
-        initializer {
-            EduroamViewModel(networkObserver, locationProvider, credentialStore, eduroamOnboarding, profileInstaller, trustPreferences)
-        }
     }
 
     val verificationViewModelFactory = viewModelFactory {
@@ -90,7 +90,11 @@ object AppModule {
                 geoQueryEncoder = geoQueryEncoder,
                 historyStore = historyStore,
                 trustPreferences = trustPreferences,
-                checkLog = portalCheckLog
+                checkLog = portalCheckLog,
+                enterpriseOnboarding = enterpriseOnboarding,
+                accountStore = accountStore,
+                profileInstaller = profileInstaller,
+                verdictStore = verdictStore
             )
         }
     }
