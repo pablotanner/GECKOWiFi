@@ -14,6 +14,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.thesis.geckowifi.eduroam.AccountInfo
 import com.thesis.geckowifi.ui.EnterpriseController
+import com.thesis.geckowifi.ui.timeText
+import com.thesis.geckowifi.ui.viaDescription
 import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
@@ -66,11 +68,25 @@ import com.thesis.geckowifi.verification.LookupStatus
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(viewModel: VerificationViewModel) {
+fun SettingsScreen(viewModel: VerificationViewModel, onOpenSavedData: () -> Unit = {}) {
     Column(Modifier.fillMaxWidth()) {
         TopAppBar(title = { Text("Settings") })
         Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = Space.xxl)) {
             viewModel.enterprise?.let { AccountsSection(it) }
+
+            SectionHeader("Saved GECKO data")
+            SectionCard(null, Modifier.padding(horizontal = Space.lg)) {
+                val saved = viewModel.savedLookup
+                Text(
+                    if (saved == null) "Nothing saved yet."
+                    else "Registrations of ${saved.certificates.mapNotNull { it.wifi.ssid }.distinct().size} networks, fetched " +
+                        "${timeText(saved.fetchedAt)} over ${saved.viaDescription()}.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                OutlinedButton(onClick = onOpenSavedData, modifier = Modifier.padding(top = Space.md).heightIn(min = 48.dp)) {
+                    Text("Show saved data")
+                }
+            }
 
             SectionHeader("How GECKO protects you")
             SectionCard(null, Modifier.padding(horizontal = Space.lg)) {

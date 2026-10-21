@@ -2,13 +2,13 @@
   {
     "schema_version": 3,
     "certificate_id": "eduroam-lab-sp",
-    "subject": { "id": "sp.test", "name": "GECKO Lab eduroam SP" },
+    "subject": { "id": "sp.test", "name": "GECKO Lab SP" },
     "critical": [],
     "wifi": {
       "ssid": "eduroam-lab",
       "auth_modes": ["wpa2-enterprise"],
       "enterprise": {
-        "federation": "eduroam",
+        "federation": "eduroam-lab",
         "aaa": []
       }
     },

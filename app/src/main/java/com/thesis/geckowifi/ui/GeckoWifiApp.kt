@@ -30,6 +30,7 @@ import com.thesis.geckowifi.ui.evidence.EvidenceScreen
 import com.thesis.geckowifi.ui.history.HistoryScreen
 import com.thesis.geckowifi.ui.home.HomeScreen
 import com.thesis.geckowifi.ui.onboarding.PermissionScreen
+import com.thesis.geckowifi.ui.settings.SavedDataScreen
 import com.thesis.geckowifi.ui.settings.SettingsScreen
 import com.thesis.geckowifi.ui.warning.WarningScreen
 
@@ -103,7 +104,8 @@ fun GeckoWifiApp(
             composable("history") {
                 HistoryScreen(viewModel.checks, onOpenCheck = { navController.navigate("check/$it") })
             }
-            composable("settings") { SettingsScreen(viewModel) }
+            composable("settings") { SettingsScreen(viewModel, onOpenSavedData = { navController.navigate("saved") }) }
+            composable("saved") { SavedDataScreen(viewModel, onBack = { navController.popBackStack() }) }
             composable("check/{id}") { entry ->
                 EvidenceScreen(
                     check = entry.arguments?.getString("id")?.let(viewModel::checkById),

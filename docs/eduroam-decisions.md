@@ -156,7 +156,7 @@ GECKO identity reaches a production RADIUS server.
 
 ## D16. Site GeoCert has no local realms
 `eduroam-lab-sp` (lab/certs/eduroam-lab.json) registers the SSID, WPA2-Enterprise
-and federation `eduroam` with an empty `aaa`: everybody is a visitor, so the
+and federation `eduroam-lab` (D22) with an empty `aaa`: everybody is a visitor, so the
 demo exercises the RealmRecord path. A local realm with `ca_certificates` would
 make the app take the pins from the site certificate instead (also implemented
 and unit-tested). Same area as `mango-a` (central Zürich), so lab work works anywhere there.
@@ -206,3 +206,45 @@ status card shows the device's real Wi-Fi connection with GECKO's last verdict
 for it (persisted). Enterprise networks GECKO can't onboard on (in the
 prototype: everything but the lab SSID, D15) open Android's Wi-Fi settings with
 a note.
+
+## D21. A saved registration replaces onboarding
+Onboarding only exists so a WiFi-only device can fetch the site's registration
+and the realm record before it has credentials. If GECKO already holds a
+verified answer for the place, the session is not needed.
+- **What is saved:** the last verified map answer (certificates, position and
+  radius, when it arrived, over which connection, the signed map-head time),
+  and every realm record fetched over an onboarding session as its signed
+  bytes. Records are re-verified (signature, federation, realm, expiry) every
+  time they are used, so a tampered store yields nothing.
+- **When it is used:** the answer is at most 24 h old, and among its
+  certificates for the SSID, valid now and covering the current position, one
+  registers an enterprise network. All applicable certificates for the SSID
+  are used, so a mismatch in advertised security still gives CONFLICT. If a
+  visitor's record is missing, GECKO falls back to onboarding where the network
+  supports it, and blocks otherwise.
+- **Why 24 h:** against an active attacker a saved answer is hardly weaker than
+  a fresh one (map-head freshness is open either way). The limit covers honest
+  changes such as a rotated server certificate or a revoked registration.
+- **Effect:** enterprise networks without GECKO onboarding (a real eduroam AP)
+  become joinable with pinned credentials, as long as GECKO looked up the place
+  recently over another connection. If the map server can't be reached, the
+  home list shows the saved answer, marked as saved. A failed proof is never
+  replaced by saved data.
+- **Transparency:** every verdict's details say where its data came from and
+  when ("Data from"). Settings > Saved GECKO data lists the saved answer and
+  records and deletes them, together with verdicts and History. Accounts and
+  installed profiles stay.
+
+## D22. The lab has its own federation, `eduroam-lab`
+The lab site certificate and the Home University realm record used to name the
+federation `eduroam`. GECKO then treated the made-up `homeuni.test` as a member
+of real eduroam: at ETH (registered with federation `eduroam`), the lab account
+`alice@homeuni.test` matched as a visitor, and GECKO installed a profile for
+the real `eduroam` pinned to the lab server. Nothing leaked, since the pin
+would have stopped the handshake, but a lab account must never be offered at a
+production network. The lab now uses `eduroam-lab` everywhere: the site
+certificate `eduroam-lab-sp` (re-registered), the record
+`/v1/realm/eduroam-lab/homeuni.test` (re-signed; the `eduroam/` copy was
+deleted). The `govroam` record stays as the second federation for the scoping
+tests. A record the app saved before the rename is still validly signed for
+`eduroam`, so delete the saved data on devices that used the lab before.

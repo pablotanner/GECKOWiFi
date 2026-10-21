@@ -160,6 +160,7 @@ fun EvidenceScreen(check: CheckDetail?, labMode: Boolean, onBack: () -> Unit) {
             }
 
             SectionCard("Map server answer") {
+                check.dataSource?.let { StackedValue("Data from", it) }
                 if (result.certificateCount != null) {
                     // Only a response that passed every check carries this metadata
                     // (GeckoClient throws before Success otherwise), so "Valid" is not assumed.

@@ -149,9 +149,9 @@ class AuthenticatedEapPinsTest {
      */
     @Test
     fun labSignedRecord_verifiesAgainstThePinnedKey() {
-        val file = File("../lab-secrets/realm/signed/eduroam/homeuni.test.bin")
+        val file = File("../lab-secrets/realm/signed/eduroam-lab/homeuni.test.bin")
         assumeTrue("no lab-signed record at ${file.absolutePath}", file.exists())
-        val result = AuthenticatedEapPins.fromSignedRealmRecord(file.readBytes(), "eduroam", "homeuni.test", PinnedRealmKey.publicKey, Instant.now())
+        val result = AuthenticatedEapPins.fromSignedRealmRecord(file.readBytes(), "eduroam-lab", "homeuni.test", PinnedRealmKey.publicKey, Instant.now())
         val pins = (result as? PinResult.Ok)?.pins ?: throw AssertionError("lab record rejected: $result")
         assertEquals(listOf("radius.homeuni.test"), pins.serverNames)
         assertEquals("GECKO-Lab-CA", pins.caCertificates.single().subjectX500Principal.name.substringAfter("CN=").substringBefore(','))

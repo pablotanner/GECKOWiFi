@@ -39,6 +39,16 @@ data class EnterpriseRun(
     val refused: String? = null
 )
 
+/**
+ * A saved registration that lets the flow skip onboarding (docs/eduroam-decisions.md,
+ * D21): the applicable certificates, where they came from, and the saved realm records.
+ */
+data class SavedInput(
+    val certificates: List<com.thesis.geckowifi.data.model.GeoCertificate>,
+    val source: com.thesis.geckowifi.eduroam.DataSource.Saved,
+    val record: (federation: String, realm: String) -> ByteArray?
+)
+
 /** The sign-in sheet is open for [target]; its wording comes from [prompt]. */
 data class SignInRequest(val target: EnterpriseTarget, val fix: LocationFix, val area: QueryArea, val prompt: SignInPrompt)
 
@@ -57,7 +67,11 @@ class EnterpriseController(
     private val accountStore: AccountStore,
     private val installer: EnterpriseProfileInstaller,
     private val onStep: (EnterpriseTarget, EnterpriseStep?) -> Unit,
-    private val onResult: (EnterpriseRun) -> Unit
+    private val onResult: (EnterpriseRun) -> Unit,
+    /** A usable saved registration for the target here and now, or null (D21). */
+    private val savedFor: (EnterpriseTarget, LocationFix, QueryArea) -> SavedInput? = { _, _, _ -> null },
+    /** Realm records fetched over an onboarding session, to be saved for next time. */
+    private val onRecordsFetched: (Map<Pair<String, String>, ByteArray>) -> Unit = {}
 ) {
     var signIn by mutableStateOf<SignInRequest?>(null)
         private set
@@ -74,9 +88,7 @@ class EnterpriseController(
         if (job?.isActive == true) return
         job = scope.launch {
             try {
-                val report = onboarding.check(target, area, accounts) { onStep(target, it) }
-                val decision = decide(report.siteResult, report.site, report.checks, accounts,
-                    accountStore.preferredAccount(preferenceKey(target, report.site)))
+                val (report, decision) = checkAndDecide(target, fix, area)
                 Log.i(TAG, "${target.ssid}: $decision")
                 when (decision) {
                     is Decision.Proceed -> connect(EnterpriseRun(target, fix, report, decision), decision)
@@ -88,6 +100,35 @@ class EnterpriseController(
                 onStep(target, null)
             }
         }
+    }
+
+    /**
+     * Phase 1 and the decision (D21): from a saved registration when there is a
+     * usable one, so no onboarding is needed; onboarding when there is none, or
+     * when the saved data lacks a visitor's realm record and the network
+     * supports GECKO onboarding.
+     */
+    private suspend fun checkAndDecide(target: EnterpriseTarget, fix: LocationFix, area: QueryArea): Pair<OnboardingReport, Decision> {
+        fun decideOn(r: OnboardingReport) =
+            decide(r.siteResult, r.site, r.checks, accounts, accountStore.preferredAccount(preferenceKey(target, r.site)))
+
+        val saved = savedFor(target, fix, area)
+        if (saved != null) {
+            onStep(target, EnterpriseStep.CHECK_NETWORK)
+            val report = onboarding.checkSaved(target, saved.certificates, accounts, saved.record, saved.source)
+            val decision = decideOn(report)
+            val missingRecord = decision is Decision.Block && !decision.hostile && report.checks.any { it is PinCheck.Missing }
+            if (!missingRecord || !onboarding.supports(target.ssid)) return report to decision
+        }
+        if (!onboarding.supports(target.ssid)) {
+            val report = OnboardingReport(null, null, null, emptyList())
+            return report to Decision.Block(
+                "GECKO has no recent registration for ${target.ssid} here, and this network doesn't support GECKO onboarding. " +
+                    "Connect to a network with internet so GECKO can look it up, then try again", hostile = false)
+        }
+        val report = onboarding.check(target, area, accounts) { onStep(target, it) }
+        if (report.fetchedRecords.isNotEmpty()) onRecordsFetched(report.fetchedRecords)
+        return report to decideOn(report)
     }
 
     /** From the sign-in sheet: save the account, then check again (its pins are only fetched over a new onboarding session). */

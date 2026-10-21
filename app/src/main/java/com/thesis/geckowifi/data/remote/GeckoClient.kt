@@ -53,7 +53,9 @@ sealed class GeckoResponse {
          * [GeckoClient]'s `fallbackClient` doc comment) - a real
          * security-relevant distinction, not decoration.
          */
-        val usedPreferredNetwork: Boolean = false
+        val usedPreferredNetwork: Boolean = false,
+        /** When the map server signed the map head this answer is proven against (epoch millis). */
+        val mapHeadMillis: Long? = null
     ) : GeckoResponse()
 
     /** Could not reach the server, or its response could not be parsed at all. Distinct from [ProofFailure]. */
@@ -244,7 +246,8 @@ class GeckoClient(
                         System.err.println("GeckoClient: dropping unparsable certificate ${certificateIdOf(bytes)}: ${e.message}")
                     }
                 }
-                GeckoResponse.Success(certificates, unparsedCount, usedPreferredNetwork)
+                GeckoResponse.Success(certificates, unparsedCount, usedPreferredNetwork,
+                    protoResponse.geopki_SignedMapHead?.Timestamp?.let { it / 1_000_000L })
             }
         } catch (e: Exception) {
             GeckoResponse.Unreachable(e.message ?: e::class.java.simpleName)

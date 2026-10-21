@@ -1,5 +1,5 @@
 {
-  "federation": "eduroam",
+  "federation": "eduroam-lab",
   "display_name": "Home University",
   "realm": "homeuni.test",
   "eap_method": "PEAP",

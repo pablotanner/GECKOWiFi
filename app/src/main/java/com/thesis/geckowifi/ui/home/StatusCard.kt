@@ -181,7 +181,8 @@ private fun lookupSummary(viewModel: VerificationViewModel): String {
         LookupStatus.UNTRUSTED -> "The map server's last answer failed verification."
         null -> "Looking up registrations."
     }
-    return "$lookup $accuracy"
+    val saved = viewModel.registrationsSavedAt?.let { " Saved list from ${com.thesis.geckowifi.ui.timeText(it)}." }.orEmpty()
+    return "$lookup$saved $accuracy"
 }
 
 private val stepLabels = mapOf(

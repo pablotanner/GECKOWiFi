@@ -14,7 +14,13 @@ import com.thesis.geckowifi.data.model.VerificationResult
 import com.thesis.geckowifi.data.model.VerificationState
 import com.thesis.geckowifi.data.remote.GeckoClient
 import com.thesis.geckowifi.discovery.Discovery
+import com.thesis.geckowifi.data.local.RegistrationCache
+import com.thesis.geckowifi.data.local.SavedLookup
+import com.thesis.geckowifi.data.local.SavedRealmRecord
 import com.thesis.geckowifi.data.local.StoredVerdict
+import com.thesis.geckowifi.eduroam.DataSource
+import com.thesis.geckowifi.eduroam.usableSavedRegistration
+import com.thesis.geckowifi.verification.coversLocation
 import com.thesis.geckowifi.data.local.VerdictStore
 import com.thesis.geckowifi.eduroam.AccountStore
 import com.thesis.geckowifi.eduroam.Decision
@@ -37,6 +43,7 @@ import com.thesis.geckowifi.verification.CertProbe
 import com.thesis.geckowifi.verification.DecisionCache
 import com.thesis.geckowifi.verification.GeoQueryEncoder
 import com.thesis.geckowifi.verification.HopVerdict
+import com.thesis.geckowifi.verification.LocationLookup
 import com.thesis.geckowifi.verification.LookupStatus
 import com.thesis.geckowifi.verification.VerificationEngine
 import com.thesis.geckowifi.verification.matchAdvertised
@@ -135,7 +142,9 @@ data class CheckDetail(
     /** Enterprise connection through GECKO's onboarding (null for every other check). */
     val enterprise: EnterpriseEvidence? = null,
     /** Restored from [VerdictStore] after a restart: a summary only, no hops. */
-    val restored: Boolean = false
+    val restored: Boolean = false,
+    /** Where the registration data behind this verdict came from and when, in words (D21). */
+    val dataSource: String? = null
 )
 
 /**
@@ -151,7 +160,7 @@ class VerificationViewModel(
     private val networkObserver: NetworkObserver,
     private val locationProvider: LocationProvider,
     private val certProbe: CertProbe,
-    decisionCache: DecisionCache,
+    private val decisionCache: DecisionCache,
     geoQueryEncoder: GeoQueryEncoder,
     private val historyStore: HistoryStore,
     private val trustPreferences: TrustPreferenceStore,
@@ -161,7 +170,8 @@ class VerificationViewModel(
     enterpriseOnboarding: EnterpriseOnboarding? = null,
     accountStore: AccountStore? = null,
     profileInstaller: EnterpriseProfileInstaller? = null,
-    private val verdictStore: VerdictStore? = null
+    private val verdictStore: VerdictStore? = null,
+    private val registrationCache: RegistrationCache? = null
 ) : ViewModel() {
 
     /**
@@ -172,8 +182,24 @@ class VerificationViewModel(
         if (enterpriseOnboarding != null && accountStore != null && profileInstaller != null) EnterpriseController(
             viewModelScope, enterpriseOnboarding, accountStore, profileInstaller,
             onStep = { target, step -> enterpriseStep(target, step) },
-            onResult = { recordEnterprise(it) }
+            onResult = { recordEnterprise(it) },
+            savedFor = { target, fix, area -> savedInputFor(target.ssid, fix, area.radiusMeters) },
+            onRecordsFetched = { saveRealmRecords(it) }
         ) else null
+
+    /**
+     * The last verified map answer, kept across restarts (D21): what the
+     * "Saved GECKO data" screen shows, and what lets an enterprise network be
+     * joined without onboarding.
+     */
+    var savedLookup by mutableStateOf(registrationCache?.lookup())
+        private set
+    var savedRealmRecords by mutableStateOf(registrationCache?.realmRecords().orEmpty())
+        private set
+
+    /** Non-null while [registeredHere] shows the saved answer (no live one): when it was fetched. */
+    var registrationsSavedAt by mutableStateOf<Long?>(null)
+        private set
 
     /** SSID of the Wi-Fi the device itself is on (not the app's own temporary joins), or null. */
     var deviceSsid by mutableStateOf<String?>(null)
@@ -356,8 +382,7 @@ class VerificationViewModel(
                     altitude = null,
                     radiusMeters = effectiveRadius(fix)
                 )
-                registeredHere = lookup.certificates
-                certLookup = lookup.status
+                applyLookup(lookup, fix, viaSsid = deviceSsid)
             }
             isRefreshing = false
         }
@@ -400,8 +425,90 @@ class VerificationViewModel(
     fun tapActionFor(network: ScannedNetwork): TapAction = when {
         network !is ScannedNetwork.Real -> TapAction.CHECK
         network.isOpen -> TapAction.CHECK
-        network.isEnterprise && enterprise?.supports(network.ssid) == true -> TapAction.ENTERPRISE
+        network.isEnterprise && enterprise != null &&
+            (enterprise.supports(network.ssid) || hasUsableSavedRegistration(network.ssid)) -> TapAction.ENTERPRISE
         else -> TapAction.ANDROID_SETTINGS
+    }
+
+    /** Whether a fresh saved registration lets GECKO sign in to [ssid] here without onboarding (D21). */
+    fun hasUsableSavedRegistration(ssid: String): Boolean {
+        val fix = location ?: return false
+        return savedInputFor(ssid, fix, effectiveRadius(fix)) != null
+    }
+
+    private fun savedInputFor(ssid: String, fix: LocationFix, radiusMeters: Int): SavedInput? {
+        val saved = savedLookup ?: return null
+        val certificates = usableSavedRegistration(saved, ssid, fix.latitude, fix.longitude, radiusMeters, java.time.Instant.now())
+            ?: return null
+        val records = savedRealmRecords
+        return SavedInput(certificates, DataSource.Saved(saved.fetchedAt, saved.viaDescription())) { federation, realm ->
+            records.firstOrNull { it.federation.equals(federation, true) && it.realm.equals(realm, true) }
+                ?.let { java.util.Base64.getDecoder().decode(it.signedBase64) }
+        }
+    }
+
+    private fun saveRealmRecords(records: Map<Pair<String, String>, ByteArray>) {
+        val cache = registrationCache ?: return
+        val now = System.currentTimeMillis()
+        records.forEach { (key, bytes) ->
+            cache.saveRealmRecord(SavedRealmRecord(key.first, key.second, now,
+                java.util.Base64.getEncoder().encodeToString(bytes), via = "GECKO onboarding"))
+        }
+        savedRealmRecords = cache.realmRecords()
+    }
+
+    /**
+     * Shows [lookup] and saves it when it is a verified answer. When the map
+     * server isn't reachable (common on a WiFi-only device before joining), the
+     * saved answer stands in, marked as saved, if it is recent and covers this
+     * place. A failed proof is never papered over with saved data.
+     */
+    private fun applyLookup(lookup: LocationLookup, fix: LocationFix, viaSsid: String?) {
+        if (lookup.status == LookupStatus.OK) {
+            registeredHere = lookup.certificates
+            certLookup = LookupStatus.OK
+            registrationsSavedAt = null
+            val saved = SavedLookup(
+                fetchedAt = System.currentTimeMillis(), lat = fix.latitude, lng = fix.longitude,
+                radiusMeters = effectiveRadius(fix), route = boundRoute.label(),
+                viaSsid = viaSsid.takeIf { boundRoute == QueryRoute.JOINED_WIFI || boundRoute == QueryRoute.DEFAULT_ROUTE },
+                mapHeadMillis = lookup.mapHeadMillis, certificates = lookup.certificates
+            )
+            registrationCache?.saveLookup(saved)
+            savedLookup = saved
+            return
+        }
+        val saved = savedLookup
+        val now = java.time.Instant.now()
+        if (lookup.status == LookupStatus.UNREACHABLE && saved != null &&
+            java.time.Duration.between(java.time.Instant.ofEpochMilli(saved.fetchedAt), now) <= com.thesis.geckowifi.eduroam.SAVED_REGISTRATION_MAX_AGE
+        ) {
+            registeredHere = saved.certificates.filter { it.isValidAt(now) && it.coversLocation(fix.latitude, fix.longitude, effectiveRadius(fix)) }
+            certLookup = LookupStatus.OK
+            registrationsSavedAt = saved.fetchedAt
+            return
+        }
+        registeredHere = lookup.certificates
+        certLookup = lookup.status
+        registrationsSavedAt = null
+    }
+
+    /**
+     * Forgets everything GECKO saved (D21): registrations, realm records,
+     * verdicts and History. Accounts and the Wi-Fi profiles GECKO installed stay.
+     */
+    fun clearSavedData() {
+        registrationCache?.clear()
+        verdictStore?.clear()
+        historyStore.clear()
+        decisionCache.invalidateAll()
+        savedLookup = null
+        savedRealmRecords = emptyList()
+        registrationsSavedAt = null
+        registeredHere = emptyList()
+        certLookup = null
+        checks = emptyList()
+        current = null
     }
 
     /** The one entry point for the UI: joins and checks [network]. */
@@ -607,8 +714,7 @@ class VerificationViewModel(
                 rebindGeckoClient()
                 // The startup query ran before any network was joined; redo it now the server is reachable.
                 engine.registeredHere(fix.latitude, fix.longitude, null, effectiveRadius(fix)).let {
-                    registeredHere = it.certificates
-                    certLookup = it.status
+                    applyLookup(it, fix, viaSsid = network.ssid)
                 }
 
                 step(network, steps, CheckStep.PORTAL)
@@ -759,10 +865,18 @@ class VerificationViewModel(
             },
             timings = run.report.timings.map { it.first.name to it.second }
         )
+        val source = when (val src = run.report.source) {
+            DataSource.Onboarding -> "Fetched live over GECKO's check connection to ${run.target.ssid}"
+            is DataSource.Saved -> "Saved registration from ${timeText(src.fetchedAt)}, fetched over ${src.via}"
+        }
         publish(run.target.ssid, run.target.bssid, run.target.bssid ?: run.target.ssid, result, run.fix,
-            modeDescription = "Enterprise network: GECKO onboarding, then a profile pinned to the verified login server",
+            modeDescription = when (run.report.source) {
+                DataSource.Onboarding -> "Enterprise network: GECKO onboarding, then a profile pinned to the verified login server"
+                is DataSource.Saved -> "Enterprise network: saved registration (no onboarding), then a profile pinned to the verified login server"
+            },
             failure = failure, isEnterprise = true, enterprise = evidence,
-            queryRoute = if (site?.certificateCount != null) QueryRoute.JOINED_WIFI else null)
+            queryRoute = if (site?.certificateCount != null) QueryRoute.JOINED_WIFI else null,
+            dataSource = source)
     }
 
     private fun publish(
@@ -778,7 +892,8 @@ class VerificationViewModel(
         isDemo: Boolean = false,
         isEnterprise: Boolean = false,
         enterprise: EnterpriseEvidence? = null,
-        queryRoute: QueryRoute? = null
+        queryRoute: QueryRoute? = null,
+        dataSource: String? = null
     ) {
         historyStore.record(networkKey, ssid, result, fix.latitude, fix.longitude)
         val detail = CheckDetail(
@@ -802,7 +917,11 @@ class VerificationViewModel(
                 false -> QueryRoute.DEFAULT_ROUTE
                 null -> null
             },
-            enterprise = enterprise
+            enterprise = enterprise,
+            dataSource = dataSource ?: result.certificateCount?.let {
+                "Fetched live at ${timeText(result.timestamp)} over ${boundRoute.label()}" +
+                    (ssid?.takeIf { boundRoute == QueryRoute.JOINED_WIFI }?.let { " ($it)" } ?: "")
+            }
         )
         if (ssid != null && !isDemo) verdictStore?.put(detail.toStoredVerdict())
         checks = listOf(detail) + checks
@@ -832,5 +951,25 @@ private fun StoredVerdict.toCheckDetail() = CheckDetail(
     failure = failure?.let { runCatching { CheckFailure.valueOf(it) }.getOrNull() },
     isEnterprise = isEnterprise,
     enterprise = if (isEnterprise) EnterpriseEvidence(account = account, serverNames = serverNames) else null,
-    restored = true
+    restored = true,
+    dataSource = "Checked ${timeText(timestamp)} (saved verdict from an earlier session)"
 )
+
+/** How a query went out, in words. */
+fun QueryRoute.label(): String = when (this) {
+    QueryRoute.MOBILE_DATA -> "Mobile data"
+    QueryRoute.JOINED_WIFI -> "Wi-Fi"
+    QueryRoute.DEFAULT_ROUTE -> "Default connection"
+}
+
+/** "Wi-Fi (GeckoTest)" / "Mobile data". */
+fun SavedLookup.viaDescription(): String = route + (viaSsid?.let { " ($it)" } ?: "")
+
+/** Local time of day, with the date when it isn't today. */
+fun timeText(epochMillis: Long): String {
+    val zone = java.time.ZoneId.systemDefault()
+    val at = java.time.Instant.ofEpochMilli(epochMillis).atZone(zone)
+    val today = java.time.LocalDate.now(zone)
+    val pattern = if (at.toLocalDate() == today) "HH:mm" else "d MMM, HH:mm"
+    return at.format(java.time.format.DateTimeFormatter.ofPattern(pattern))
+}

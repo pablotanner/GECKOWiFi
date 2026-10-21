@@ -9,6 +9,8 @@ import com.thesis.geckowifi.data.local.SharedPrefsTrustPreferenceStore
 import com.thesis.geckowifi.data.local.PortalCheckLog
 import com.thesis.geckowifi.data.local.TrustPreferenceStore
 import com.thesis.geckowifi.data.remote.GeckoClient
+import com.thesis.geckowifi.data.local.RegistrationCache
+import com.thesis.geckowifi.data.local.SharedPrefsRegistrationCache
 import com.thesis.geckowifi.data.local.SharedPrefsVerdictStore
 import com.thesis.geckowifi.data.local.VerdictStore
 import com.thesis.geckowifi.eduroam.AccountStore
@@ -57,6 +59,10 @@ object AppModule {
         KeystoreAccountStore(appContext.getSharedPreferences("gecko_eduroam", Context.MODE_PRIVATE))
     }
 
+    val registrationCache: RegistrationCache by lazy {
+        SharedPrefsRegistrationCache(appContext.getSharedPreferences("gecko_registrations", Context.MODE_PRIVATE))
+    }
+
     val verdictStore: VerdictStore by lazy {
         SharedPrefsVerdictStore(appContext.getSharedPreferences("gecko_verdicts", Context.MODE_PRIVATE))
     }
@@ -94,7 +100,8 @@ object AppModule {
                 enterpriseOnboarding = enterpriseOnboarding,
                 accountStore = accountStore,
                 profileInstaller = profileInstaller,
-                verdictStore = verdictStore
+                verdictStore = verdictStore,
+                registrationCache = registrationCache
             )
         }
     }

@@ -13,7 +13,14 @@ enum class LookupStatus {
 }
 
 /** Result of [VerificationEngine.registeredHere]: the status plus any certificates found. */
-data class LocationLookup(val status: LookupStatus, val certificates: List<GeoCertificate>)
+data class LocationLookup(
+    val status: LookupStatus,
+    val certificates: List<GeoCertificate>,
+    /** When the map head of the answer was signed (epoch millis); null without a verified answer. */
+    val mapHeadMillis: Long? = null,
+    /** Whether the query went over the network the client was bound to. */
+    val usedPreferredNetwork: Boolean? = null
+)
 
 /**
  * Result of [VerificationEngine.checkAdvertisedSite]: the site verdict plus the

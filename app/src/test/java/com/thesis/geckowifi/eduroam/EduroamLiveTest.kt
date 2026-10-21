@@ -49,16 +49,16 @@ class EduroamLiveTest {
     fun realmEndpoint_servesAVerifiableRecord() = runTest {
         assumeTrue("realm server not reachable", reachable(1235))
         val client = RealmRecordClient(baseUrl = "http://192.168.137.1:1235", network = null)
-        val fetched = client.fetch("eduroam", "homeuni.test")
+        val fetched = client.fetch("eduroam-lab", "homeuni.test")
         val bytes = (fetched as? RealmFetch.Fetched)?.bytes ?: throw AssertionError("fetch: $fetched")
-        val pins = (AuthenticatedEapPins.fromSignedRealmRecord(bytes, "eduroam", "homeuni.test") as? PinResult.Ok)?.pins
+        val pins = (AuthenticatedEapPins.fromSignedRealmRecord(bytes, "eduroam-lab", "homeuni.test") as? PinResult.Ok)?.pins
             ?: throw AssertionError("record rejected")
         assertEquals(listOf("radius.homeuni.test"), pins.serverNames)
-        assertEquals(RealmFetch.NotFound, client.fetch("eduroam", "other.test"))
-        // Same realm, other federation: a different binding, and not valid at an eduroam site.
+        assertEquals(RealmFetch.NotFound, client.fetch("eduroam-lab", "other.test"))
+        // Same realm, other federation: a different binding, and not valid at an eduroam-lab site.
         val gov = (client.fetch("govroam", "homeuni.test") as RealmFetch.Fetched).bytes
         assertEquals(listOf("radius-gov.homeuni.test"),
             (AuthenticatedEapPins.fromSignedRealmRecord(gov, "govroam", "homeuni.test") as PinResult.Ok).pins.serverNames)
-        assertTrue(AuthenticatedEapPins.fromSignedRealmRecord(gov, "eduroam", "homeuni.test") is PinResult.Rejected)
+        assertTrue(AuthenticatedEapPins.fromSignedRealmRecord(gov, "eduroam-lab", "homeuni.test") is PinResult.Rejected)
     }
 }

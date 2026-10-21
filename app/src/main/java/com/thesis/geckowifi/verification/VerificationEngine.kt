@@ -54,7 +54,8 @@ class VerificationEngine(
         val bitStrings = encoder.encodeQuery(lat, lng, radiusMeters)
         val (minAlt, maxAlt) = encoder.altitudeBounds(altitude, radiusMeters)
         return when (val response = gecko.queryLocation(bitStrings, minAlt, maxAlt)) {
-            is GeckoResponse.Success -> LocationLookup(LookupStatus.OK, response.validCertificates(lat, lng, radiusMeters))
+            is GeckoResponse.Success -> LocationLookup(LookupStatus.OK, response.validCertificates(lat, lng, radiusMeters),
+                response.mapHeadMillis, response.usedPreferredNetwork)
             // The caller must tell "nothing registered here" apart from "couldn't
             // get a trustworthy answer" - an empty list alone can't. On a WiFi-only
             // device this query is usually unreachable until a network is joined.

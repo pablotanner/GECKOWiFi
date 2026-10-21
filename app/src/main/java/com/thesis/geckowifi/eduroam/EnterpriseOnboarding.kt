@@ -38,7 +38,11 @@ data class OnboardingReport(
     val site: EnterpriseSite?,
     val checks: List<PinCheck>,
     /** Milliseconds since the start at which each step began. */
-    val timings: List<Pair<EnterpriseStep, Long>> = emptyList()
+    val timings: List<Pair<EnterpriseStep, Long>> = emptyList(),
+    /** Onboarding session, or a saved registration (D21). */
+    val source: DataSource = DataSource.Onboarding,
+    /** Signed realm records fetched over the session, (federation, realm) to bytes, for saving. */
+    val fetchedRecords: Map<Pair<String, String>, ByteArray> = emptyMap()
 )
 
 data class ConnectOutcome(val install: InstallOutcome, val connected: Boolean?)
@@ -68,6 +72,15 @@ class EnterpriseOnboarding(
     private val onboardingTimeoutMs: Int = 60_000,
     private val connectTimeoutMs: Long = 60_000
 ) {
+    /** Phase 1 from a saved registration, without onboarding (D21); see [checkSaved]. */
+    fun checkSaved(
+        target: EnterpriseTarget,
+        certificates: List<com.thesis.geckowifi.data.model.GeoCertificate>,
+        accounts: List<AccountInfo>,
+        savedRecord: (federation: String, realm: String) -> ByteArray?,
+        source: DataSource.Saved
+    ): OnboardingReport = checkSaved(target, certificates, accounts, savedRecord, source, realmKey(), clock())
+
     /** Whether this prototype may onboard on [ssid] at all (lab guard, D15). */
     fun supports(ssid: String): Boolean = ssid in OnboardingIdentity.LAB_SSIDS
 
@@ -94,18 +107,24 @@ class EnterpriseOnboarding(
             step(EnterpriseStep.CONFIRM_SERVER)
             val matches = site?.let { matchAccounts(it, accounts) }.orEmpty()
             val client = realmClientFor(network)
+            val fetched = java.util.concurrent.ConcurrentHashMap<Pair<String, String>, ByteArray>()
             val checks = coroutineScope {
-                matches.map { match -> async { pinsFor(match, site!!, client) } }.awaitAll()
+                matches.map { match -> async { pinsFor(match, site!!, client, fetched) } }.awaitAll()
             }
-            Triple(siteCheck.result, site, checks)
+            OnboardingReport(null, siteCheck.result, site, checks, fetchedRecords = fetched.toMap())
         }
         return when (session) {
             is OnboardingOutcome.Failed -> OnboardingReport(session.reason, null, null, emptyList(), timings)
-            is OnboardingOutcome.Done -> session.value.let { (result, site, checks) -> OnboardingReport(null, result, site, checks, timings.toList()) }
+            is OnboardingOutcome.Done -> session.value.copy(timings = timings.toList())
         }
     }
 
-    private suspend fun pinsFor(match: AccountMatch, site: EnterpriseSite, client: RealmRecordClient): PinCheck {
+    private suspend fun pinsFor(
+        match: AccountMatch,
+        site: EnterpriseSite,
+        client: RealmRecordClient,
+        fetched: MutableMap<Pair<String, String>, ByteArray>
+    ): PinCheck {
         val realm = match.account.realm!!
         return when (match) {
             is AccountMatch.Local -> when (val r = site.localPins(realm)) {
@@ -115,7 +134,7 @@ class EnterpriseOnboarding(
             }
             is AccountMatch.Visitor -> when (val f = client.fetch(match.federation, realm)) {
                 is RealmFetch.Fetched -> when (val r = AuthenticatedEapPins.fromSignedRealmRecord(f.bytes, match.federation, realm, realmKey(), clock())) {
-                    is PinResult.Ok -> PinCheck.Pinned(match, r.pins)
+                    is PinResult.Ok -> PinCheck.Pinned(match, r.pins).also { fetched[match.federation to realm] = f.bytes }
                     is PinResult.Rejected -> PinCheck.Rejected(match, r.reason, hostile = true)
                 }
                 RealmFetch.NotFound -> PinCheck.Missing(match, "no record for $realm in ${match.federation}")

@@ -6,7 +6,7 @@
 // record because its signature verifies against a pinned key, not because of
 // where it came from; the server never holds the signing key.
 //
-//	go run . sign  -key ../../lab-secrets/realm/realm-signing.key -in records/eduroam/homeuni.test.json -out ../../lab-secrets/realm/signed
+//	go run . sign  -key ../../lab-secrets/realm/realm-signing.key -in records/eduroam-lab/homeuni.test.json -out ../../lab-secrets/realm/signed
 //	go run . serve -addr 192.168.137.1:1235 -dir ../../lab-secrets/realm/signed
 //
 // GET /v1/realm/<federation>/<realm> returns a binary SignedRealmRecord
