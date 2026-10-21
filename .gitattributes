@@ -1,2 +1,7 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Shell scripts and files copied onto the routers run under bash/ash: always LF,
+# also in a Windows checkout (CRLF broke run.sh after the first commit).
+*.sh text eol=lf
+lab/eduroam/openwrt/** text eol=lf

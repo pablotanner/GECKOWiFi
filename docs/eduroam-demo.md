@@ -14,10 +14,10 @@ made while implementing it is in [eduroam-decisions.md](eduroam-decisions.md).
 | 0 Backups, inventory | Done. WSL distro exported before installing FreeRADIUS; router archives in `lab-secrets/router-backups/`, configs in `lab-configs/` |
 | 1 Test PKI | Done, `lab/eduroam/make-pki.sh` → `lab-secrets/` |
 | 2 FreeRADIUS | Done: legit + attacker B1 + attacker B2 in WSL, all 11 `eapol_test` checks pass, relay path tested |
-| 3 Legit SP | **Done on Router B** (vanilla OpenWrt): WPA2-Enterprise + dynamic VLAN walled garden, scene 1 and the walled-garden negative test confirmed on hardware (below). Router A still on GL firmware |
+| 3 Legit SP | **Done: Router A** (vanilla OpenWrt, `sp-legit.sh`): WPA2-Enterprise + dynamic VLAN walled garden. Scene 1 confirmed on A (2026-10-21); first developed and fully tested on B, including the walled-garden negative test (below) |
 | 4 Map server side | Done: `eduroam-lab-sp` inserted, realm endpoint serving, live JVM tests pass |
 | 5 App | Done and unit-tested; on the Tab: onboarding request and pinned suggestion accepted by One UI 8.5. End-to-end needs phase 3 |
-| 6 Router B | B flashed to vanilla OpenWrt; **B1 done**: scenes 2 and 4 confirmed on hardware (2026-10-20, see below). B2 still to set up |
+| 6 Router B | Vanilla OpenWrt, now only `GeckoTest` (attacker portal); `eduroam_b1` kept disabled. Scenes 2 and 4 confirmed earlier against B1 (2026-10-20); to repeat with A as the legit SP. B2 (scene 3) still to set up |
 | 7 Demo script, evidence | This document; B1 evidence reproducible without hardware (`b1-evidence.sh`) |
 
 ## Components
@@ -198,6 +198,27 @@ unpinned → alice's MSCHAPv2 exchange captured). Verified 2026-10-20.
 Logs: `adb logcat -s OnboardingSession EduroamOnboarding EduroamInstaller GeckoClient`.
 
 ## Hardware results
+
+**Current lab roles (2026-10-21):** Router A = legit eduroam SP (`eduroam-lab`) +
+genuine `GeckoTest` portal; Router B = `GeckoTest` attacker portal, attacker eduroam
+sections disabled. Both on vanilla OpenWrt 25.12.6.
+
+**2026-10-21, Router A as the legit SP:** scene 1 again, all steps, connected.
+RADIUS: `gecko@gecko.sp.test` → VLAN 99 / Session-Timeout 60, then
+`anonymous@homeuni.test` (alice) without VLAN. A: `RADIUS: VLAN ID 99`,
+`AP-STA-CONNECTED ... vlanid=99`, walled garden 2 connections to map/realm
+allowed, 2 packets rejected, alice in `edu` (10.98.0.14) 6 s after onboarding.
+Before the test the tablet had already joined A on its own with the profile
+installed on B the day before: one pinned profile works on every AP of the
+network. Evidence: `lab-secrets/evidence/scene1-routerA-legit-20261021.log`.
+
+Lab issues found on the way (fixed): openNDS 10.3.1 on A rejected replies to
+A's own connections into its LAN, so `ssh mango-b` failed
+(`/usr/sbin/gecko-opennds-fix`); routers and laptop on one USB hub caused link
+drops on A's ports (routers now on the hub alone). The laptop-A link still
+drops about once a minute (cable or USB adapter, under investigation); the
+demo tolerates it, SSH sometimes needs a retry.
+
 
 **2026-10-20, Router B as the legit SP** (`lab/eduroam/openwrt/sp-legit.sh`, legit RADIUS :1812):
 

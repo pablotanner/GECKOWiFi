@@ -1,12 +1,11 @@
 
 config system
-	option timezone 'UTC'
-	option log_size '64'
+	option hostname 'mango-a'
+	option timezone 'CET-1CEST,M3.5.0,M10.5.0/3'
+	option zonename 'Europe/Zurich'
+	option ttylogin '0'
+	option log_size '128'
 	option urandom_seed '0'
-	option hostname 'GL-MT300N-V2'
-	option compat_version '1.0'
-	option ttylogin '1'
-	option cronloglevel '10'
 
 config timeserver 'ntp'
 	option enabled '1'
@@ -21,7 +20,7 @@ config led 'led_wifi_led'
 	option sysfs 'red:wlan'
 	option trigger 'netdev'
 	option mode 'link tx rx'
-	option dev 'ra0'
+	option dev 'phy0-ap0'
 
 config led 'led_wan'
 	option name 'wan'

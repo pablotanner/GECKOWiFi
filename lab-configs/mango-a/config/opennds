@@ -18,3 +18,4 @@ config opennds
 	option dhcp_default_url_enable '0'
 	list trustedmac '94:83:c4:97:c2:47'
 
+	option faskey '41ab5e9efd3df8b0658020b1374a45d71fc7dab2230cab673c9cd5314826c98e'

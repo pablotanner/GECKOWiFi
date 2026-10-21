@@ -140,3 +140,9 @@ RADIUS/EAP/dynamic VLAN, LuCI, openNDS), first-boot config restored by
 `sysupgrade -f`. Details, checks and lessons in
 [flashing-openwrt.md](flashing-openwrt.md). A stays on GL firmware until B has
 shown WPA2-Enterprise with the tablet.
+
+## D18. Final lab roles: A legit, B attacker
+After proving the legit SP on B, it moved to Router A (flashed to vanilla
+OpenWrt too), matching the lab's existing roles (A genuine, B evil twin; B
+hangs behind A, so it can block the map server for its own clients in scene 3).
+B keeps its attacker sections, disabled while idle.

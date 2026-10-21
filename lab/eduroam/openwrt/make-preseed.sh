@@ -27,6 +27,7 @@ sed -i "s/@ROOT_PASSWORD@/$password/g" "$stage/etc/uci-defaults/99-gecko-lab"
 # A Windows checkout (.gitattributes text=auto) may have CRLF; ash would choke on it.
 find "$stage" -type f -exec sed -i 's/\r$//' {} +
 chmod 755 "$stage/etc/uci-defaults/99-gecko-lab"
+[ -d "$stage/usr/sbin" ] && chmod 755 "$stage"/usr/sbin/*
 
 mkdir -p "$stage/etc/dropbear" "$stage/etc/config"
 ssh -o BatchMode=yes "$router" "cat /etc/dropbear/authorized_keys" > "$stage/etc/dropbear/authorized_keys"

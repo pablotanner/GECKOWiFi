@@ -152,7 +152,16 @@ Lessons (all fixed in the tooling, so A won't hit them):
    from the legit RADIUS (`Tunnel-Private-Group-Id = 99`) arrive.
 4. Snapshot: `bash lab/eduroam/pull-router-configs.sh mango-b`, commit, `lab-configs/CHANGELOG.md`.
 
-## Router A (later)
+## Router A: done (2026-10-20)
+
+Flashed the same way (image with `dnsmasq-full` in addition; first-boot config
+`lab/eduroam/openwrt/mango-a`), back after 282 s with WAN, LAN, B's
+reservation, DNS overrides and the genuine portal as under GL. New lesson:
+**openNDS 10.3.1 has no established/related rule in its client-to-router chain**,
+so A could not reach B (SSH, ping) - fixed by `gecko-opennds-fix` (in A's
+first-boot config now). The eduroam SP role came afterwards with `sp-legit.sh`.
+
+## Router A (notes from before the flash)
 
 Same image; the preseed needs more (static WAN `192.168.137.50`, LAN
 `192.168.8.1`, DHCP reservation for B, openNDS as the genuine portal with

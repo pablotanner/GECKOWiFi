@@ -1,0 +1,80 @@
+#!/bin/sh
+# First boot of vanilla OpenWrt on Router A (docs/flashing-openwrt.md):
+# recreates what A did under GL firmware - uplink via the laptop's internet
+# sharing, genuine captive portal (openNDS) for GeckoTest, DHCP reservation
+# for Router B - so `ssh mango-a`, B behind A and lab/scenarios/*.ps1 keep
+# working. Restored by `sysupgrade -f`, runs once, deleted by OpenWrt afterwards.
+# The eduroam SP role is added afterwards with lab/eduroam/openwrt/sp-legit.sh.
+
+uci set system.@system[0].hostname='mango-a'
+uci set system.@system[0].zonename='Europe/Zurich'
+uci set system.@system[0].timezone='CET-1CEST,M3.5.0,M10.5.0/3'
+
+# WAN: static on the laptop's ICS segment (laptop = 192.168.137.1).
+uci set network.wan.proto='static'
+uci set network.wan.ipaddr='192.168.137.50/24'
+uci -q delete network.wan.netmask
+uci set network.wan.gateway='192.168.137.1'
+uci -q delete network.wan.dns
+uci add_list network.wan.dns='192.168.137.1'
+uci set network.wan.peerdns='0'
+# 25.12 writes the LAN address in CIDR form; without /24 it becomes a /32.
+uci set network.lan.ipaddr='192.168.8.1/24'
+uci -q delete network.lan.netmask
+
+# DHCP as under GL, with Router B's reservation.
+uci set dhcp.lan.start='100'
+uci set dhcp.lan.limit='150'
+uci set dhcp.lan.leasetime='12h'
+uci set dhcp.mango_b=host
+uci set dhcp.mango_b.name='mango-b'
+uci set dhcp.mango_b.mac='94:83:C4:97:C2:47'
+uci set dhcp.mango_b.ip='192.168.8.115'
+
+# DNS overrides for the genuine portal (docs/lab-setup.md, "Captive portal").
+uci -q delete dhcp.@dnsmasq[0].address
+uci add_list dhcp.@dnsmasq[0].address='/gecko-a.lab/192.168.8.1'
+uci add_list dhcp.@dnsmasq[0].address='/portal.gecko-a.lab/192.168.137.10'
+uci add_list dhcp.@dnsmasq[0].address='/pay.gecko-pay.lab/192.168.137.10'
+uci add_list dhcp.@dnsmasq[0].address='/status.client/192.168.8.1'
+
+# SSH from the laptop's ICS subnet only, keys only.
+uci set dropbear.@dropbear[0].PasswordAuth='off'
+uci set dropbear.@dropbear[0].RootPasswordAuth='off'
+uci set firewall.gecko_ssh=rule
+uci set firewall.gecko_ssh.name='GECKO-SSH-from-laptop'
+uci set firewall.gecko_ssh.src='wan'
+uci set firewall.gecko_ssh.src_ip='192.168.137.0/24'
+uci set firewall.gecko_ssh.proto='tcp'
+uci set firewall.gecko_ssh.dest_port='22'
+uci set firewall.gecko_ssh.target='ACCEPT'
+
+# Wi-Fi as before: open GeckoTest on channel 1, low TX power (eduroam-brief.md 4.1).
+# The interface section is named wifi2g like under GL, which lab/scenarios use.
+[ -n "$(uci -q get wireless.radio0)" ] || wifi config
+uci -q rename wireless.default_radio0='wifi2g'
+uci set wireless.radio0.disabled='0'
+uci set wireless.radio0.channel='1'
+uci set wireless.radio0.htmode='HT20'
+uci set wireless.radio0.country='DE'
+uci set wireless.radio0.txpower='5'
+uci set wireless.wifi2g.ssid='GeckoTest'
+uci set wireless.wifi2g.encryption='none'
+uci set wireless.wifi2g.network='lan'
+uci set wireless.wifi2g.mode='ap'
+# Since 25.12 the generated interface section is disabled, not the radio.
+uci set wireless.wifi2g.disabled='0'
+# The Wi-Fi LED is generated for 'wlan0'; 25.12 names the interface phy0-ap0.
+uci -q set system.led_wifi_led.dev='phy0-ap0'
+
+uci commit
+
+# openNDS 10.3.1 rejects replies to the router's own connections to portal-LAN
+# clients (e.g. SSH to Router B); see /usr/sbin/gecko-opennds-fix.
+chmod +x /usr/sbin/gecko-opennds-fix
+/usr/sbin/gecko-opennds-fix --install
+
+# Root password for LuCI (SSH is keys only); value from lab-secrets, filled in by make-preseed.sh.
+printf '%s\n%s\n' '@ROOT_PASSWORD@' '@ROOT_PASSWORD@' | passwd root >/dev/null 2>&1
+
+exit 0

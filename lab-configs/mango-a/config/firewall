@@ -1,7 +1,7 @@
 
 config defaults
 	option syn_flood '1'
-	option input 'ACCEPT'
+	option input 'REJECT'
 	option output 'ACCEPT'
 	option forward 'REJECT'
 
@@ -16,12 +16,11 @@ config zone
 	option name 'wan'
 	list network 'wan'
 	list network 'wan6'
-	list network 'wwan'
+	option input 'REJECT'
 	option output 'ACCEPT'
-	option forward 'REJECT'
+	option forward 'DROP'
 	option masq '1'
 	option mtu_fix '1'
-	option input 'DROP'
 
 config forwarding
 	option src 'lan'
@@ -34,6 +33,14 @@ config rule
 	option dest_port '68'
 	option target 'ACCEPT'
 	option family 'ipv4'
+
+config rule
+	option name 'Allow-Ping'
+	option src 'wan'
+	option proto 'icmp'
+	option icmp_type 'echo-request'
+	option family 'ipv4'
+	option target 'ACCEPT'
 
 config rule
 	option name 'Allow-IGMP'
@@ -112,73 +119,49 @@ config rule
 	option proto 'udp'
 	option target 'ACCEPT'
 
-config include 'nat6'
-	option path '/etc/firewall.nat6'
-	option reload '1'
-
-config rule 'block_dns'
-	option name 'block_dns'
-	option src '*'
-	option dest_port '53'
-	option target 'REJECT'
-	option enabled '0'
-	option device 'br-*'
-
-config include 'gls2s'
-	option type 'script'
-	option path '/var/etc/gls2s.include'
-	option reload '1'
-
-config include 'glblock'
-	option type 'script'
-	option path '/usr/bin/gl_block.sh'
-	option reload '1'
-
-config zone
-	option name 'guest'
-	option network 'guest'
-	option forward 'REJECT'
-	option output 'ACCEPT'
-	option input 'REJECT'
-
-config forwarding
-	option src 'guest'
-	option dest 'wan'
-
-config rule
-	option name 'Allow-DHCP'
-	option src 'guest'
-	option target 'ACCEPT'
-	option proto 'udp'
-	option dest_port '67-68'
-
-config rule
-	option name 'Allow-DNS'
-	option src 'guest'
-	option target 'ACCEPT'
-	option proto 'tcp udp'
-	option dest_port '53'
-
-config include 'security'
-	option type 'script'
-	option path '/etc/firewall.security'
-	option reload '0'
-
-config include 'vpn_server_policy'
-	option type 'script'
-	option path '/etc/firewall.vpn_server_policy.sh'
-	option reload '1'
-	option enabled '1'
-
-config rule
-	option dest_port '22'
-	option proto 'tcp'
-	option name 'GL-Open TCP'
-	option target 'ACCEPT'
-	option src 'wan'
-	option enabled '1'
-
 config include 'opennds'
 	option type 'script'
 	option path '/usr/lib/opennds/restart.sh'
+
+config rule 'gecko_ssh'
+	option name 'GECKO-SSH-from-laptop'
+	option src 'wan'
+	option src_ip '192.168.137.0/24'
+	option proto 'tcp'
+	option dest_port '22'
+	option target 'ACCEPT'
+
+config zone 'edu'
+	option name 'edu'
+	list network 'edu'
+	option input 'ACCEPT'
+	option output 'ACCEPT'
+	option forward 'REJECT'
+
+config forwarding 'edu_wan'
+	option src 'edu'
+	option dest 'wan'
+
+config zone 'onboard'
+	option name 'onboard'
+	list network 'onboard'
+	option input 'REJECT'
+	option output 'ACCEPT'
+	option forward 'REJECT'
+
+config rule 'onboard_dhcp'
+	option name 'GECKO-onboard-DHCP'
+	option src 'onboard'
+	option proto 'udp'
+	option dest_port '67'
+	option target 'ACCEPT'
+
+config rule 'onboard_gecko'
+	option name 'GECKO-onboard-to-map'
+	option src 'onboard'
+	option dest 'wan'
+	option dest_ip '192.168.137.1'
+	option proto 'tcp'
+	option dest_port '1234 1235'
+	option target 'ACCEPT'
 

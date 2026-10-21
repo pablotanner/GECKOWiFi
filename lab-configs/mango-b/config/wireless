@@ -38,7 +38,7 @@ config wifi-iface 'eduroam_legit'
 	option auth_port '1812'
 	option auth_secret '<redacted, see lab-secrets/router-backups>'
 	option dynamic_vlan '1'
-	option disabled '0'
+	option disabled '1'
 
 config wifi-vlan 'onboard_vlan'
 	option name 'onb'
