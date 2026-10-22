@@ -111,6 +111,18 @@ Can the router reach the map server? (404 = reachable)
 ssh mango-a "curl -s -o /dev/null -w '%{http_code}\n' http://192.168.137.1:1234/ || echo FAIL" 
 ```
 
+Laptop can't even reach Routers (ssh mango-a)? 
+- Turn off Sharing ("Allow other network users to connect…") and then on again in 
+- Check ```powershell Get-NetIPAddress -InterfaceAlias 'Ethernet 4' -AddressFamily IPv4 | ft IPAddress,PrefixLength ```
+- If .1 is missing above: ```powershell New-NetIPAddress -InterfaceAlias 'Ethernet 4' -IPAddress 192.168.137.1 -PrefixLength 24```
+
+Finally, re-add addresses so portal can still run:
+```powershell
+New-NetIPAddress -InterfaceAlias 'Ethernet 4' -IPAddress 192.168.137.10 -PrefixLength 24
+New-NetIPAddress -InterfaceAlias 'Ethernet 4' -IPAddress 192.168.137.20 -PrefixLength 24 
+```
+
+
 ### GECKO App
 ```powershell
 ./gradlew installDeviceDebug                        # (re)install the app
