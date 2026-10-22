@@ -6,7 +6,9 @@ import com.thesis.geckowifi.R
 import gecko.realm.RealmRecord
 import gecko.realm.SignedRealmRecord
 import kotlinx.coroutines.runBlocking
+import android.os.Build
 import okio.ByteString.Companion.toByteString
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -54,6 +56,23 @@ class SuggestionProfileInstallerTest {
                 pins(), EnterpriseAccount("test", "alice@homeuni.test", "not-a-real-password"), TargetNetwork(ssid, federation = "eduroam"), installer
             )
             assertTrue("install outcome: $outcome", outcome is InstallOutcome.Installed)
+        } finally {
+            installer.remove(ssid)
+        }
+    }
+
+    /** The profile can be forgotten after an app restart: a new installer (new process state) still lists it. */
+    @Test
+    fun installedProfileIsListedAcrossInstancesAndGoneAfterRemove() = runBlocking {
+        val installer = SuggestionProfileInstaller(context)
+        try {
+            EnterpriseProfileBuilder.install(
+                pins(), EnterpriseAccount("test", "alice@homeuni.test", "not-a-real-password"), TargetNetwork(ssid, federation = "eduroam"), installer
+            )
+            assertTrue(ssid in installer.installedSsids())
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) assertTrue(ssid in SuggestionProfileInstaller(context).installedSsids())
+            SuggestionProfileInstaller(context).remove(ssid)
+            assertFalse(ssid in installer.installedSsids())
         } finally {
             installer.remove(ssid)
         }

@@ -31,7 +31,7 @@ class SuggestionProfileInstaller(context: Context) : EnterpriseProfileInstaller 
     private val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
     private val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
-    /** What this process added, for [remove] on API 29 (no [WifiManager.getNetworkSuggestions]). */
+    /** What this process added, by SSID, for [remove] and [installedSsids] on API 29 (no [WifiManager.getNetworkSuggestions]). */
     private val added = mutableMapOf<String, WifiNetworkSuggestion>()
 
     override suspend fun install(plan: ProfilePlan, password: String): InstallOutcome {
@@ -68,7 +68,7 @@ class SuggestionProfileInstaller(context: Context) : EnterpriseProfileInstaller 
         Log.i(TAG, "addNetworkSuggestions(${plan.ssid}) = $status")
         return when (status) {
             WifiManager.STATUS_NETWORK_SUGGESTIONS_SUCCESS -> {
-                added[plan.ssid.lowercase()] = suggestion
+                added[plan.ssid] = suggestion
                 InstallOutcome.Installed("suggested to Android; the first time, allow the app's suggested networks in the notification")
             }
             WifiManager.STATUS_NETWORK_SUGGESTIONS_ERROR_APP_DISALLOWED ->
@@ -79,13 +79,19 @@ class SuggestionProfileInstaller(context: Context) : EnterpriseProfileInstaller 
 
     override suspend fun remove(ssid: String) {
         val ours = buildList {
-            added.remove(ssid.lowercase())?.let(::add)
+            added.keys.filter { it.equals(ssid, ignoreCase = true) }.forEach { added.remove(it)?.let(::add) }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 addAll(wifi.networkSuggestions.filter { it.ssid?.removeSurrounding("\"").equals(ssid, ignoreCase = true) })
             }
         }.distinct()
         if (ours.isNotEmpty()) Log.i(TAG, "removeNetworkSuggestions($ssid) = ${wifi.removeNetworkSuggestions(ours)}")
     }
+
+    override fun installedSsids(): Set<String> =
+        // Android keeps an app's suggestions across restarts and returns them from API 30.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) wifi.networkSuggestions.mapNotNull { it.ssid?.removeSurrounding("\"") }.toSet()
+        // API 29 can't read them back: only what this process added (lost track of after a restart).
+        else added.keys.toSet()
 
     @SuppressLint("MissingPermission")
     override suspend fun awaitConnected(ssid: String, timeoutMs: Long): Boolean {

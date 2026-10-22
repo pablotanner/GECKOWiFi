@@ -16,6 +16,7 @@ class RecordingInstaller(private val outcome: InstallOutcome = InstallOutcome.In
     val installed = mutableListOf<Pair<ProfilePlan, String>>()
     override suspend fun install(plan: ProfilePlan, password: String): InstallOutcome = outcome.also { installed += plan to password }
     override suspend fun remove(ssid: String) = Unit
+    override fun installedSsids(): Set<String> = installed.map { it.first.ssid }.toSet()
     override suspend fun awaitConnected(ssid: String, timeoutMs: Long) = connects
 }
 

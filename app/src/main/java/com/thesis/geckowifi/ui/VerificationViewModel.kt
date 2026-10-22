@@ -300,7 +300,12 @@ class VerificationViewModel(
         // Verdicts from earlier sessions: History and the status card know them after a restart.
         checks = verdictStore?.all().orEmpty().map { it.toCheckDetail() }
         runCatching {
-            networkObserver.watchDeviceWifi { ssid -> viewModelScope.launch(Dispatchers.Main) { deviceSsid = ssid } }
+            networkObserver.watchDeviceWifi { ssid ->
+                viewModelScope.launch(Dispatchers.Main) {
+                    deviceSsid = ssid
+                    enterprise?.refreshInstalled()
+                }
+            }
         }
     }
 
@@ -575,6 +580,9 @@ class VerificationViewModel(
     fun noticeShown() {
         pendingNotice = null
     }
+
+    /** Whether GECKO installed a pinned profile for [ssid] that is still there. */
+    fun isSetUpByGecko(ssid: String): Boolean = enterprise?.isInstalled(ssid) == true
 
     /** Removes the pinned profile GECKO installed for [ssid]; the status card goes back to idle. */
     fun forgetEnterpriseNetwork(ssid: String) {

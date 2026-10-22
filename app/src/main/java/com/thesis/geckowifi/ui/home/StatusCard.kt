@@ -47,7 +47,6 @@ import com.thesis.geckowifi.ui.components.colors
 import com.thesis.geckowifi.ui.theme.MonoFontFamily
 import com.thesis.geckowifi.ui.theme.Radius
 import com.thesis.geckowifi.ui.theme.Space
-import com.thesis.geckowifi.data.model.VerificationState
 import com.thesis.geckowifi.ui.verdict.scopeNote
 import com.thesis.geckowifi.ui.verdict.Tone
 import com.thesis.geckowifi.ui.verdict.verdict
@@ -103,10 +102,14 @@ fun StatusCard(viewModel: VerificationViewModel, onOpenCheck: (String) -> Unit, 
                         onDetails = { onOpenCheck(s.check.id) },
                         onDisconnect = viewModel::disconnect,
                         onDismiss = viewModel::dismissCurrent,
-                        onForget = { s.check.ssid?.let(viewModel::forgetEnterpriseNetwork) },
+                        onForget = s.check.ssid?.takeIf(viewModel::isSetUpByGecko)?.let { ssid -> { viewModel.forgetEnterpriseNetwork(ssid) } },
                         onRetry = { viewModel.retry(s.check) }
                     )
-                    is CardState.Connected -> ConnectedContent(s.ssid, s.verdict, onDetails = { s.verdict?.let { onOpenCheck(it.id) } })
+                    is CardState.Connected -> ConnectedContent(
+                        s.ssid, s.verdict,
+                        onDetails = { s.verdict?.let { onOpenCheck(it.id) } },
+                        onForget = if (viewModel.isSetUpByGecko(s.ssid)) ({ viewModel.forgetEnterpriseNetwork(s.ssid) }) else null
+                    )
                 }
             }
         }
@@ -120,9 +123,12 @@ private sealed class CardState(val key: String) {
     data class Connected(val ssid: String, val verdict: CheckDetail?) : CardState("connected:$ssid:${verdict?.id}")
 }
 
-/** The device is on [ssid] (joined through Android or an earlier GECKO setup); [verdict] is GECKO's latest for it. */
+/**
+ * The device is on [ssid] (joined through Android or an earlier GECKO setup); [verdict] is GECKO's latest for it.
+ * [onForget] is non-null while GECKO's profile for [ssid] is installed: after "Done" or a restart, this is where it is removed.
+ */
 @Composable
-private fun ConnectedContent(ssid: String, verdict: CheckDetail?, onDetails: () -> Unit) {
+private fun ConnectedContent(ssid: String, verdict: CheckDetail?, onDetails: () -> Unit, onForget: (() -> Unit)?) {
     val v = verdict?.verdict()
     val colors = MaterialTheme.colorScheme
     Text("Connected to", style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant)
@@ -139,7 +145,16 @@ private fun ConnectedContent(ssid: String, verdict: CheckDetail?, onDetails: () 
             VerdictBadge(v.tone, v.label, v.icon)
         }
         Text(v.body, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = Space.sm))
-        OutlinedButton(onClick = onDetails, modifier = Modifier.padding(top = Space.lg).heightIn(min = 48.dp)) { Text("Details") }
+    }
+    if (v != null || onForget != null) {
+        Row(
+            Modifier.padding(top = Space.lg),
+            horizontalArrangement = Arrangement.spacedBy(Space.sm),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (v != null) OutlinedButton(onClick = onDetails, modifier = Modifier.heightIn(min = 48.dp)) { Text("Details") }
+            if (onForget != null) TextButton(onClick = onForget, modifier = Modifier.heightIn(min = 48.dp)) { Text("Forget network") }
+        }
     }
 }
 
@@ -259,7 +274,8 @@ private fun ResultContent(
     onDetails: () -> Unit,
     onDisconnect: () -> Unit,
     onDismiss: () -> Unit,
-    onForget: () -> Unit,
+    /** Non-null while GECKO's profile for this network is installed. */
+    onForget: (() -> Unit)?,
     onRetry: () -> Unit
 ) {
     val v = check.verdict()
@@ -339,8 +355,8 @@ private fun ResultContent(
             TextButton(onClick = leave, modifier = Modifier.heightIn(min = 48.dp)) {
                 Text(leaveLabel, color = toneColors.content)
             }
-            // A profile GECKO installed stays until removed; this is the way to remove it.
-            if (check.enterprise != null && check.result.state in setOf(VerificationState.VERIFIED, VerificationState.REGISTERED)) {
+            // A profile GECKO installed stays until removed; also offered on the connected card and in Settings.
+            if (onForget != null) {
                 TextButton(onClick = onForget, modifier = Modifier.heightIn(min = 48.dp)) {
                     Text("Forget network", color = toneColors.content)
                 }

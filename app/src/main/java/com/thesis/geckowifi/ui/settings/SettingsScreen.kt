@@ -72,7 +72,10 @@ fun SettingsScreen(viewModel: VerificationViewModel, onOpenSavedData: () -> Unit
     Column(Modifier.fillMaxWidth()) {
         TopAppBar(title = { Text("Settings") })
         Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = Space.xxl)) {
-            viewModel.enterprise?.let { AccountsSection(it) }
+            viewModel.enterprise?.let {
+                AccountsSection(it)
+                SetUpNetworksSection(it, onForget = viewModel::forgetEnterpriseNetwork)
+            }
 
             SectionHeader("Saved GECKO data")
             SectionCard(null, Modifier.padding(horizontal = Space.lg)) {
@@ -261,7 +264,7 @@ private fun AccountsSection(flow: EnterpriseController) {
         AlertDialog(
             onDismissRequest = { removing = null },
             title = { Text("Remove ${account.identity}?") },
-            text = { Text("GECKO forgets this account and its password. Networks that are already set up keep working until you forget them.") },
+            text = { Text("GECKO forgets this account and its password. Networks that are already set up keep working until you forget them under \"Networks GECKO set up\".") },
             confirmButton = {
                 Button(
                     onClick = { flow.removeAccount(account.id); removing = null },
@@ -269,6 +272,59 @@ private fun AccountsSection(flow: EnterpriseController) {
                 ) { Text("Remove") }
             },
             dismissButton = { TextButton(onClick = { removing = null }) { Text("Cancel") } }
+        )
+    }
+}
+
+/**
+ * The networks GECKO installed a pinned profile for. Android's own Wi-Fi
+ * settings can't reliably remove an app's suggested network, so this list is
+ * the one place that always can, whether or not the network is in range.
+ */
+@Composable
+private fun SetUpNetworksSection(flow: EnterpriseController, onForget: (String) -> Unit) {
+    var forgetting by remember { mutableStateOf<String?>(null) }
+
+    SectionHeader("Networks GECKO set up")
+    SectionCard(null, Modifier.padding(horizontal = Space.lg)) {
+        Text(
+            "GECKO installed a profile for each of these, with your account and the verified login server. Android joins them on its own.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        val ssids = flow.installedSsids.sortedBy { it.lowercase() }
+        if (ssids.isEmpty()) {
+            Text(
+                "None yet. When GECKO sets up a network such as eduroam, it shows here.",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = Space.md)
+            )
+        }
+        ssids.forEach { ssid ->
+            Row(
+                Modifier.fillMaxWidth().padding(top = Space.sm).heightIn(min = 48.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(ssid, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                IconButton(onClick = { forgetting = ssid }) {
+                    Icon(Icons.Outlined.Delete, contentDescription = "Forget $ssid", tint = MaterialTheme.colorScheme.error)
+                }
+            }
+        }
+    }
+
+    forgetting?.let { ssid ->
+        AlertDialog(
+            onDismissRequest = { forgetting = null },
+            title = { Text("Forget $ssid?") },
+            text = { Text("GECKO removes the profile it installed, including your password, and Android stops joining $ssid. To use it again, connect to it in GECKO.") },
+            confirmButton = {
+                Button(
+                    onClick = { onForget(ssid); forgetting = null },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError)
+                ) { Text("Forget") }
+            },
+            dismissButton = { TextButton(onClick = { forgetting = null }) { Text("Cancel") } }
         )
     }
 }

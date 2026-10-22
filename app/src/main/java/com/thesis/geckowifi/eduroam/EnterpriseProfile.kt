@@ -124,6 +124,9 @@ interface EnterpriseProfileInstaller {
     /** Removes what [install] added for [ssid]; a no-op if nothing was. */
     suspend fun remove(ssid: String)
 
+    /** SSIDs that have a profile from [install] right now, also from earlier app runs where the platform can tell. */
+    fun installedSsids(): Set<String>
+
     /** Whether the device is connected to [ssid] within [timeoutMs]. */
     suspend fun awaitConnected(ssid: String, timeoutMs: Long): Boolean
 }

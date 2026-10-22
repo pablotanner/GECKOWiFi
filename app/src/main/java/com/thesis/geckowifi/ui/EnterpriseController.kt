@@ -80,6 +80,17 @@ class EnterpriseController(
     var accounts by mutableStateOf(accountStore.accounts())
         private set
 
+    /** SSIDs with a pinned profile GECKO installed: what the status card and Settings offer to forget. */
+    var installedSsids by mutableStateOf(installer.installedSsids())
+        private set
+
+    fun isInstalled(ssid: String): Boolean = installedSsids.any { it.equals(ssid, ignoreCase = true) }
+
+    /** Re-reads [installedSsids]; a profile can also go away outside GECKO (e.g. the app's Wi-Fi permission revoked). */
+    fun refreshInstalled() {
+        installedSsids = installer.installedSsids()
+    }
+
     private var job: Job? = null
 
     fun supports(ssid: String): Boolean = onboarding.supports(ssid)
@@ -171,6 +182,7 @@ class EnterpriseController(
         } catch (e: CredentialsRefused) {
             return onResult(run.copy(account = decision.account, refused = e.message))
         }
+        refreshInstalled()
         onResult(run.copy(account = decision.account, connect = outcome))
     }
 
@@ -193,7 +205,11 @@ class EnterpriseController(
 
     /** Removes the pinned profile GECKO installed for [ssid] (Android then forgets the network). */
     fun forgetNetwork(ssid: String) {
-        scope.launch { installer.remove(ssid) }
+        installedSsids = installedSsids.filterNot { it.equals(ssid, ignoreCase = true) }.toSet()
+        scope.launch {
+            installer.remove(ssid)
+            refreshInstalled()
+        }
     }
 
     /** A choice is remembered per network and federation: the same SSID in another federation is another network. */
