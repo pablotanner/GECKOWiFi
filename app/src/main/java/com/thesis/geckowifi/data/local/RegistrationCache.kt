@@ -49,6 +49,8 @@ interface RegistrationCache {
     fun saveLookup(lookup: SavedLookup)
     fun realmRecords(): List<SavedRealmRecord>
     fun saveRealmRecord(record: SavedRealmRecord)
+    /** Deletes the saved answer only; realm records aren't tied to a place and expire on their own. */
+    fun clearLookup()
     fun clear()
 }
 
@@ -59,6 +61,7 @@ class InMemoryRegistrationCache : RegistrationCache {
     override fun saveLookup(lookup: SavedLookup) { this.lookup = lookup }
     override fun realmRecords() = records.values.toList()
     override fun saveRealmRecord(record: SavedRealmRecord) { records[record.federation to record.realm] = record }
+    override fun clearLookup() { lookup = null }
     override fun clear() { lookup = null; records.clear() }
 }
 
@@ -79,6 +82,8 @@ class SharedPrefsRegistrationCache(private val prefs: SharedPreferences) : Regis
         val kept = realmRecords().filterNot { it.federation == record.federation && it.realm == record.realm }
         prefs.edit { putString(RECORDS, json.encodeToString(records, kept + record)) }
     }
+
+    override fun clearLookup() = prefs.edit { remove(LOOKUP) }
 
     override fun clear() = prefs.edit { remove(LOOKUP); remove(RECORDS) }
 

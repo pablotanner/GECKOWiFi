@@ -5,6 +5,7 @@ import com.thesis.geckowifi.data.model.GeoCertificate
 import com.thesis.geckowifi.data.model.VerificationResult
 import com.thesis.geckowifi.data.model.VerificationState
 import com.thesis.geckowifi.verification.AdvertisedMatch
+import com.thesis.geckowifi.verification.appliesAt
 import com.thesis.geckowifi.verification.coversLocation
 import com.thesis.geckowifi.verification.matchAdvertised
 import java.security.PublicKey
@@ -33,9 +34,10 @@ val SAVED_REGISTRATION_MAX_AGE: Duration = Duration.ofHours(24)
 
 /**
  * The saved registrations that let GECKO skip onboarding for [ssid] here and
- * now, or null: the saved answer must not be older than [maxAge], and among
- * its certificates for [ssid] that are valid now and whose area reaches the
- * device's current position, at least one registers an enterprise network.
+ * now, or null: the saved answer must [apply][appliesAt] here (not older than
+ * [maxAge], fetched for an area containing the device's position, D26), and
+ * among its certificates for [ssid] that are valid now and whose area reaches
+ * the device's position, at least one registers an enterprise network.
  * Returns every applicable certificate for [ssid] (also non-enterprise ones),
  * so the security-type comparison sees the whole registration.
  */
@@ -48,8 +50,7 @@ fun usableSavedRegistration(
     now: Instant,
     maxAge: Duration = SAVED_REGISTRATION_MAX_AGE
 ): List<GeoCertificate>? {
-    if (saved == null) return null
-    if (Duration.between(Instant.ofEpochMilli(saved.fetchedAt), now) > maxAge) return null
+    if (saved == null || !saved.appliesAt(lat, lng, radiusMeters, now, maxAge)) return null
     val applicable = saved.certificates.filter {
         it.wifi.ssid.equals(ssid, ignoreCase = true) && it.isValidAt(now) && it.isEvaluable() &&
             it.coversLocation(lat, lng, radiusMeters)

@@ -102,7 +102,10 @@ fun CheckDetail.verdict(): Verdict {
         )
         VerificationState.REGISTERED -> if (enterprise != null) Verdict(
             Tone.NEUTRAL, "Set up", "$name is set up",
-            "The profile is installed. Android joins it on its own; your password only goes to the verified login server.",
+            if (failure == CheckFailure.ANDROID_STAYED)
+                "The profile is installed, but Android stayed on the network you were on: it doesn't leave a working network by itself. " +
+                    "Tap $name in Wi-Fi settings to switch. Your password only goes to the verified login server."
+            else "The profile is installed. Android joins it on its own; your password only goes to the verified login server.",
             Icons.Outlined.GppMaybe
         ) else Verdict(
             Tone.NEUTRAL, "Registered", "$name is registered here",
@@ -145,6 +148,8 @@ fun CheckDetail.verdict(): Verdict {
                 "GECKO couldn't confirm the login server of $name, so it didn't connect. This is usually a connection problem, not an attack. Try again, or join it in Android's settings.",
                 Icons.Outlined.Shield
             )
+            // Only recorded with REGISTERED (above); here for exhaustiveness.
+            CheckFailure.ANDROID_STAYED,
             CheckFailure.ONBOARDING_FAILED -> Verdict(
                 Tone.NEUTRAL, "Not connected", "GECKO couldn't check $name",
                 "The check connection was declined, the network was out of range, or it doesn't support GECKO. Try again, or join it in Android's settings.",

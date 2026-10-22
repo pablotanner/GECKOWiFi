@@ -19,7 +19,9 @@ data class LocationLookup(
     /** When the map head of the answer was signed (epoch millis); null without a verified answer. */
     val mapHeadMillis: Long? = null,
     /** Whether the query went over the network the client was bound to. */
-    val usedPreferredNetwork: Boolean? = null
+    val usedPreferredNetwork: Boolean? = null,
+    /** Why the server couldn't be reached, for the log; null otherwise. */
+    val unreachableCause: String? = null
 )
 
 /**

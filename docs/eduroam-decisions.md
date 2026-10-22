@@ -216,9 +216,10 @@ verified answer for the place, the session is not needed.
   and every realm record fetched over an onboarding session as its signed
   bytes. Records are re-verified (signature, federation, realm, expiry) every
   time they are used, so a tampered store yields nothing.
-- **When it is used:** the answer is at most 24 h old, and among its
-  certificates for the SSID, valid now and covering the current position, one
-  registers an enterprise network. All applicable certificates for the SSID
+- **When it is used:** the answer is at most 24 h old and was fetched for an
+  area containing the current position (D26), and among its certificates for
+  the SSID, valid now and covering the current position, one registers an
+  enterprise network. All applicable certificates for the SSID
   are used, so a mismatch in advertised security still gives CONFLICT. If a
   visitor's record is missing, GECKO falls back to onboarding where the network
   supports it, and blocks otherwise.
@@ -279,9 +280,10 @@ A captive portal blocks the internet until login, so a check over the joined
 network can't reach the map server; a device without mobile data then can't
 check the network at all. When the live query is unreachable, every judging
 query (portal hops, portal domain, login server, advertised security) uses the
-saved answer (D21) instead, if it is at most 24 h old and either its area
-contains the whole query circle (so "nothing registered" holds as it did then)
-or it holds a valid certificate for the SSID reaching this position. Results
+saved answer (D21) instead, if it is at most 24 h old and its area contains
+the whole query circle, so "nothing registered" holds as it did then. (It used
+to apply also outside that area when it held a certificate for the SSID; D26
+drops that.) Results
 say "Data from: saved registration from …" and are not put in the decision
 cache, so a live answer replaces them as soon as the server is reachable. A
 failed proof is never replaced. This also defeats withholding: a network that
@@ -296,3 +298,65 @@ tablet observed on 2026-10-21: `enter-guest-net.ethz.ch` (primary) and
 `login.enter.ethz.ch` (delegate), ETH campus areas. The pins are TLS leaf keys
 from one observation; when ETH renews its certificates with new keys the
 registration has to follow.
+
+## D26. A saved answer only speaks for the area it was fetched for
+The map server returns the certificates whose area overlaps the query circle,
+so a saved answer says two things: these registrations exist, and nothing else
+is registered *inside that circle*. The first stays true wherever a
+certificate's own area reaches; the second does not. Before, the saved answer
+was used anywhere for 24 h (D21, the home list) or wherever it held a
+certificate for the SSID (D25). A kilometre away, networks registered only
+there looked unregistered, and a second registration of the same SSID (another
+eduroam operator) went unseen, so a contradiction could be missed or a portal
+check could warn falsely. Nothing leaked, since passwords only go to pinned
+servers, but the app showed things it couldn't know.
+- **One rule** (`SavedLookup.appliesAt`): the answer is at most 24 h old and
+  `distance(fetched at, here) + query radius <= saved radius`. It decides the
+  home list's fallback, enterprise sign-in without onboarding (D21) and network
+  checks (D25) alike.
+- **A wider saved area:** the home list's lookup now asks for the encoder's
+  maximum radius (253 m) instead of the device's accuracy (tens of metres), and
+  the list shows only what reaches the device. One query serves both, and the
+  saved answer still applies after a walk across the building. Checks keep
+  querying with the accuracy radius.
+- **Expired means deleted; elsewhere means unused.** An answer older than 24 h
+  is deleted. One that only doesn't apply here is kept and used again on
+  return, until a fresh lookup replaces it; deleting it would only lose data
+  that is correct where it was fetched. Settings > Saved GECKO data says
+  whether it is used here and how far away it was fetched. Realm records
+  aren't tied to a place and keep their own signed expiry.
+- **Kept fresh while the app is open:** a lookup every 10 minutes and a few
+  seconds after the device joins a Wi-Fi network (when a WiFi-only device can
+  usually reach the map server again), not while a check holds a network. On
+  the Tab, a lookup 3 s after joining `GeckoTest` failed over the default
+  route: Android hadn't made the new network (a captive portal) the default
+  yet. Lookups without a join of the app's own are now bound to the device's
+  Wi-Fi network, and after a join GECKO tries again after 10 and 30 s until an
+  answer is saved; a request during a running lookup is queued, not dropped.
+  Measured after the fix: answer saved 5 s after the join, on the first try. Tied
+  to the started lifecycle, so nothing runs and no location is asked for in the
+  background. A real deployment could do this in the system, with background
+  location and a freshness policy for the map head.
+
+## D27. Android doesn't leave a working network for a suggestion
+Seen on the Tab: connected to `eduroam` through GECKO, a sign-in to
+`eduroam-lab` waited 60 s and ended "Set up", and the same the other way
+round; after forgetting the first network it worked. It looked like the
+saved-registration path (D21, no GECKO identity), but that path did its job:
+pins verified, profile installed. The cause is the platform. A
+`WifiNetworkSuggestion` is a candidate for Android's own network selection,
+which doesn't switch away from a connected network that works, and an app
+can't make it (`WifiManager.disconnect()` is a no-op for apps since API 29).
+Forgetting the other network worked because removing a suggestion disconnects
+from it. The saved path makes it visible: real `eduroam` always takes it, and
+it never touches the radio, while onboarding briefly takes the radio over
+with its own request.
+- **Fix in the prototype:** while waiting, the status card says the device is
+  on another network and offers Android's Wi-Fi panel, where tapping the
+  network joins it with GECKO's profile; GECKO is still waiting then, so the
+  result becomes Verified. If the wait ends first, the result is "Set up"
+  with `ANDROID_STAYED` and the same button, instead of the generic wording.
+- **Not done:** removing the other network's profile to force the switch (it
+  would delete a working setup), or a root command (untested on the Tab). A
+  system-level GECKO (D1) would select the network in wpa_supplicant directly,
+  and the problem disappears.

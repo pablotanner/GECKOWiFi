@@ -106,7 +106,11 @@ fun HomeScreen(
     // The registered network whose registration sheet is open, if any.
     var sheetFor by remember { mutableStateOf<ScannedNetwork.Real?>(null) }
 
-    val connect: (ScannedNetwork) -> Unit = { viewModel.startCheck(it) }
+    val connect: (ScannedNetwork) -> Unit = {
+        // Wi-Fi off: startCheck explains; the panel has the switch to turn it on.
+        if (it is ScannedNetwork.Real && !viewModel.isWifiEnabled()) context.startActivity(Intent(Settings.Panel.ACTION_WIFI))
+        viewModel.startCheck(it)
+    }
     val list = ListContext(
         viewModel = viewModel,
         busy = busy,
@@ -158,7 +162,10 @@ fun HomeScreen(
                 loginServerCheck = if (viewModel.rootAvailable && !network.isOpen && !busy) LoginServerCheck(
                     connected = viewModel.isConnectedTo(network.ssid),
                     onCheck = { sheetFor = null; viewModel.checkLoginServer(network) }
-                ) else null
+                ) else null,
+                latest = viewModel.latestVerdictFor(network.ssid),
+                onOpenCheck = { id -> sheetFor = null; onOpenCheck(id) },
+                savedAt = viewModel.registrationsSavedAt
             )
         }
     }

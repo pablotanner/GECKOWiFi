@@ -17,6 +17,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
@@ -55,6 +58,12 @@ fun GeckoWifiApp(
     if (!hasLocationPermission) {
         PermissionScreen(deniedBefore = permissionDeniedBefore, onAllow = onRequestLocationPermission)
         return
+    }
+
+    // While the app is visible, GECKO keeps the saved answer for this place current (D26).
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(lifecycle, viewModel) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { viewModel.keepRegistrationsFresh() }
     }
 
     val navController = rememberNavController()

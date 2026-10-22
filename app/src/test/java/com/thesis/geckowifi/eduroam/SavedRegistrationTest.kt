@@ -11,6 +11,7 @@ import com.thesis.geckowifi.eduroam.EduroamFixtures.realmKey
 import com.thesis.geckowifi.eduroam.EduroamFixtures.record
 import com.thesis.geckowifi.eduroam.EduroamFixtures.sign
 import com.thesis.geckowifi.eduroam.EduroamFixtures.siteCert
+import com.thesis.geckowifi.verification.coversLocation
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -54,6 +55,14 @@ class SavedRegistrationTest {
         assertNull(usable(saved(cert(), age = Duration.ofHours(25))))
         assertNull(usable(saved(cert()), at = 46.948 to 7.447)) // Bern
         assertNull(usable(saved(cert()), ssid = "other-net"))
+    }
+
+    /** D26: the certificate's own area still covers the new spot, but the saved answer wasn't fetched for it. */
+    @Test
+    fun notUsable_movedOutOfTheSavedArea_evenThoughTheCertificateCoversTheNewSpot() {
+        val fourHundredMetresNorth = 47.3800 to 8.5482
+        assertTrue(cert().coversLocation(fourHundredMetresNorth.first, fourHundredMetresNorth.second, 50))
+        assertNull(usable(saved(cert()), at = fourHundredMetresNorth))
     }
 
     @Test

@@ -1,5 +1,7 @@
 package com.thesis.geckowifi.ui.home
 
+import android.content.Intent
+import android.provider.Settings
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -33,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -70,6 +73,9 @@ fun StatusCard(viewModel: VerificationViewModel, onOpenCheck: (String) -> Unit, 
         else -> CardState.Idle
     }
     val tone = (state as? CardState.Result)?.check?.verdict()?.tone
+    val context = LocalContext.current
+    // Where the user switches networks themselves: Android doesn't leave a working one for a suggestion (D27).
+    val openWifi = { context.startActivity(Intent(Settings.Panel.ACTION_WIFI)) }
     val container by animateColorAsState(
         when (tone) {
             null -> MaterialTheme.colorScheme.surfaceContainer
@@ -95,13 +101,14 @@ fun StatusCard(viewModel: VerificationViewModel, onOpenCheck: (String) -> Unit, 
             Column(Modifier.padding(Space.xl)) {
                 when (s) {
                     CardState.Idle -> IdleContent(viewModel)
-                    is CardState.Checking -> CheckingContent(s.check, onCancel = viewModel::cancelCheck)
+                    is CardState.Checking -> CheckingContent(s.check, device, onOpenWifi = openWifi, onCancel = viewModel::cancelCheck)
                     is CardState.Result -> ResultContent(
                         check = s.check,
                         labMode = viewModel.labMode,
                         onDetails = { onOpenCheck(s.check.id) },
                         onDisconnect = viewModel::disconnect,
                         onDismiss = viewModel::dismissCurrent,
+                        onOpenWifi = openWifi,
                         onForget = s.check.ssid?.takeIf(viewModel::isSetUpByGecko)?.let { ssid -> { viewModel.forgetEnterpriseNetwork(ssid) } },
                         onRetry = { viewModel.retry(s.check) }
                     )
@@ -213,8 +220,10 @@ private val stepLabels = mapOf(
     CheckStep.CONNECT to "Connecting with your account"
 )
 
+/** [deviceSsid]: the device's own Wi-Fi; while connecting, being on another network means Android likely stays there. */
 @Composable
-private fun CheckingContent(check: ActiveCheck, onCancel: () -> Unit) {
+private fun CheckingContent(check: ActiveCheck, deviceSsid: String?, onOpenWifi: () -> Unit, onCancel: () -> Unit) {
+    val onOther = check.current == CheckStep.CONNECT && deviceSsid != null && !deviceSsid.equals(check.ssid, ignoreCase = true)
     Text("Checking", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
     Text(
         check.ssid,
@@ -230,9 +239,10 @@ private fun CheckingContent(check: ActiveCheck, onCancel: () -> Unit) {
             StepRow(stepLabels.getValue(step), done = i < currentIndex, active = i == currentIndex)
         }
     }
-    val hint = when (check.current) {
-        CheckStep.JOIN, CheckStep.ONBOARD -> "Android may ask you to allow the connection."
-        CheckStep.CONNECT -> "The first time, allow GECKO's suggested networks in Android's notification."
+    val hint = when {
+        onOther -> "You're on $deviceSsid, and Android usually stays on a working network. Tap ${check.ssid} in Wi-Fi settings to switch."
+        check.current == CheckStep.JOIN || check.current == CheckStep.ONBOARD -> "Android may ask you to allow the connection."
+        check.current == CheckStep.CONNECT -> "The first time, allow GECKO's suggested networks in Android's notification."
         else -> null
     }
     if (hint != null) {
@@ -243,7 +253,10 @@ private fun CheckingContent(check: ActiveCheck, onCancel: () -> Unit) {
             modifier = Modifier.padding(top = Space.md)
         )
     }
-    TextButton(onClick = onCancel, modifier = Modifier.padding(top = Space.sm)) { Text("Cancel") }
+    Row(Modifier.padding(top = Space.sm), horizontalArrangement = Arrangement.spacedBy(Space.sm), verticalAlignment = Alignment.CenterVertically) {
+        if (onOther) OutlinedButton(onClick = onOpenWifi, modifier = Modifier.heightIn(min = 48.dp)) { Text("Open Wi-Fi settings") }
+        TextButton(onClick = onCancel, modifier = Modifier.heightIn(min = 48.dp)) { Text("Cancel") }
+    }
 }
 
 @Composable
@@ -274,6 +287,7 @@ private fun ResultContent(
     onDetails: () -> Unit,
     onDisconnect: () -> Unit,
     onDismiss: () -> Unit,
+    onOpenWifi: () -> Unit,
     /** Non-null while GECKO's profile for this network is installed. */
     onForget: (() -> Unit)?,
     onRetry: () -> Unit
@@ -349,8 +363,16 @@ private fun ResultContent(
                 Text(leaveLabel, color = toneColors.content)
             }
         } else {
-            OutlinedButton(onClick = onDetails, modifier = Modifier.heightIn(min = 48.dp)) {
-                Text("Details", color = toneColors.content)
+            // Set up but Android stayed elsewhere: switching is the one thing left to do (D27).
+            if (check.failure == CheckFailure.ANDROID_STAYED) {
+                Button(onClick = onOpenWifi, modifier = Modifier.heightIn(min = 48.dp)) { Text("Open Wi-Fi settings") }
+                TextButton(onClick = onDetails, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text("Details", color = toneColors.content)
+                }
+            } else {
+                OutlinedButton(onClick = onDetails, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text("Details", color = toneColors.content)
+                }
             }
             TextButton(onClick = leave, modifier = Modifier.heightIn(min = 48.dp)) {
                 Text(leaveLabel, color = toneColors.content)

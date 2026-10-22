@@ -37,6 +37,14 @@ class NetworkObserver(private val context: Context) {
         private set
 
     /**
+     * The Wi-Fi network the device itself is on (see [watchDeviceWifi]), or null. Binding to it reaches
+     * the network right after joining, while Android is still evaluating it (e.g. a captive portal)
+     * and hasn't made it the default route yet.
+     */
+    @Volatile var deviceWifiNetwork: Network? = null
+        private set
+
+    /**
      * The last cached WiFi scan (not a fresh one - reading cached results
      * avoids Android's per-app throttling on requesting new scans, which
      * only gates `startScan()`, not reading what's already there).
@@ -150,7 +158,10 @@ class NetworkObserver(private val context: Context) {
     fun watchDeviceWifi(onChange: (String?) -> Unit) {
         if (deviceWifiCallback != null) return
         val bySsid = java.util.concurrent.ConcurrentHashMap<Network, String>()
-        val report = { onChange(bySsid.values.firstOrNull()) }
+        val report = {
+            deviceWifiNetwork = bySsid.keys.firstOrNull()
+            onChange(bySsid.values.firstOrNull())
+        }
         val request = NetworkRequest.Builder()
             .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
@@ -179,6 +190,9 @@ class NetworkObserver(private val context: Context) {
         deviceWifiCallback = callback
         runCatching { connectivity.registerNetworkCallback(request, callback) }.onFailure { Log.w(TAG, "can't watch Wi-Fi: $it") }
     }
+
+    /** Whether Wi-Fi is switched on; with it off, every join fails, so callers ask the user to turn it on first. */
+    fun isWifiEnabled(): Boolean = runCatching { wifi.isWifiEnabled }.getOrDefault(true)
 
     /** SSID of the network the device itself is connected to (not the app's own join), or null. */
     @Suppress("DEPRECATION")

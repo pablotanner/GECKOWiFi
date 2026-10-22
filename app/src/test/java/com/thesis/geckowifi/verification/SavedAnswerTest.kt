@@ -16,8 +16,9 @@ import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Duration
 import java.time.Instant
@@ -42,25 +43,44 @@ class SavedAnswerTest {
         route = "Wi-Fi", viaSsid = "GeckoTest", certificates = listOf(visitors)
     )
 
-    private fun answer(lookup: SavedLookup?, ssid: String?, radius: Int = 50) =
-        savedAnswer(lookup, here.first, here.second, radius, ssid, now)
+    private fun answer(lookup: SavedLookup?, radius: Int = 50) =
+        savedAnswer(lookup, here.first, here.second, radius, now)
 
     @Test
     fun recentAndCoveringTheQuery_applies_markedAsSaved() {
-        val a = answer(saved(), "unknown-net")!!
+        val a = answer(saved())!!
         assertEquals(saved().fetchedAt, a.savedAt)
     }
 
     @Test
     fun tooOld_doesNotApply() {
-        assertNull(answer(saved(age = Duration.ofHours(25)), "eth-visitors"))
+        assertNull(answer(saved(age = Duration.ofHours(25))))
+    }
+
+    /**
+     * D26: outside its area the answer may lack registrations, also more of the same SSID, so a
+     * certificate for the SSID that reaches the new spot is no longer enough.
+     */
+    @Test
+    fun fetchedForAnotherArea_doesNotApply_evenWithACertificateForTheSsid() {
+        val elsewhere = saved(radius = 50, at = 47.3800 to 8.5482) // about 400 m north
+        assertTrue(visitors.coversLocation(here.first, here.second, 50))
+        assertNull(answer(elsewhere))
     }
 
     @Test
-    fun fetchedForAnotherArea_onlyAppliesWithACertificateForTheSsid() {
-        val elsewhere = saved(radius = 50, at = 47.3800 to 8.5482) // about 400 m north
-        assertNull(answer(elsewhere, "unknown-net"))
-        assertNotNull(answer(elsewhere, "eth-visitors"))
+    fun appliesAt_onlyWhileTheWholeQueryCircleIsInsideTheSavedArea() {
+        val north = 47.3765 + 200.0 / 111_195 // about 200 m north of where it was fetched
+        val lookup = saved(radius = 253)
+        assertTrue(lookup.appliesAt(north, here.second, 50, now))   // 200 + 50 <= 253
+        assertFalse(lookup.appliesAt(north, here.second, 60, now))  // 200 + 60 > 253: the fix is too vague for the area left
+        assertFalse(lookup.appliesAt(47.3765 + 300.0 / 111_195, here.second, 10, now))
+    }
+
+    @Test
+    fun isExpired_afterTheMaximumAge() {
+        assertFalse(saved(age = Duration.ofHours(23)).isExpired(now))
+        assertTrue(saved(age = Duration.ofHours(25)).isExpired(now))
     }
 
     @Test
@@ -89,7 +109,7 @@ class SavedAnswerTest {
         val live = engine.verifyPortalHops("net", hops, true, here.first, here.second, null, 50, "eth-visitors")
         assertEquals(VerificationState.UNREACHABLE, live.overall.state)
 
-        engine.savedAnswer = { lat, lng, r, ssid -> savedAnswer(saved(), lat, lng, r, ssid, now) }
+        engine.savedAnswer = { lat, lng, r, _ -> savedAnswer(saved(), lat, lng, r, now) }
         val fromSaved = engine.verifyPortalHops("net", hops, true, here.first, here.second, null, 50, "eth-visitors")
         assertEquals(VerificationState.VERIFIED, fromSaved.overall.state)
         assertEquals(saved().fetchedAt, fromSaved.overall.savedAt)

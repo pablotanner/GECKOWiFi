@@ -20,7 +20,10 @@ import com.thesis.geckowifi.data.local.SavedRealmRecord
 import com.thesis.geckowifi.data.local.StoredVerdict
 import com.thesis.geckowifi.eduroam.DataSource
 import com.thesis.geckowifi.eduroam.usableSavedRegistration
+import com.thesis.geckowifi.verification.appliesAt
 import com.thesis.geckowifi.verification.coversLocation
+import com.thesis.geckowifi.verification.distanceMeters
+import com.thesis.geckowifi.verification.isExpired
 import com.thesis.geckowifi.verification.savedAnswer
 import com.thesis.geckowifi.data.local.VerdictStore
 import com.thesis.geckowifi.eduroam.AccountStore
@@ -51,6 +54,7 @@ import com.thesis.geckowifi.verification.matchAdvertised
 import com.thesis.geckowifi.capability.Capabilities
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
 import kotlin.math.ceil
@@ -78,7 +82,12 @@ enum class CheckFailure {
     /** Enterprise: GECKO couldn't confirm the login server for any fitting account, so no password went out. */
     SERVER_NOT_CONFIRMED,
     /** Enterprise: the GECKO onboarding session didn't come up (declined, out of range, server certificate). */
-    ONBOARDING_FAILED
+    ONBOARDING_FAILED,
+    /**
+     * Enterprise: the pinned profile is installed, but the device stayed on another Wi-Fi network; Android
+     * doesn't switch from a working network to a suggested one by itself (docs/eduroam-decisions.md, D27).
+     */
+    ANDROID_STAYED
 }
 
 /**
@@ -108,6 +117,20 @@ data class EnterpriseEvidence(
  * a silent miss (see docs/experiments.md, L3).
  */
 const val MAX_QUERY_RADIUS_METERS = 253
+
+/**
+ * Radius of the area the home list's lookup asks for and the saved answer then
+ * covers (docs/eduroam-decisions.md, D26): the widest query the encoder allows,
+ * so the saved answer still applies after a walk across the building, not only
+ * within one GPS fix. The list itself only shows what reaches the device.
+ */
+const val SAVED_AREA_RADIUS_METERS = MAX_QUERY_RADIUS_METERS
+
+/** How often GECKO looks the place up again while the app is visible (D26). */
+const val REGISTRATION_REFRESH_INTERVAL_MS = 10 * 60_000L
+
+/** After the device joins a Wi-Fi network: waits before each lookup attempt until one is saved (D26). */
+private val JOIN_LOOKUP_DELAYS_MS = listOf(3_000L, 10_000L, 30_000L)
 
 /** How long the login-server check waits for the user to reconnect and the EAP handshake to run. */
 const val HANDSHAKE_CAPTURE_SECONDS = 60
@@ -220,7 +243,7 @@ class VerificationViewModel(
         encoder = geoQueryEncoder
     ).also { e ->
         // A portal network blocks the map server until login: judge with the saved answer then (D25).
-        e.savedAnswer = { lat, lng, radius, ssid -> savedAnswer(savedLookup, lat, lng, radius, ssid, java.time.Instant.now()) }
+        e.savedAnswer = { lat, lng, radius, _ -> savedAnswer(savedLookup, lat, lng, radius, java.time.Instant.now()) }
     }
 
     var hasLocationPermission by mutableStateOf(false)
@@ -299,11 +322,25 @@ class VerificationViewModel(
         viewModelScope.launch(Dispatchers.IO) { rootAvailable = Capabilities.hasRoot }
         // Verdicts from earlier sessions: History and the status card know them after a restart.
         checks = verdictStore?.all().orEmpty().map { it.toCheckDetail() }
+        dropExpiredLookup(java.time.Instant.now())
         runCatching {
             networkObserver.watchDeviceWifi { ssid ->
                 viewModelScope.launch(Dispatchers.Main) {
+                    val joined = ssid != null && !ssid.equals(deviceSsid, ignoreCase = true)
                     deviceSsid = ssid
                     enterprise?.refreshInstalled()
+                    // A WiFi-only device can usually reach the map server once it is on a network (D26).
+                    if (joined) {
+                        val joinedAt = System.currentTimeMillis()
+                        // A new network may need a moment (DHCP, the AP's own portal setup): a few tries, until an
+                        // answer fetched after the join is saved or the device moves on.
+                        for (wait in JOIN_LOOKUP_DELAYS_MS) {
+                            delay(wait)
+                            if (!ssid.equals(deviceSsid, ignoreCase = true)) break
+                            if ((savedLookup?.fetchedAt ?: 0L) >= joinedAt) break
+                            refresh()
+                        }
+                    }
                 }
             }
         }
@@ -366,34 +403,78 @@ class VerificationViewModel(
         if (granted) refresh()
     }
 
-    /** Re-scans nearby networks and re-queries GECKO for what's registered at the current location. */
+    /** When the last lookup started (epoch millis); paces [keepRegistrationsFresh]. */
+    private var lastLookupAt = 0L
+
+    /** A refresh was asked for while one ran; it runs when that one ends, so e.g. a join isn't lost. */
+    private var refreshQueued = false
+
+    /**
+     * Re-scans nearby networks and re-queries GECKO for what's registered at the
+     * current location. Not while a check runs: it rebinds the map client to the
+     * network the check holds.
+     */
     fun refresh() {
-        if (!hasLocationPermission || isRefreshing) return
+        if (!hasLocationPermission || activeCheck != null) return
+        if (isRefreshing) {
+            refreshQueued = true
+            return
+        }
+        isRefreshing = true
+        lastLookupAt = System.currentTimeMillis()
         scannedNetworks = currentScanList()
         networkObserver.requestScan { scannedNetworks = currentScanList() }
         viewModelScope.launch {
-            isRefreshing = true
-            // lastKnown() alone returns null until some component has actively
-            // requested a location update at least once - a real gap on a cold
-            // emulator/device even after `adb emu geo fix`, confirmed via
-            // `adb shell dumpsys location` showing every provider's
-            // "last location=null". awaitFix() actively requests one instead
-            // of only reading the (possibly never-populated) passive cache.
-            val fix = locationProvider.lastKnown() ?: locationProvider.awaitFix()
-            location = fix
-            if (fix != null) {
-                rebindGeckoClient()
-                val lookup = engine.registeredHere(
-                    lat = fix.latitude,
-                    lng = fix.longitude,
-                    // Not fix.altitude - see the doc comment below on why this
-                    // query deliberately never narrows by device altitude.
-                    altitude = null,
-                    radiusMeters = effectiveRadius(fix)
-                )
-                applyLookup(lookup, fix, viaSsid = deviceSsid)
+            try {
+                // lastKnown() alone returns null until some component has actively
+                // requested a location update at least once - a real gap on a cold
+                // emulator/device even after `adb emu geo fix`, confirmed via
+                // `adb shell dumpsys location` showing every provider's
+                // "last location=null". awaitFix() actively requests one instead
+                // of only reading the (possibly never-populated) passive cache.
+                val fix = locationProvider.lastKnown() ?: locationProvider.awaitFix()
+                location = fix
+                if (fix != null) {
+                    rebindGeckoClient()
+                    val lookup = engine.registeredHere(
+                        lat = fix.latitude,
+                        lng = fix.longitude,
+                        // Not fix.altitude - see the doc comment below on why this
+                        // query deliberately never narrows by device altitude.
+                        altitude = null,
+                        // The whole saved area (D26); applyLookup narrows the list to the device.
+                        radiusMeters = SAVED_AREA_RADIUS_METERS
+                    )
+                    applyLookup(lookup, fix, viaSsid = deviceSsid)
+                }
+            } finally {
+                isRefreshing = false
+                if (refreshQueued) {
+                    refreshQueued = false
+                    refresh()
+                }
             }
-            isRefreshing = false
+        }
+    }
+
+    /**
+     * Keeps the saved answer current while the app is visible (D26): a lookup
+     * every [REGISTRATION_REFRESH_INTERVAL_MS], and a missed one as soon as the
+     * app comes back. Together with the lookup after joining a network, GECKO
+     * has a fresh answer for where the user is whenever it can reach the map
+     * server. Runs until cancelled; the UI ties it to the started lifecycle, so
+     * nothing runs (and no location is asked for) in the background.
+     */
+    suspend fun keepRegistrationsFresh() {
+        while (true) {
+            val due = lastLookupAt + REGISTRATION_REFRESH_INTERVAL_MS - System.currentTimeMillis()
+            if (due > 0) {
+                delay(due)
+            } else {
+                refresh()
+                // Skipped while a check runs: try again shortly instead of a whole interval later.
+                delay(60_000)
+            }
         }
     }
 
@@ -412,12 +493,15 @@ class VerificationViewModel(
     private fun rebindGeckoClient() {
         val joined = networkObserver.joinedNetwork
         val cellular = networkObserver.cellularNetwork()
+        // Without a join of its own, the device's Wi-Fi: bound, it works right after joining,
+        // before Android makes a network with a captive portal the default route.
+        val wifi = joined ?: networkObserver.deviceWifiNetwork
         boundRoute = when {
             cellular != null -> QueryRoute.MOBILE_DATA
-            joined != null -> QueryRoute.JOINED_WIFI
+            wifi != null -> QueryRoute.JOINED_WIFI
             else -> QueryRoute.DEFAULT_ROUTE
         }
-        engine.gecko = GeckoClient(baseUrl = SERVER_URL, network = cellular ?: joined)
+        engine.gecko = GeckoClient(baseUrl = SERVER_URL, network = cellular ?: wifi)
         certProbe.network = joined
     }
 
@@ -473,13 +557,15 @@ class VerificationViewModel(
      * place. A failed proof is never papered over with saved data.
      */
     private fun applyLookup(lookup: LocationLookup, fix: LocationFix, viaSsid: String?) {
+        android.util.Log.i("GeckoLookup", "${lookup.status}, ${lookup.certificates.size} certificates, route $boundRoute, via $viaSsid${lookup.unreachableCause?.let { ": $it" }.orEmpty()}")
         if (lookup.status == LookupStatus.OK) {
-            registeredHere = lookup.certificates
+            // The answer covers the whole saved area; the list shows what reaches the device.
+            registeredHere = lookup.certificates.filter { it.coversLocation(fix.latitude, fix.longitude, effectiveRadius(fix)) }
             certLookup = LookupStatus.OK
             registrationsSavedAt = null
             val saved = SavedLookup(
                 fetchedAt = System.currentTimeMillis(), lat = fix.latitude, lng = fix.longitude,
-                radiusMeters = effectiveRadius(fix), route = boundRoute.label(),
+                radiusMeters = SAVED_AREA_RADIUS_METERS, route = boundRoute.label(),
                 viaSsid = viaSsid.takeIf { boundRoute == QueryRoute.JOINED_WIFI || boundRoute == QueryRoute.DEFAULT_ROUTE },
                 mapHeadMillis = lookup.mapHeadMillis, certificates = lookup.certificates
             )
@@ -487,10 +573,12 @@ class VerificationViewModel(
             savedLookup = saved
             return
         }
-        val saved = savedLookup
         val now = java.time.Instant.now()
+        dropExpiredLookup(now)
+        val saved = savedLookup
+        // Only where the saved answer is complete (D26): elsewhere an empty list would claim "nothing registered".
         if (lookup.status == LookupStatus.UNREACHABLE && saved != null &&
-            java.time.Duration.between(java.time.Instant.ofEpochMilli(saved.fetchedAt), now) <= com.thesis.geckowifi.eduroam.SAVED_REGISTRATION_MAX_AGE
+            saved.appliesAt(fix.latitude, fix.longitude, effectiveRadius(fix), now)
         ) {
             registeredHere = saved.certificates.filter { it.isValidAt(now) && it.coversLocation(fix.latitude, fix.longitude, effectiveRadius(fix)) }
             certLookup = LookupStatus.OK
@@ -500,6 +588,28 @@ class VerificationViewModel(
         registeredHere = lookup.certificates
         certLookup = lookup.status
         registrationsSavedAt = null
+    }
+
+    /** Deletes the saved answer once it is too old to be used anywhere (D26); realm records expire on their own. */
+    private fun dropExpiredLookup(now: java.time.Instant) {
+        if (savedLookup?.isExpired(now) == true) {
+            registrationCache?.clearLookup()
+            savedLookup = null
+        }
+    }
+
+    /** Metres between the device and where the saved answer was fetched, or null without either. */
+    fun savedLookupDistanceMeters(): Double? {
+        val saved = savedLookup ?: return null
+        val fix = location ?: return null
+        return distanceMeters(saved.lat, saved.lng, fix.latitude, fix.longitude)
+    }
+
+    /** Whether the saved answer [applies][appliesAt] where the device is now; null without a location. */
+    fun savedLookupAppliesHere(): Boolean? {
+        val saved = savedLookup ?: return false
+        val fix = location ?: return null
+        return saved.appliesAt(fix.latitude, fix.longitude, effectiveRadius(fix), java.time.Instant.now())
     }
 
     /**
@@ -523,6 +633,11 @@ class VerificationViewModel(
     /** The one entry point for the UI: joins and checks [network]. */
     fun startCheck(network: ScannedNetwork) {
         if (activeCheck != null) return
+        // Joining can't work with Wi-Fi off: say so instead of a "Couldn't join" result. Demo entries don't join.
+        if (network is ScannedNetwork.Real && !isWifiEnabled()) {
+            showNotice("Wi-Fi is off. Turn it on, then tap ${network.ssid} again.")
+            return
+        }
         checkJob = when {
             network is ScannedNetwork.Real && tapActionFor(network) == TapAction.ENTERPRISE -> { startEnterprise(network); null }
             network is ScannedNetwork.Real -> checkReal(network)
@@ -580,6 +695,8 @@ class VerificationViewModel(
     fun noticeShown() {
         pendingNotice = null
     }
+
+    fun isWifiEnabled(): Boolean = networkObserver.isWifiEnabled()
 
     /** Whether GECKO installed a pinned profile for [ssid] that is still there. */
     fun isSetUpByGecko(ssid: String): Boolean = enterprise?.isInstalled(ssid) == true
@@ -856,8 +973,14 @@ class VerificationViewModel(
             run.connected -> Triple(VerificationState.VERIFIED, null,
                 "connected as ${run.account?.identity}; the login server proved it is ${pins?.serverNames?.joinToString()} " +
                     "before the password was sent (${(decision as Decision.Proceed).why})")
-            else -> Triple(VerificationState.REGISTERED, null,
-                run.installFailure ?: "pinned profile installed; Android hasn't joined it yet")
+            run.installFailure != null -> Triple(VerificationState.REGISTERED, null, run.installFailure)
+            else -> {
+                // Android doesn't leave a working network for a suggestion by itself (D27).
+                val stayedOn = deviceSsid?.takeUnless { it.equals(run.target.ssid, ignoreCase = true) }
+                if (stayedOn != null) Triple(VerificationState.REGISTERED, CheckFailure.ANDROID_STAYED,
+                    "pinned profile installed; Android stayed on $stayedOn")
+                else Triple(VerificationState.REGISTERED, null, "pinned profile installed; Android hasn't joined it yet")
+            }
         }
         val result = VerificationResult(
             state, run.target.ssid,

@@ -31,6 +31,8 @@ import androidx.compose.ui.unit.dp
 import com.thesis.geckowifi.data.local.SavedLookup
 import com.thesis.geckowifi.data.model.GeoCertificate
 import com.thesis.geckowifi.eduroam.SAVED_REGISTRATION_MAX_AGE
+import com.thesis.geckowifi.ui.REGISTRATION_REFRESH_INTERVAL_MS
+import com.thesis.geckowifi.ui.SAVED_AREA_RADIUS_METERS
 import com.thesis.geckowifi.ui.VerificationViewModel
 import com.thesis.geckowifi.ui.components.DetailRow
 import com.thesis.geckowifi.ui.components.SectionCard
@@ -63,8 +65,11 @@ fun SavedDataScreen(viewModel: VerificationViewModel, onBack: () -> Unit) {
         ) {
             Text(
                 "What GECKO kept so it doesn't have to ask the map server for every network. Everything here passed GECKO's " +
-                    "checks when it arrived. A registration less than ${SAVED_REGISTRATION_MAX_AGE.toHours()} hours old lets " +
-                    "GECKO sign you in to an enterprise network without its onboarding step.",
+                    "checks when it arrived. The registrations are only used within ${SAVED_AREA_RADIUS_METERS} m of where they " +
+                    "were fetched and for ${SAVED_REGISTRATION_MAX_AGE.toHours()} hours. There they let GECKO check networks " +
+                    "when the map server can't be reached, and sign you in to an enterprise network without its onboarding step. " +
+                    "While the app is open, GECKO looks the place up again every ${REGISTRATION_REFRESH_INTERVAL_MS / 60_000} " +
+                    "minutes and whenever you join a network.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -74,7 +79,7 @@ fun SavedDataScreen(viewModel: VerificationViewModel, onBack: () -> Unit) {
                     Text("Nothing saved yet. GECKO saves the registrations around you whenever it can reach the map server.",
                         style = MaterialTheme.typography.bodyMedium)
                 } else {
-                    LookupSummary(lookup)
+                    LookupSummary(lookup, viewModel.savedLookupDistanceMeters(), viewModel.savedLookupAppliesHere())
                     lookup.certificates.sortedBy { it.wifi.ssid.orEmpty().lowercase() }.forEach {
                         HorizontalDivider(Modifier.padding(vertical = Space.sm), color = MaterialTheme.colorScheme.outlineVariant)
                         CertificateEntry(it)
@@ -126,16 +131,35 @@ fun SavedDataScreen(viewModel: VerificationViewModel, onBack: () -> Unit) {
     }
 }
 
+/**
+ * Where, when and how the saved answer was fetched, and whether it is used
+ * where the device is now (D26). [distanceMeters] and [appliesHere] are null
+ * while there is no location fix.
+ */
 @Composable
-private fun LookupSummary(lookup: SavedLookup) {
+private fun LookupSummary(lookup: SavedLookup, distanceMeters: Double?, appliesHere: Boolean?) {
     val ageMinutes = (System.currentTimeMillis() - lookup.fetchedAt) / 60_000
-    val usable = ageMinutes < SAVED_REGISTRATION_MAX_AGE.toMinutes()
+    val leftMinutes = SAVED_REGISTRATION_MAX_AGE.toMinutes() - ageMinutes
     DetailRow("Fetched", "${timeText(lookup.fetchedAt)} (${age(ageMinutes)} ago)", mono = false)
     DetailRow("Over", lookup.viaDescription(), mono = false)
-    DetailRow("Around", "%.5f, %.5f, %d m".format(lookup.lat, lookup.lng, lookup.radiusMeters))
+    DetailRow("Around", "%.5f, %.5f, within %d m".format(lookup.lat, lookup.lng, lookup.radiusMeters))
     lookup.mapHeadMillis?.let { DetailRow("Map signed", timeText(it), mono = false) }
-    DetailRow("Joining without onboarding", if (usable) "Yes, for ${age(SAVED_REGISTRATION_MAX_AGE.toMinutes() - ageMinutes)} more" else "No, too old", mono = false)
+    DetailRow("Valid for", if (leftMinutes > 0) "${age(leftMinutes)} more" else "No longer, too old", mono = false)
+    DetailRow(
+        "Used here",
+        when {
+            appliesHere == null || distanceMeters == null -> "Not known yet: GECKO has no location"
+            appliesHere -> "Yes, you're ${distance(distanceMeters)} from where it was fetched"
+            leftMinutes <= 0 -> "No, too old"
+            else -> "No, you're ${distance(distanceMeters)} from where it was fetched. GECKO uses it again if you come back, " +
+                "and replaces it the next time it reaches the map server"
+        },
+        mono = false
+    )
 }
+
+private fun distance(meters: Double): String =
+    if (meters < 1000) "${meters.toInt()} m" else "%.1f km".format(meters / 1000)
 
 @Composable
 private fun CertificateEntry(cert: GeoCertificate) {
