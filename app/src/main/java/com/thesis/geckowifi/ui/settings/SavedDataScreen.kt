@@ -56,7 +56,7 @@ fun SavedDataScreen(viewModel: VerificationViewModel, onBack: () -> Unit) {
 
     Column(Modifier.fillMaxWidth()) {
         TopAppBar(
-            title = { Text("Saved GECKO data") },
+            title = { Text("Saved Data") },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back") } }
         )
         Column(
@@ -64,17 +64,15 @@ fun SavedDataScreen(viewModel: VerificationViewModel, onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(Space.lg)
         ) {
             Text(
-                "What GECKO kept so it doesn't have to ask the map server for every network. Everything here passed GECKO's " +
-                    "checks when it arrived. The registrations are only used within ${SAVED_AREA_RADIUS_METERS} m of where they " +
-                    "were fetched and for ${SAVED_REGISTRATION_MAX_AGE.toHours()} hours. There they let GECKO check networks " +
-                    "when the map server can't be reached, and sign you in to an enterprise network without its onboarding step. " +
+                "The registrations are only used within ${SAVED_AREA_RADIUS_METERS} m of where they " +
+                    "were fetched and for ${SAVED_REGISTRATION_MAX_AGE.toHours()} hours." +
                     "While the app is open, GECKO looks the place up again every ${REGISTRATION_REFRESH_INTERVAL_MS / 60_000} " +
                     "minutes and whenever you join a network.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            SectionCard("Registrations") {
+            SectionCard("GeoCertificates") {
                 if (lookup == null) {
                     Text("Nothing saved yet. GECKO saves the registrations around you whenever it can reach the map server.",
                         style = MaterialTheme.typography.bodyMedium)
@@ -115,10 +113,9 @@ fun SavedDataScreen(viewModel: VerificationViewModel, onBack: () -> Unit) {
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
-            title = { Text("Delete saved data?") },
+            title = { Text("Delete Data?") },
             text = {
-                Text("GECKO forgets the saved registrations, login server records, verdicts and History, and asks the map server " +
-                    "again next time. Your accounts and the networks GECKO set up stay.")
+                Text("GECKO forgets the saved GeoCertificates, login server records, verdicts and History and asks the map server again next time.")
             },
             confirmButton = {
                 Button(

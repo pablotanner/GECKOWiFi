@@ -77,7 +77,7 @@ fun SettingsScreen(viewModel: VerificationViewModel, onOpenSavedData: () -> Unit
                 SetUpNetworksSection(it, onForget = viewModel::forgetEnterpriseNetwork)
             }
 
-            SectionHeader("Saved GECKO data")
+            SectionHeader("Saved Data")
             SectionCard(null, Modifier.padding(horizontal = Space.lg)) {
                 val saved = viewModel.savedLookup
                 Text(
@@ -87,11 +87,11 @@ fun SettingsScreen(viewModel: VerificationViewModel, onOpenSavedData: () -> Unit
                     style = MaterialTheme.typography.bodyMedium
                 )
                 OutlinedButton(onClick = onOpenSavedData, modifier = Modifier.padding(top = Space.md).heightIn(min = 48.dp)) {
-                    Text("Show saved data")
+                    Text("Show")
                 }
             }
 
-            SectionHeader("How GECKO protects you")
+            /*SectionHeader("How GECKO protects you")
             SectionCard(null, Modifier.padding(horizontal = Space.lg)) {
                 Text(
                     "Network operators register their WiFi and its login page for the place where it is. " +
@@ -104,7 +104,7 @@ fun SettingsScreen(viewModel: VerificationViewModel, onOpenSavedData: () -> Unit
                 ScopeLine(true, "Fake enterprise networks (e.g. eduroam clones) trying to steal your password")
                 ScopeLine(false, "Networks not certified by GECKO")
                 ScopeLine(false, "What happens to your traffic after you log in (TODO; requires Root)")
-            }
+            }*/
 
             Row(
                 Modifier
@@ -228,8 +228,7 @@ private fun AccountsSection(flow: EnterpriseController) {
     SectionHeader("Accounts")
     SectionCard(null, Modifier.padding(horizontal = Space.lg)) {
         Text(
-            "Accounts GECKO can sign you in with, such as your eduroam account. For each network, GECKO picks the account it accepts " +
-                "and only gives your password to a login server it has verified.",
+            "Accounts GECKO can sign you in with, such as your eduroam account. For each network, GECKO picks the account it accepts.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -264,7 +263,7 @@ private fun AccountsSection(flow: EnterpriseController) {
         AlertDialog(
             onDismissRequest = { removing = null },
             title = { Text("Remove ${account.identity}?") },
-            text = { Text("GECKO forgets this account and its password. Networks that are already set up keep working until you forget them under \"Networks GECKO set up\".") },
+            text = { Text("GECKO forgets this account and its password.") },
             confirmButton = {
                 Button(
                     onClick = { flow.removeAccount(account.id); removing = null },
@@ -285,17 +284,17 @@ private fun AccountsSection(flow: EnterpriseController) {
 private fun SetUpNetworksSection(flow: EnterpriseController, onForget: (String) -> Unit) {
     var forgetting by remember { mutableStateOf<String?>(null) }
 
-    SectionHeader("Networks GECKO set up")
+    SectionHeader("Your Networks")
     SectionCard(null, Modifier.padding(horizontal = Space.lg)) {
         Text(
-            "GECKO installed a profile for each of these, with your account and the verified login server. Android joins them on its own.",
+            "GECKO installed a profile for each of these, with your account and the verified login server. Your device joins them on its own.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         val ssids = flow.installedSsids.sortedBy { it.lowercase() }
         if (ssids.isEmpty()) {
             Text(
-                "None yet. When GECKO sets up a network such as eduroam, it shows here.",
+                "None yet. When GECKO sets up a network, it shows here.",
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(top = Space.md)
             )
