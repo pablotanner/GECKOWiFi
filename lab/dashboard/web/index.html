@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GECKO lab</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <svg width="0" height="0" class="sprite" aria-hidden="true" focusable="false">
+    <symbol id="i-ok" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+    <symbol id="i-fail" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></symbol>
+    <symbol id="i-blocked" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+    <symbol id="i-off" viewBox="0 0 24 24"><path d="M10.1 2.18a10 10 0 0 1 3.8 0"/><path d="M13.9 21.82a10 10 0 0 1-3.8 0"/><path d="M17.61 3.72a10 10 0 0 1 2.69 2.7"/><path d="M2.18 13.9a10 10 0 0 1 0-3.8"/><path d="M20.28 17.61a10 10 0 0 1-2.7 2.69"/><path d="M21.82 10.1a10 10 0 0 1 0 3.8"/><path d="M3.72 6.39a10 10 0 0 1 2.7-2.69"/><path d="M6.39 20.28a10 10 0 0 1-2.69-2.7"/></symbol>
+    <symbol id="i-unknown" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  </svg>
+
+  <header class="top">
+    <div class="wrap top-inner">
+      <div class="verdict">
+        <p class="eyebrow">GECKO lab</p>
+        <h1 id="verdict" class="display" aria-live="polite">Checking the lab</h1>
+        <p id="checked" class="muted">First check runs now, it takes about ten seconds.</p>
+      </div>
+      <div class="top-actions">
+        <button class="btn btn-primary" data-action="lab.start" title="Starts whatever is missing, in dependency order">
+          <svg class="icon"><use href="#i-play"/></svg><span>Start lab</span>
+        </button>
+        <button class="btn" id="refresh"><svg class="icon"><use href="#i-refresh"/></svg><span>Check now</span></button>
+      </div>
+    </div>
+    <nav class="wrap nav" aria-label="Sections">
+      <a href="#fix">Fix</a><a href="#map">Connections</a><a href="#services">Services</a><a href="#portals">Portals</a><a href="#addresses">Addresses</a>
+      <a href="#routers">Routers</a><a href="#tablet">Tablet</a><a href="#activity">Activity</a><a href="#all">All checks</a>
+    </nav>
+  </header>
+
+  <main class="wrap">
+    <section id="fix" aria-labelledby="fix-h">
+      <h2 id="fix-h">Fix these first</h2>
+      <p class="muted section-note">Root causes first. Checks that only fail because of another one are listed as waiting, not here.</p>
+      <div id="problems" class="problems"></div>
+    </section>
+
+    <section id="map" aria-labelledby="map-h">
+      <h2 id="map-h">Who reaches whom</h2>
+      <div class="map-grid">
+        <figure class="topology" aria-hidden="true">
+          <svg id="topology" viewBox="0 0 720 300" role="img"></svg>
+        </figure>
+        <ul id="links" class="links"></ul>
+      </div>
+    </section>
+
+    <section id="services" aria-labelledby="services-h">
+      <h2 id="services-h">Services</h2>
+      <div id="service-list" class="rows"></div>
+    </section>
+
+    <section id="portals" aria-labelledby="portals-h">
+      <h2 id="portals-h">Captive-portal experiment</h2>
+      <p class="muted section-note">One genuine portal for Router A and one attacker portal for Router B. Picking a config replaces the one running on that address.</p>
+      <div id="portal-slots" class="panels"></div>
+      <div class="panel">
+        <div class="scenario-head">
+          <h3>Scenarios</h3>
+          <p id="scenario-now" class="muted"></p>
+        </div>
+        <p class="muted">Set up runs lab/scenarios/scenario.ps1 for Router B (DNS, openNDS, firewall) and starts the scenario's two portals. Deauth the tablet before each run.</p>
+        <ul id="scenario-list" class="scenario-list"></ul>
+        <div class="button-row">
+          <button class="btn" data-action="scenario.reset">Back to the baseline</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="addresses" aria-labelledby="addresses-h">
+      <h2 id="addresses-h">Addresses: expected and actual</h2>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th scope="col">Where</th><th scope="col">What</th><th scope="col">Expected</th><th scope="col">Actual</th><th scope="col">State</th></tr></thead>
+          <tbody id="address-rows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="routers" aria-labelledby="routers-h">
+      <h2 id="routers-h">Routers</h2>
+      <div id="router-panels" class="panels"></div>
+      <div class="panel">
+        <h3>Router B: eduroam-lab</h3>
+        <p class="muted">B1 needs FreeRADIUS attacker-b1 and the relay running; the dashboard refuses otherwise. Keep the radio on only while testing.</p>
+        <div class="seg" role="group" aria-label="Router B eduroam-lab mode" id="bmode">
+          <button class="seg-btn" data-action="routerb.mode" data-arg="off" aria-pressed="false">Off</button>
+          <button class="seg-btn" data-action="routerb.mode" data-arg="legit" aria-pressed="false">Legit SP</button>
+          <button class="seg-btn" data-action="routerb.mode" data-arg="b1" aria-pressed="false">Attacker B1</button>
+        </div>
+        <div class="button-row">
+          <button class="btn" data-action="routers.snapshot">Snapshot router configs</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="tablet" aria-labelledby="tablet-h">
+      <h2 id="tablet-h">Tablet</h2>
+      <div id="tablet-panel" class="panel"></div>
+    </section>
+
+    <section id="activity" aria-labelledby="activity-h">
+      <h2 id="activity-h">Activity</h2>
+      <div class="panels">
+        <div class="panel"><h3>Actions</h3><ol id="jobs" class="jobs"></ol></div>
+        <div class="panel"><h3>Changes since the dashboard started</h3><ol id="events" class="events"></ol></div>
+      </div>
+    </section>
+
+    <section id="all" aria-labelledby="all-h">
+      <h2 id="all-h">All checks</h2>
+      <div id="all-checks"></div>
+    </section>
+  </main>
+
+  <dialog id="log-dialog" class="dialog dialog-wide" aria-labelledby="log-title">
+    <div class="dialog-head">
+      <h2 id="log-title">Log</h2>
+      <div class="button-row">
+        <button class="btn" id="log-reload"><svg class="icon"><use href="#i-refresh"/></svg><span>Reload</span></button>
+        <button class="btn btn-icon" id="log-close" aria-label="Close"><svg class="icon"><use href="#i-x"/></svg></button>
+      </div>
+    </div>
+    <pre id="log-text" class="log" tabindex="0"></pre>
+  </dialog>
+
+  <dialog id="sudo-dialog" class="dialog" aria-labelledby="sudo-title">
+    <form method="dialog" id="sudo-form">
+      <h2 id="sudo-title">WSL sudo password</h2>
+      <p class="muted">FreeRADIUS and PostgreSQL run as root in WSL. The password stays in the dashboard's memory until it stops; it is never written to disk.</p>
+      <label class="field">
+        <span>Password for your WSL user</span>
+        <input type="password" id="sudo-input" autocomplete="current-password" required>
+      </label>
+      <p id="sudo-error" class="field-error" role="alert" hidden></p>
+      <div class="button-row end">
+        <button class="btn" value="cancel" formnovalidate>Cancel</button>
+        <button class="btn btn-primary" value="ok" id="sudo-ok">Continue</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="confirm-dialog" class="dialog" aria-labelledby="confirm-title">
+    <form method="dialog">
+      <h2 id="confirm-title">Are you sure?</h2>
+      <p id="confirm-text"></p>
+      <div class="button-row end">
+        <button class="btn" value="cancel">Cancel</button>
+        <button class="btn btn-destructive" value="ok" id="confirm-ok">Do it</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>

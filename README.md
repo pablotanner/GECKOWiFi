@@ -113,8 +113,8 @@ ssh mango-a "curl -s -o /dev/null -w '%{http_code}\n' http://192.168.137.1:1234/
 
 Laptop can't even reach Routers (ssh mango-a)? 
 - Turn off Sharing ("Allow other network users to connect…") and then on again in 
-- Check ```powershell Get-NetIPAddress -InterfaceAlias 'Ethernet 4' -AddressFamily IPv4 | ft IPAddress,PrefixLength ```
-- If .1 is missing above: ```powershell New-NetIPAddress -InterfaceAlias 'Ethernet 4' -IPAddress 192.168.137.1 -PrefixLength 24```
+- Check ```Get-NetIPAddress -InterfaceAlias 'Ethernet 4' -AddressFamily IPv4 | ft IPAddress,PrefixLength ```
+- If .1 is missing above: ```New-NetIPAddress -InterfaceAlias 'Ethernet 4' -IPAddress 192.168.137.1 -PrefixLength 24```
 
 Finally, re-add addresses so portal can still run:
 ```powershell
