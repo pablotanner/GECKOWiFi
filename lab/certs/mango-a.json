@@ -1,32 +1,58 @@
 [
   {
-    "schema_version": 3,
     "certificate_id": "mango-a",
-    "subject": { "id": "gecko-a.lab", "name": "GECKO Lab, Router A" },
-    "critical": [],
-    "wifi": {
-      "ssid": "GeckoTest",
-      "auth_modes": ["open"]
-    },
-    "portal": {
-      "domains": [
-        {
-          "name": "portal.gecko-a.lab",
-          "role": "primary",
-          "pinned_spki_sha256": ["dAJnHfG0hpOWSRhQOeWz1NBoiXHnUnB2y/40h9i2exk="]
-        },
-        {
-          "name": "pay.gecko-pay.lab",
-          "role": "delegate",
-          "pinned_spki_sha256": ["u9H7ovOnPGAi3ptBn2262bEEeXNcndvZCmnr8gmG3+c="]
+    "domain": "gecko-a.lab",
+    "areas": [
+      {
+        "type": "MultiPolygon",
+        "coordinates": [
+          [
+            [
+              [8.515, 47.36],
+              [8.565, 47.36],
+              [8.565, 47.39],
+              [8.515, 47.39],
+              [8.515, 47.36]
+            ]
+          ],
+          []
+        ]
+      }
+    ],
+    "areas_altitude": [
+      [200, 700]
+    ],
+    "not_valid_after": "2031-09-26T15:28:00Z",
+    "critical": [
+      "wifi"
+    ],
+    "extensions": {
+      "wifi": {
+        "version": 1,
+        "operator": "GECKO Lab, Router A",
+        "ssid": "GeckoTest",
+        "auth_modes": [
+          "open"
+        ],
+        "portal": {
+          "domains": [
+            {
+              "name": "portal.gecko-a.lab",
+              "role": "primary",
+              "pinned_spki_sha256": [
+                "dAJnHfG0hpOWSRhQOeWz1NBoiXHnUnB2y/40h9i2exk="
+              ]
+            },
+            {
+              "name": "pay.gecko-pay.lab",
+              "role": "delegate",
+              "pinned_spki_sha256": [
+                "u9H7ovOnPGAi3ptBn2262bEEeXNcndvZCmnr8gmG3+c="
+              ]
+            }
+          ]
         }
-      ]
-    },
-    "areas": [{
-      "type": "MultiPolygon",
-      "coordinates": [[[[8.515,47.360],[8.565,47.360],[8.565,47.390],[8.515,47.390],[8.515,47.360]]],[]]
-    }],
-    "areas_altitude": [[200,700]],
-    "not_valid_after": "2031-09-26T15:28:00Z"
+      }
+    }
   }
 ]

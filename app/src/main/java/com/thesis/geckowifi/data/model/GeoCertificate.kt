@@ -166,10 +166,17 @@ data class GeoCertArea(
     val interiorRings: List<List<List<Double>>> get() = coordinates.getOrNull(1).orEmpty()
 }
 
-/** Critical features this client implements; see [GeoCertificate.isEvaluable]. None defined yet. */
+/**
+ * Critical extensions this client implements besides "wifi" (which
+ * [GeoCertificateFormat.decode] removes from `critical`); see [GeoCertificate.isEvaluable].
+ */
 val SUPPORTED_CRITICAL_FEATURES: Set<String> = emptySet()
 
-/** The client-side model of a GeoCertificate; the schema is specified in docs/geocert-schema.md. */
+/**
+ * The client-side model of a WiFi GeoCertificate, in the shape of schema v3
+ * (docs/geocert-schema.md). The map server's format is read with
+ * [GeoCertificateFormat]; this shape is what the app works with and saves.
+ */
 @Serializable
 data class GeoCertificate(
     /** 3 = current; 2 = per-domain portal pins, single `auth_mode`; 0 = legacy certificate without the field. */

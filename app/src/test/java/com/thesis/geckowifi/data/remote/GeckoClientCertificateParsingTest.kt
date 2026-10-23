@@ -155,7 +155,11 @@ class GeckoClientCertificateParsingTest {
 
     // --- schema v3 ---
 
-    /** lab/certs/mango-a.json as registered on the server. */
+    /**
+     * mango-a in the app's own v3 shape: what the server served before the
+     * extension format, and what saved data still holds. The server's current
+     * format is tested in GeoCertificateFormatTest.
+     */
     private val mangoAv3 = """
         {
           "schema_version": 3,

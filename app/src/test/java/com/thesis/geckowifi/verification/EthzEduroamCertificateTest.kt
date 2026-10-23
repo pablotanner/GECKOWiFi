@@ -1,6 +1,7 @@
 package com.thesis.geckowifi.verification
 
 import com.thesis.geckowifi.data.model.GeoCertificate
+import com.thesis.geckowifi.data.model.GeoCertificateFormat
 import com.thesis.geckowifi.data.model.VerificationState
 import com.thesis.geckowifi.data.model.WiFiAuthMode
 import com.thesis.geckowifi.data.remote.GeckoClient
@@ -8,8 +9,8 @@ import com.thesis.geckowifi.data.remote.GeckoResponse
 import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -28,10 +29,10 @@ class EthzEduroamCertificateTest {
 
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
 
-    private val cert: GeoCertificate = json.decodeFromString(
-        ListSerializer(GeoCertificate.serializer()),
-        File("../lab/certs/ethz-eduroam.json").readText()
-    ).single()
+    // the file is an insertion request (a JSON array); each entry is one certificate as the server stores it
+    private val cert: GeoCertificate = json.parseToJsonElement(File("../lab/certs/ethz-eduroam.json").readText())
+        .jsonArray.single()
+        .let { GeoCertificateFormat.decode(json, it.toString())!! }
 
     private val server = cert.wifi.enterprise!!.aaa.single().servers.single()
 

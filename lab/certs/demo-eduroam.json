@@ -1,29 +1,70 @@
 [
   {
-    "schema_version": 3,
     "certificate_id": "demo-eduroam-ethz",
-    "subject": { "id": "ethz.ch", "name": "ETH Zürich (demo)" },
-    "critical": [],
-    "wifi": {
-      "ssid": "eduroam",
-      "auth_modes": ["wpa2-enterprise", "wpa3-enterprise"],
-      "enterprise": {
-        "federation": "eduroam",
-        "aaa": [{
-          "realms": ["ethz.ch", "*.ethz.ch"],
-          "eap_methods": [{ "method": "peap", "phase2": ["mschapv2"] }],
-          "servers": [{
-            "names": ["radius.ethz.ch"],
-            "ca_spki_sha256": ["NLEWAnfdeAYUmQvPuzEdZA980jz6RORmyEERVADEFHA="]
-          }]
-        }]
+    "domain": "ethz.ch",
+    "areas": [
+      {
+        "type": "MultiPolygon",
+        "coordinates": [
+          [
+            [
+              [8.515, 47.36],
+              [8.565, 47.36],
+              [8.565, 47.39],
+              [8.515, 47.39],
+              [8.515, 47.36]
+            ]
+          ],
+          []
+        ]
       }
-    },
-    "areas": [{
-      "type": "MultiPolygon",
-      "coordinates": [[[[8.515,47.360],[8.565,47.360],[8.565,47.390],[8.515,47.390],[8.515,47.360]]],[]]
-    }],
-    "areas_altitude": [[200,700]],
-    "not_valid_after": "2031-09-26T15:28:00Z"
+    ],
+    "areas_altitude": [
+      [200, 700]
+    ],
+    "not_valid_after": "2031-09-26T15:28:00Z",
+    "critical": [
+      "wifi"
+    ],
+    "extensions": {
+      "wifi": {
+        "version": 1,
+        "operator": "ETH Zürich (demo)",
+        "ssid": "eduroam",
+        "auth_modes": [
+          "wpa2-enterprise",
+          "wpa3-enterprise"
+        ],
+        "enterprise": {
+          "federation": "eduroam",
+          "aaa": [
+            {
+              "realms": [
+                "ethz.ch",
+                "*.ethz.ch"
+              ],
+              "eap_methods": [
+                {
+                  "method": "peap",
+                  "phase2": [
+                    "mschapv2"
+                  ]
+                }
+              ],
+              "servers": [
+                {
+                  "names": [
+                    "radius.ethz.ch"
+                  ],
+                  "ca_spki_sha256": [
+                    "NLEWAnfdeAYUmQvPuzEdZA980jz6RORmyEERVADEFHA="
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
   }
 ]

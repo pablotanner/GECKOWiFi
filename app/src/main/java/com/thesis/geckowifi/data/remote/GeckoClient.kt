@@ -3,6 +3,7 @@ package com.thesis.geckowifi.data.remote
 import android.net.Network
 import com.thesis.geckowifi.BuildConfig
 import com.thesis.geckowifi.data.model.GeoCertificate
+import com.thesis.geckowifi.data.model.GeoCertificateFormat
 import com.thesis.geckowifi.geopki.bitstring.RawXYBitString
 import com.thesis.geckowifi.geopki.crypto.GeoPkiQuery
 import com.thesis.geckowifi.geopki.crypto.GeoPkiVerificationException
@@ -240,13 +241,14 @@ class GeckoClient(
                 // node tree - only the JSON decoding below remains unverified,
                 // and is done per-certificate so one malformed entry doesn't
                 // discard every other (possibly hostile) certificate at this
-                // location.
+                // location. Certificates of other kinds (no wifi extension)
+                // counted for the proof above and are left out here.
                 val certificates = ArrayList<GeoCertificate>(protoResponse.Certificates.size)
                 var unparsedCount = 0
                 for (raw in protoResponse.Certificates) {
                     val bytes = raw.toByteArray()
                     try {
-                        certificates += parseCertificate(bytes)
+                        parseCertificate(bytes)?.let { certificates += it }
                     } catch (e: Exception) {
                         unparsedCount++
                         System.err.println("GeckoClient: dropping unparsable certificate ${certificateIdOf(bytes)}: ${e.message}")
@@ -282,15 +284,11 @@ class GeckoClient(
             fallback.newCall(request).execute() to false
         }
 
-    // CONFIRMED (2026-09-11, against a live geopki server - see
-    // app/src/test/resources/geopki-fixtures/cert0.json): each entry of
-    // response.Certificates is a UTF-8 JSON document, not binary/protobuf,
-    // and GeoCertificate.kt's shape correctly matches the server's real Go
-    // `GeoCertificate` struct (certificate_id/wifi/portal/areas/
-    // areas_altitude/not_valid_after all line up, including "wifi" genuinely
-    // being required - no `omitempty` on the Go side either).
-    private fun parseCertificate(bytes: ByteArray): GeoCertificate =
-        certificateJson.decodeFromString(GeoCertificate.serializer(), String(bytes, Charsets.UTF_8))
+    // Each entry of response.Certificates is a UTF-8 JSON document: geopki's
+    // generic certificate with the WiFi network in extensions.wifi (see
+    // GeoCertificateFormat). Null for a certificate of another kind.
+    private fun parseCertificate(bytes: ByteArray): GeoCertificate? =
+        GeoCertificateFormat.decode(certificateJson, String(bytes, Charsets.UTF_8))
 
     /** Best-effort `certificate_id` of a certificate that failed to parse, so the log says which one. */
     private fun certificateIdOf(bytes: ByteArray): String =

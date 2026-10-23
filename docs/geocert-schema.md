@@ -1,15 +1,27 @@
-# GeoCertificate schema (v3)
+# GeoCertificate format: geopki core + `wifi` extension
 
-The JSON format of a GeoCertificate as stored in the geopki map server and
-read by the app. The Go structs live in geopki's `pkg/crypto/certificate.go`,
-the Kotlin model in `app/.../data/model/GeoCertificate.kt`. Both must follow
-this document.
+The JSON format of a WiFi GeoCertificate as stored in the geopki map server
+and read by the app. geopki's certificate is generic: a core that binds a
+`domain` to areas, and named extensions for what a particular kind of
+certificate says (D28). A WiFi network is the `wifi` extension.
+
+- geopki: the core in `pkg/crypto/certificate.go`, the extension and its
+  validator in `pkg/extension/wifi` (with its own `README.md`).
+- App: `GeoCertificateFormat` reads the server's format into
+  `GeoCertificate`, which keeps the shape of the former flat schema v3, so
+  the rest of the app and saved data didn't change.
+
+Both must follow this document. Until 2026-10-22 the lab server stored the
+flat schema v3 (WiFi fields at the top level); the mapping is in *Former flat
+schema v3* below.
 
 ## Rules that keep the schema stable
 
 1. **Unknown fields are ignored** by the client, unless named in `critical`.
-2. **`critical`** lists features a certificate can't be judged without. A
-   client that doesn't implement one treats the certificate as unevaluable:
+2. **`critical`** lists extensions a certificate can't be judged without.
+   WiFi certificates list `wifi`, which the app implements, so a client that
+   doesn't know WiFi ignores them. A client that doesn't implement one treats
+   the certificate as unevaluable:
    never `VERIFIED`, never `CONFLICT`. If it was the SSID's only certificate
    the result is a silent `UNVERIFIED`; if other certificates exist, a
    `CONFLICT` from them is downgraded to `UNVERIFIED`. Mark a feature critical
@@ -35,30 +47,33 @@ bytes, so both sides must read the same bytes the same way.
 
 ```json
 {
-  "schema_version": 3,
   "certificate_id": "ethz-zentrum-eduroam-2026a",
-  "subject": { "id": "ethz.ch", "name": "ETH Zürich" },
-  "critical": [],
-  "wifi": {
-    "ssid": "eduroam",
-    "auth_modes": ["wpa2-enterprise", "wpa3-enterprise"],
-    "pmf": "optional",
-    "enterprise": {
-      "federation": "eduroam",
-      "aaa": [{
-        "realms": ["ethz.ch", "*.ethz.ch"],
-        "eap_methods": [{ "method": "peap", "phase2": ["mschapv2"] }],
-        "servers": [{
-          "names": ["radius.ethz.ch"],
-          "ca_spki_sha256": ["<base64>"]
-        }]
-      }]
-    }
-  },
+  "domain": "ethz.ch",
   "areas": [{ "type": "MultiPolygon", "coordinates": [[[[8.515,47.360], ...]], []] }],
   "areas_altitude": [[200, 700]],
   "not_valid_before": "2026-11-01T00:00:00Z",
-  "not_valid_after": "2027-11-01T00:00:00Z"
+  "not_valid_after": "2027-11-01T00:00:00Z",
+  "critical": ["wifi"],
+  "extensions": {
+    "wifi": {
+      "version": 1,
+      "operator": "ETH Zürich",
+      "ssid": "eduroam",
+      "auth_modes": ["wpa2-enterprise", "wpa3-enterprise"],
+      "pmf": "optional",
+      "enterprise": {
+        "federation": "eduroam",
+        "aaa": [{
+          "realms": ["ethz.ch", "*.ethz.ch"],
+          "eap_methods": [{ "method": "peap", "phase2": ["mschapv2"] }],
+          "servers": [{
+            "names": ["radius.ethz.ch"],
+            "ca_spki_sha256": ["<base64>"]
+          }]
+        }]
+      }
+    }
+  }
 }
 ```
 
@@ -69,30 +84,30 @@ hashes for the demo entries), [`lab/certs/ethz-eduroam.json`](../lab/certs/ethz-
 
 ## Fields
 
-### Top level
+### Core (geopki)
 
 | Field | Required | Meaning |
 |---|---|---|
-| `schema_version` | yes | `3` |
 | `certificate_id` | yes | Unique per issuance |
-| `subject.id` | yes | Registrant the authority bound this claim to (e.g. a verified domain). Certificates with the same id belong to one operator |
-| `subject.name` | no | Display only, never matched |
-| `critical` | no | See rule 2. No critical features are defined yet |
-| `wifi` | yes | The network, below |
-| `portal` | no | Captive-portal domains, unchanged from v2 (below) |
+| `domain` | yes | Registrant the authority bound this claim to (a verified domain). Certificates with the same domain belong to one operator |
 | `areas`, `areas_altitude` | yes | Unchanged from upstream geopki, see *Areas* |
 | `not_valid_before` | no | RFC 3339, UTC with `Z`. Absent = valid from issuance |
 | `not_valid_after` | yes | RFC 3339, UTC with `Z` |
+| `critical` | no | See rule 2. WiFi certificates: `["wifi"]` |
+| `extensions` | no | Name to content. The network is `extensions.wifi`; a certificate without it isn't a WiFi certificate and the app ignores it |
 
-### `wifi`
+### `extensions.wifi`
 
 | Field | Meaning |
 |---|---|
+| `version` | Required, `1`. The app doesn't read other versions (the certificate counts as unreadable) |
+| `operator` | Display name of the operator, never matched |
 | `ssid` | Required. Compared case-insensitively by the client; the server's overlap check must use the same rule |
 | `ssid_shared` | Default `false`: the SSID is exclusive here, a non-matching network on it is a `CONFLICT`. `true` for a generic SSID shared by several operators in one area |
 | `auth_modes` | Every mode the network advertises: `open`, `owe`, `wpa2-personal`, `wpa3-personal`, `wpa2-enterprise`, `wpa3-enterprise`, `wpa3-enterprise-192`. A transition-mode network lists all of its modes |
 | `pmf` | `optional` / `required`; absent = unspecified. Parsed, not yet compared |
 | `enterprise` | Required for the enterprise modes, absent otherwise |
+| `portal` | Captive-portal domains, below |
 
 ### `wifi.enterprise`
 
@@ -107,7 +122,7 @@ hashes for the demo entries), [`lab/certs/ethz-eduroam.json`](../lab/certs/ethz-
 | `aaa[].servers[].ca_spki_sha256` | SHA-256 of a CA's SPKI, base64. Matched against the chain the server sends, or against `ca_certificates` |
 | `aaa[].servers[].ca_certificates` | Optional: the CA certificates themselves, base64 DER (as in an eduroam CAT profile). Only those whose key is in `ca_spki_sha256` are used. They let the client check a chain whose root the server doesn't send, and are what a supplicant needs to pin the CA when it enforces the check inside the handshake |
 
-### `portal`
+### `wifi.portal`
 
 `domains[]` of `{name, role, pinned_spki_sha256[], certificate_sha256[]}`,
 `role` one of `primary` (entry point), `delegate` (only after the primary),
@@ -159,14 +174,35 @@ the switch and letting the old one expire.
 
 Not enforced by the client, assumed by it:
 
-- Reject on insert: unknown/duplicate/miscased keys; enterprise modes without
-  an `enterprise` block; a server entry without pins; `ca_spki_sha256` without
-  `names`; a federation `aaa` entry without `realms`; a portal domain without
-  pins; missing areas or `areas_altitude` not matching `areas`; hashes that
-  aren't 32 bytes of base64; timestamps without `Z`.
-- Refuse a certificate whose `(SSID, area)` overlaps one of a **different**
-  `subject.id` (exclusivity), but allow it for the same subject (rotation).
-  Compare SSIDs case-insensitively, as the client does.
+- Reject on insert (implemented, `pkg/extension/wifi` and the core's
+  `CheckStructure`): unknown/duplicate/miscased keys in the extension;
+  enterprise modes without an `enterprise` block and the reverse; a server
+  entry without pins; `ca_spki_sha256` without `names`; a federation `aaa`
+  entry without `realms`; a portal domain without pins; missing areas or
+  `areas_altitude` not matching `areas`; hashes that aren't 32 bytes of base64;
+  a critical extension the certificate doesn't contain.
+- Not implemented yet: timestamps without `Z`; refusing a certificate whose
+  `(SSID, area)` overlaps one of a **different** `domain` (exclusivity), but
+  allowing it for the same domain (rotation), with SSIDs compared
+  case-insensitively, as the client does.
+
+## Former flat schema v3
+
+Before the extension format the lab server stored WiFi certificates flat. The
+app's `GeoCertificate` still has this shape (saved data uses it);
+`GeoCertificateFormat` maps the server's format onto it:
+
+| Flat v3 | Extension format |
+|---|---|
+| `schema_version: 3` | `extensions.wifi.version: 1` |
+| `subject.id` | `domain` |
+| `subject.name` | `extensions.wifi.operator` |
+| `wifi.*` | `extensions.wifi.*` |
+| `portal` | `extensions.wifi.portal` |
+| `critical: []` | `critical: ["wifi"]` (other critical names carry over) |
+
+A certificate in the flat format has no `extensions`, so the app no longer
+reads it as a WiFi certificate.
 
 ## Not in the schema, deliberately
 

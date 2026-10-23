@@ -360,3 +360,26 @@ with its own request.
   would delete a working setup), or a root command (untested on the Tab). A
   system-level GECKO (D1) would select the network in wpa_supplicant directly,
   and the problem disappears.
+
+## D28. WiFi is an extension of a generic GeoCertificate
+The geopki maintainers want WiFi as one kind of certificate among others
+(shops, ATMs, ...), not as geopki's certificate format. The lab server had
+replaced upstream's generic certificate with the flat schema v3.
+- **geopki** (upstream pull request from branch `geocert-extensions` of the
+  fork): the core binds a `domain` to areas; named `extensions` carry
+  everything else, `critical` names the ones a client must understand. The
+  server keeps each certificate's submitted bytes (it used to re-marshal them,
+  which dropped unknown fields: the cause of D24) and validates the extensions
+  it knows. A query still returns every certificate of an area, so completeness
+  stays provable; each client filters by extension. The WiFi network is
+  `extensions.wifi`, validated strictly on insertion.
+- **App:** `GeoCertificateFormat` reads the server's format into the existing
+  `GeoCertificate`, so the rest of the app and saved data are unchanged.
+  Certificates without `wifi` count for the proof (completeness is checked on
+  the raw bytes first) and are then ignored. `wifi` is the one critical
+  extension the app implements; any other still makes a certificate
+  unevaluable.
+- **Lab:** the lab certificates were converted (`lab/certs/`), and the new
+  server runs with the same signing key, so the app's pin didn't change. It has
+  its own database and Trillian tree; the old server, database and tree stay as
+  the way back (lab-setup.md, *Map server*).

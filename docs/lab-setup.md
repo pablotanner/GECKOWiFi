@@ -42,16 +42,29 @@ access point it is checking.
 
 ## Map server
 
-The server is [geopki](https://github.com/netsec-ethz/geopki) running in WSL2
-(Ubuntu 22.04, PostgreSQL 14). Trillian runs in Docker from
-`trillian/examples/deployment` and restarts on its own. `direnv` loads
-`DATABASE_URL`, `CERT_INSERT_KEY` and `PRIVATE_KEY` from `.envrc`.
+The server is [geopki](https://github.com/netsec-ethz/geopki) with GeoCert
+extensions, running in WSL2 (Ubuntu 22.04, PostgreSQL 14): `~/Thesis/geopki-ext`,
+branch `lab-admin` of the fork (`geocert-extensions`, the upstream pull request,
+plus the admin dashboard). Database `geopki_ext`, Trillian tree
+`8686676202186529070`. Trillian runs in Docker from
+`trillian/examples/deployment` and restarts on its own. `.envrc` holds
+`DATABASE_URL`, `CERT_INSERT_KEY`, `PRIVATE_KEY` and `CLOG_ID`; copies of the
+secrets are in `lab-secrets/geopki/`.
 
 ```bash
-cd ~/Thesis/geopki
+cd ~/Thesis/geopki-ext
+source .envrc
 go run ./cmd/geopki-server --address=0.0.0.0 --port=1234 \
-  --trillian-address=127.0.0.1:8090 --clog-id=5656256576233247638
+  --trillian-address=127.0.0.1:8090 --clog-id=$CLOG_ID
 ```
+
+Admin dashboard (every stored certificate with its extensions; insert, delete,
+release; needs the insertion key): `http://192.168.137.1:1234/demo/admin.html`.
+
+The server before the extension format (flat schema v3) is still in
+`~/Thesis/geopki` with database `geopki` and tree `5656256576233247638`, kept
+as the way back; its code is branch `wifi-prototype` of the fork, a database
+dump is in `lab-secrets/geopki/`.
 
 WSL runs behind NAT on Windows 10, so `netsh portproxy` forwards port 1234 from
 the laptop to WSL. WSL gets a new address on every restart. After a reboot,
@@ -73,8 +86,13 @@ The server's public key is pinned in the app; if the server is ever set up
 with a new key, every check fails with `CONFLICT` until the pin is updated.
 
 ## GeoCertificates
-Certificates use schema v3, specified in [geocert-schema.md](geocert-schema.md).
-A captive portal is a list of domains, each with a role and its own pinned keys:
+Certificates are geopki's generic format with the WiFi network in the `wifi`
+extension (`extensions.wifi`, listed in `critical`); see
+[geocert-schema.md](geocert-schema.md). The server also returns certificates of
+other kinds; the app counts them for the proof and otherwise ignores them. The
+files in `lab/certs/` are insertion requests (JSON arrays): paste one into the
+admin dashboard to register it. A captive portal is a list of domains, each
+with a role and its own pinned keys:
 
 - `primary`: the login page, the only valid entry point
 - `delegate`: only valid after the primary, e.g. a payment page
