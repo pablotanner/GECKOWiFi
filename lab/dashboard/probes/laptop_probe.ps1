@@ -23,7 +23,8 @@ function Adapter($name) {
 }
 
 $names = 'python.exe', 'pythonw.exe', 'go.exe', 'realm.exe', 'portal.exe', 'Docker Desktop.exe', 'com.docker.backend.exe', 'adb.exe'
-$procs = @(Get-CimInstance Win32_Process | Where-Object { $names -contains $_.Name } | ForEach-Object {
+# python* also catches the Microsoft Store build (python3.13.exe) and the py launcher's children
+$procs = @(Get-CimInstance Win32_Process | Where-Object { $names -contains $_.Name -or $_.Name -like 'python*.exe' } | ForEach-Object {
   [ordered]@{
     pid     = $_.ProcessId
     parent  = $_.ParentProcessId

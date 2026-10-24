@@ -1089,7 +1089,8 @@ def wsl_action(cmd, arg=None, sudo=False, timeout=120):
 
 
 def start_relay():
-    stop_relay(quiet=True)
+    if stop_relay(quiet=True):
+        time.sleep(1)  # let Windows release the ports
     p, log = spawn("relay", [sys.executable, "-u", str(REPO / "lab" / "eduroam" / "udp-relay.py")], REPO)
     STATE.remember("relay", {"pid": p.pid})
     time.sleep(3)
@@ -1099,8 +1100,19 @@ def start_relay():
 
 
 def stop_relay(quiet=False):
-    pids = [p["pid"] for p in lab_procs(lambda n, c: n.startswith("python") and "udp-relay.py" in c)]
-    return kill(pids) if pids else ("" if quiet else "relay was not running")
+    pids = {p["pid"] for p in lab_procs(lambda n, c: n.startswith("python") and "udp-relay.py" in c)}
+    # Whatever holds the relay ports right now, also a relay the last check missed:
+    # a second relay can't bind them (WinError 10048).
+    udp = probe_netstat()["udp"]
+    for port in RELAY_PORTS:
+        owner = udp.get(f"{LAPTOP_IP}:{port}")
+        if owner and owner not in pids:
+            rc, out = run(["tasklist", "/FI", f"PID eq {owner}", "/FO", "CSV", "/NH"], timeout=8)
+            name = out.split(",")[0].strip('"') if out.startswith('"') else "?"
+            if not name.lower().startswith("python"):
+                raise RuntimeError(f"{LAPTOP_IP}:{port} is held by {name} (pid {owner}), not by a relay: stop that first.")
+            pids.add(owner)
+    return kill(sorted(pids)) if pids else ("" if quiet else "relay was not running")
 
 
 def start_realm():
