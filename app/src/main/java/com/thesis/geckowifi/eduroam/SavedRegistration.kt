@@ -30,7 +30,7 @@ sealed interface DataSource {
  * (map-head freshness is unsolved either way); the limit is for honest changes,
  * such as an operator rotating its certificate or a revoked registration.
  */
-val SAVED_REGISTRATION_MAX_AGE: Duration = Duration.ofHours(24)
+val SAVED_REGISTRATION_MAX_AGE: Duration = Duration.ofHours(2)
 
 /**
  * The saved registrations that let GECKO skip onboarding for [ssid] here and
