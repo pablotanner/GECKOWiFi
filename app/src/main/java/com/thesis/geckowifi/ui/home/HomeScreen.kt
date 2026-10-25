@@ -121,8 +121,12 @@ fun HomeScreen(
         onAndroidSettings = { network ->
             Toast.makeText(
                 context,
-                if (network.isEnterprise) "GECKO can't sign in to ${network.ssid} in this prototype. Join it in Android's settings."
-                else "GECKO doesn't check password networks. Join ${network.ssid} in Android's settings.",
+                when {
+                    !network.isEnterprise -> "GECKO doesn't check password networks. Join ${network.ssid} in Android's settings."
+                    viewModel.enterpriseAccessFor(network) == VerificationViewModel.EnterpriseAccess.NOT_REGISTERED ->
+                        "${network.ssid} isn't registered with GECKO here, so GECKO can't sign you in. Join it in Android's settings."
+                    else -> "GECKO couldn't look up ${network.ssid} yet, so it can't sign you in. Join it in Android's settings."
+                },
                 Toast.LENGTH_LONG
             ).show()
             context.startActivity(Intent(Settings.Panel.ACTION_WIFI))
@@ -446,8 +450,12 @@ private fun supportingText(row: NetworkRow, ctx: ListContext, registered: Boolea
             match is AdvertisedMatch.Mismatch -> "Registered as ${match.registered.securityNames()}, but this one is ${match.advertised.securityNames()}"
             n.isEnterprise -> {
                 val kind = ctx.federationOf(n.ssid)?.let { "$it, enterprise" } ?: "Enterprise"
-                if (ctx.viewModel.tapActionFor(n) == VerificationViewModel.TapAction.ENTERPRISE) "$kind. GECKO signs you in"
-                else "$kind. Unsupported: Not operated by Pablo"
+                when (ctx.viewModel.enterpriseAccessFor(n)) {
+                    VerificationViewModel.EnterpriseAccess.SIGN_IN -> "$kind. GECKO signs you in"
+                    VerificationViewModel.EnterpriseAccess.NEEDS_LOOKUP -> "$kind. GECKO needs a recent lookup first"
+                    VerificationViewModel.EnterpriseAccess.NOT_REGISTERED -> "$kind. Not registered with GECKO"
+                    VerificationViewModel.EnterpriseAccess.UNKNOWN -> "$kind. Registration not looked up yet"
+                }
             }
             !n.isOpen -> "Password network. Unsupported: TODO"
             labMode && row.accessPoints.size == 1 ->

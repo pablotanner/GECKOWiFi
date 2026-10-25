@@ -519,8 +519,26 @@ class VerificationViewModel(
         network !is ScannedNetwork.Real -> TapAction.CHECK
         network.isOpen -> TapAction.CHECK
         network.isEnterprise && enterprise != null &&
-            (enterprise.supports(network.ssid) || hasUsableSavedRegistration(network.ssid)) -> TapAction.ENTERPRISE
+            enterpriseAccessFor(network) in setOf(EnterpriseAccess.SIGN_IN, EnterpriseAccess.NEEDS_LOOKUP) -> TapAction.ENTERPRISE
         else -> TapAction.ANDROID_SETTINGS
+    }
+
+    /**
+     * Why GECKO can or can't sign in to an enterprise network here, for the
+     * row's second line and the tap: [SIGN_IN] where it can onboard or holds a
+     * usable saved registration (D21); [NEEDS_LOOKUP] when the SSID is
+     * registered here but the saved answer can't be used, so a new lookup
+     * would help; [NOT_REGISTERED] when the map's answer has nothing for it;
+     * [UNKNOWN] when there is no answer to go by.
+     */
+    enum class EnterpriseAccess { SIGN_IN, NEEDS_LOOKUP, NOT_REGISTERED, UNKNOWN }
+
+    fun enterpriseAccessFor(network: ScannedNetwork.Real): EnterpriseAccess = when {
+        enterprise?.supports(network.ssid) == true || hasUsableSavedRegistration(network.ssid) -> EnterpriseAccess.SIGN_IN
+        registeredHere.any { it.wifi.ssid.equals(network.ssid, ignoreCase = true) && it.wifi.enterprise != null } ->
+            EnterpriseAccess.NEEDS_LOOKUP
+        certLookup == LookupStatus.OK -> EnterpriseAccess.NOT_REGISTERED
+        else -> EnterpriseAccess.UNKNOWN
     }
 
     /** Whether a fresh saved registration lets GECKO sign in to [ssid] here without onboarding (D21). */
@@ -666,6 +684,12 @@ class VerificationViewModel(
                 VerificationResult(VerificationState.UNREACHABLE, network.ssid,
                     reason = "location too imprecise (±${fix.accuracyMeters.toInt()} m)"),
                 fix, failure = CheckFailure.LOW_ACCURACY, isEnterprise = true)
+            return
+        }
+        // Registered, but nothing usable to sign in with: say how to get it instead of recording a failed check.
+        if (enterpriseAccessFor(network) == EnterpriseAccess.NEEDS_LOOKUP) {
+            showNotice("GECKO has no recent registration for ${network.ssid} here. " +
+                "Join a network with internet so GECKO can look it up, then tap ${network.ssid} again.")
             return
         }
         // Android serves one app-requested network at a time; a portal check may still hold one.
