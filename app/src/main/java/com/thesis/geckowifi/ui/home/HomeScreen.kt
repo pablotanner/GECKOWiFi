@@ -193,7 +193,7 @@ fun HomeScreen(
                         CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                     }
                 } else {
-                    IconButton(onClick = { viewModel.refresh() }, enabled = !busy) {
+                    IconButton(onClick = { viewModel.refresh(userInitiated = true) }, enabled = !busy) {
                         Icon(Icons.Outlined.Refresh, contentDescription = "Scan again")
                     }
                 }
@@ -307,7 +307,6 @@ private fun LazyListScope.networkSection(title: String, rows: List<NetworkRow>, 
             NetworkListItem(
                 row = row,
                 registered = registered,
-                registrant = if (registered) ctx.registrantOf(ssid) else null,
                 match = if (registered) ctx.matchOf(row.primary) else null,
                 supporting = supportingText(row, ctx, registered),
                 onInfo = (row.primary as? ScannedNetwork.Real)?.takeIf { registered }?.let { r -> { ctx.onShowRegistration(r) } },
@@ -362,7 +361,6 @@ private fun AccessPointItem(ap: ScannedNetwork.Real, latest: CheckDetail?, enabl
 private fun NetworkListItem(
     row: NetworkRow,
     registered: Boolean,
-    registrant: String?,
     match: AdvertisedMatch?,
     supporting: String,
     /** Shows the registration; null for networks nothing is registered for. */
@@ -404,14 +402,6 @@ private fun NetworkListItem(
                     color = colors.onSurfaceVariant
                 )
             }
-            if (registered) {
-                // Neutral, not the theme's green: registration is information, not a verification.
-                Text(
-                    "Registered with GECKO" + registrant?.let { " by $it" }.orEmpty(),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = colors.onSurfaceVariant
-                )
-            }
         }
         when {
             // Judged from the scan, before anyone connects: shown until a check says otherwise.
@@ -442,35 +432,39 @@ private fun NetworkListItem(
 /** Results worth remembering in the list: a confirmation and, above all, a warning. "Registered" is the label's job. */
 private val BADGED_STATES = setOf(VerificationState.VERIFIED, VerificationState.CONFLICT)
 
-/** The row's second line: what the network is, and what tapping it does. */
+/**
+ * The row's second line, one job for every row: what kind of network it is,
+ * as in Android's Wi-Fi list, and who runs it if it is registered here. The
+ * section already says whether it is registered; the line only explains
+ * something else when there is something to act on (a mismatch). Lab mode
+ * adds the access-point details.
+ */
 private fun supportingText(row: NetworkRow, ctx: ListContext, registered: Boolean): String = when (val n = row.primary) {
     is ScannedNetwork.Real -> {
-        val labMode = ctx.viewModel.labMode
         val match = if (registered) ctx.matchOf(n) else null
         val connected = n.ssid.equals(ctx.viewModel.deviceSsid, ignoreCase = true)
         val base = when {
             match is AdvertisedMatch.Mismatch -> "Registered as ${match.registered.securityNames()}, but this one is ${match.advertised.securityNames()}"
-            n.isEnterprise -> {
-                val kind = ctx.federationOf(n.ssid)?.let { "$it, enterprise" } ?: "Enterprise"
-                when (ctx.viewModel.enterpriseAccessFor(n)) {
-                    VerificationViewModel.EnterpriseAccess.SIGN_IN -> "$kind. GECKO signs you in"
-                    VerificationViewModel.EnterpriseAccess.NEEDS_LOOKUP -> "$kind. GECKO needs a recent lookup first"
-                    VerificationViewModel.EnterpriseAccess.NOT_REGISTERED -> "$kind. Not registered with GECKO"
-                    VerificationViewModel.EnterpriseAccess.UNKNOWN -> "$kind. Registration not looked up yet"
-                }
-            }
-            // Joined through Android; GECKO checks the connection afterwards, if the SSID is registered here.
-            !n.isOpen -> if (registered) "Password network. GECKO checks it once you join" else "Password network"
-            labMode && row.accessPoints.size == 1 ->
+            ctx.viewModel.labMode && n.isOpen && row.accessPoints.size == 1 ->
                 listOfNotNull(n.bssid, n.channel?.let { "ch $it" }, n.rssi.takeIf { it != Int.MIN_VALUE }?.let { "$it dBm" })
                     .joinToString("  ")
-            row.accessPoints.size > 1 -> "Open, ${row.accessPoints.size} access points"
-            else -> "Open"
+            else -> listOfNotNull(
+                n.kind(ctx.federationOf(n.ssid)),
+                if (registered) ctx.registrantOf(n.ssid) else null,
+                row.accessPoints.size.takeIf { ctx.viewModel.labMode && it > 1 }?.let { "$it access points" }
+            ).joinToString(" · ")
         }
-        if (connected) "Connected. $base" else base
+        if (connected) "Connected · $base" else base
     }
     is ScannedNetwork.FakeCaptivePortal -> "Simulated ${n.label}" + if (ctx.viewModel.labMode) ", presents ${n.presumedDomain}" else ""
     is ScannedNetwork.FakeEduroam -> "Simulated ${n.label}" + if (ctx.viewModel.labMode) ", login server ${n.observed.displayName}" + (n.userRealm?.let { ", realm $it" } ?: "") else ""
+}
+
+/** Open, Password or Enterprise; an enterprise network registered in a federation is named after it ("eduroam"). */
+private fun ScannedNetwork.Real.kind(federation: String?): String = when {
+    isEnterprise -> federation ?: "Enterprise"
+    isOpen -> "Open"
+    else -> "Password"
 }
 
 private fun signalIcon(rssi: Int?): ImageVector = when {

@@ -113,7 +113,7 @@ fun StatusCard(viewModel: VerificationViewModel, onOpenCheck: (String) -> Unit, 
                         onRetry = { viewModel.retry(s.check) }
                     )
                     is CardState.Connected -> ConnectedContent(
-                        s.ssid, s.verdict,
+                        s.ssid, s.verdict, unverifiedNote(viewModel, s.ssid),
                         onDetails = { s.verdict?.let { onOpenCheck(it.id) } },
                         onForget = if (viewModel.isSetUpByGecko(s.ssid)) ({ viewModel.forgetEnterpriseNetwork(s.ssid) }) else null
                     )
@@ -135,14 +135,14 @@ private sealed class CardState(val key: String) {
  * [onForget] is non-null while GECKO's profile for [ssid] is installed: after "Done" or a restart, this is where it is removed.
  */
 @Composable
-private fun ConnectedContent(ssid: String, verdict: CheckDetail?, onDetails: () -> Unit, onForget: (() -> Unit)?) {
+private fun ConnectedContent(ssid: String, verdict: CheckDetail?, note: String, onDetails: () -> Unit, onForget: (() -> Unit)?) {
     val v = verdict?.verdict()
     val colors = MaterialTheme.colorScheme
     Text("Connected to", style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant)
     Text(ssid, style = MaterialTheme.typography.headlineLarge, modifier = Modifier.padding(top = Space.xs))
     if (v == null) {
         Text(
-            "GECKO hasn't checked this network. Tap it in the list below to check it.",
+            note,
             style = MaterialTheme.typography.bodyLarge,
             color = colors.onSurfaceVariant,
             modifier = Modifier.padding(top = Space.sm)
@@ -190,6 +190,28 @@ private fun IdleContent(viewModel: VerificationViewModel) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = Space.lg)
     )
+}
+
+/**
+ * The connected card without a verdict: why GECKO has nothing to say about
+ * [ssid]. A failed lookup is said out loud, so it isn't mistaken for a clean
+ * result.
+ */
+private fun unverifiedNote(viewModel: VerificationViewModel, ssid: String): String {
+    val savedAt = viewModel.registrationsSavedAt
+    val registered = viewModel.registeredHere.any { it.wifi.ssid.equals(ssid, ignoreCase = true) }
+    return when {
+        viewModel.location == null -> "Waiting for your location to look up what's registered here."
+        viewModel.certLookup == null -> "Looking up what's registered here."
+        viewModel.certLookup == LookupStatus.UNREACHABLE ->
+            "GECKO can't reach the map server over this network, so it doesn't know whether $ssid is registered here."
+        viewModel.certLookup == LookupStatus.UNTRUSTED ->
+            "The map server's last answer failed verification, so GECKO can't say anything about $ssid."
+        !registered -> "$ssid isn't registered with GECKO here, so there is nothing to check." +
+            savedAt?.let { " (Saved registrations from ${com.thesis.geckowifi.ui.timeText(it)}.)" }.orEmpty()
+        else -> "GECKO hasn't checked this network yet." +
+            savedAt?.let { " Using saved registrations from ${com.thesis.geckowifi.ui.timeText(it)}." }.orEmpty()
+    }
 }
 
 private fun lookupSummary(viewModel: VerificationViewModel): String {

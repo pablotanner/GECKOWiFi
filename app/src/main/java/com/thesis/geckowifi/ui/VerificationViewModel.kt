@@ -414,9 +414,10 @@ class VerificationViewModel(
     /**
      * Re-scans nearby networks and re-queries GECKO for what's registered at the
      * current location. Not while a check runs: it rebinds the map client to the
-     * network the check holds.
+     * network the check holds. [userInitiated]: the user asked (the refresh
+     * button), so a lookup that fails is said, not only shown in the list.
      */
-    fun refresh() {
+    fun refresh(userInitiated: Boolean = false) {
         if (!hasLocationPermission || activeCheck != null) return
         if (isRefreshing) {
             refreshQueued = true
@@ -448,6 +449,9 @@ class VerificationViewModel(
                         radiusMeters = SAVED_AREA_RADIUS_METERS
                     )
                     applyLookup(lookup, fix, viaSsid = deviceSsid)
+                    if (userInitiated) lookupFailureNotice(lookup.status)?.let(::showNotice)
+                } else if (userInitiated) {
+                    showNotice("No location yet, so GECKO can't look up what's registered here.")
                 }
             } finally {
                 isRefreshing = false
@@ -609,6 +613,14 @@ class VerificationViewModel(
         registeredHere = lookup.certificates
         certLookup = lookup.status
         registrationsSavedAt = null
+    }
+
+    /** What to tell the user after a refresh they asked for didn't get a live answer; null if it did. */
+    private fun lookupFailureNotice(status: LookupStatus): String? = when {
+        status == LookupStatus.OK -> null
+        status == LookupStatus.UNTRUSTED -> "The map server's answer failed verification. GECKO ignored it."
+        registrationsSavedAt != null -> "Couldn't reach the map server. Showing saved registrations from ${timeText(registrationsSavedAt!!)}."
+        else -> "Couldn't reach the map server, so GECKO doesn't know what's registered here."
     }
 
     /** Deletes the saved answer once it is too old to be used anywhere (D26); realm records expire on their own. */
