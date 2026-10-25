@@ -104,7 +104,7 @@ hashes for the demo entries), [`lab/certs/ethz-eduroam.json`](../lab/certs/ethz-
 | `operator` | Display name of the operator, never matched |
 | `ssid` | Required. Compared case-insensitively by the client; the server's overlap check must use the same rule |
 | `ssid_shared` | Default `false`: the SSID is exclusive here, a non-matching network on it is a `CONFLICT`. `true` for a generic SSID shared by several operators in one area |
-| `auth_modes` | Every mode the network advertises: `open`, `owe`, `wpa2-personal`, `wpa3-personal`, `wpa2-enterprise`, `wpa3-enterprise`, `wpa3-enterprise-192`. A transition-mode network lists all of its modes |
+| `auth_modes` | Every mode the network advertises: `open`, `owe`, `wpa2-personal`, `wpa3-personal`, `wpa2-enterprise`, `wpa3-enterprise`, `wpa3-enterprise-192`. A transition-mode network lists all of its modes. Registering `wpa3-personal` means every access point offers it: one offering only `wpa2-personal` doesn't match (a downgrade); one offering only `wpa3-personal` does (6 GHz). An operator with WPA2-only access points on the SSID registers `wpa2-personal` alone |
 | `pmf` | `optional` / `required`; absent = unspecified. Parsed, not yet compared |
 | `enterprise` | Required for the enterprise modes, absent otherwise |
 | `portal` | Captive-portal domains, below |
@@ -149,8 +149,10 @@ is harmless while the app queries the full altitude range.
    the device, and whose SSID matches. None left: `UNVERIFIED`.
 2. Set aside certificates with an unknown critical feature (rule 2).
 3. **Auth mode** (scenario A1): every mode the access point advertises must be
-   in `auth_modes` of at least one certificate; otherwise the network is not
-   what was registered → `CONFLICT`. Certificates without `auth_modes` (v2)
+   in `auth_modes` of at least one certificate, and an access point offering
+   `wpa2-personal` must also offer `wpa3-personal` if that certificate
+   registers it (no downgrade); otherwise the network is not what was
+   registered → `CONFLICT`. Certificates without `auth_modes` (v2)
    are skipped. Works from the scan alone, no root.
 4. **Captive portal**: hop chain judged as in [portal-detection.md](portal-detection.md).
 5. **Enterprise**: the server seen in the EAP handshake is accepted by an

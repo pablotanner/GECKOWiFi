@@ -58,8 +58,20 @@ data class WiFiIdentity(
     val authModes: Set<WiFiAuthMode>
         get() = authModeNames.mapNotNull(WiFiAuthMode::fromWire).toSet()
 
-    /** Every mode the network advertises must be registered. Unknown registered names never match. */
-    fun permits(observed: Set<WiFiAuthMode>): Boolean = observed.all { it in authModes }
+    /**
+     * Every mode the network advertises must be registered, and a registered
+     * WPA3-Personal must be offered: a transition network offers WPA3 on every
+     * access point, so one offering only WPA2 is the downgrade an attacker uses
+     * to capture a crackable handshake. WPA3 alone stays fine (6 GHz access
+     * points can't offer WPA2). Enterprise isn't held to this: the pinned server
+     * protects the password whatever the mode, and federations mix older access
+     * points. Unknown registered names never match.
+     */
+    fun permits(observed: Set<WiFiAuthMode>): Boolean {
+        val downgraded = WiFiAuthMode.WPA3_PERSONAL in authModes &&
+            WiFiAuthMode.WPA2_PERSONAL in observed && WiFiAuthMode.WPA3_PERSONAL !in observed
+        return observed.all { it in authModes } && !downgraded
+    }
 }
 
 /** 802.1X identity of an enterprise network (schema v3). */

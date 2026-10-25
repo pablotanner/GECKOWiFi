@@ -5,6 +5,7 @@ import com.thesis.geckowifi.data.model.WiFiAuthMode.OPEN
 import com.thesis.geckowifi.data.model.WiFiAuthMode.WPA2_ENTERPRISE
 import com.thesis.geckowifi.data.model.WiFiAuthMode.WPA2_PERSONAL
 import com.thesis.geckowifi.data.model.WiFiAuthMode.WPA3_ENTERPRISE
+import com.thesis.geckowifi.data.model.WiFiAuthMode.WPA3_PERSONAL
 import com.thesis.geckowifi.data.model.WiFiIdentity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -48,6 +49,39 @@ class AdvertisedMatchTest {
     @Test
     fun personalCloneOfEnterpriseSsid_isMismatch() {
         assertTrue(matchAdvertised("eduroam", setOf(WPA2_PERSONAL), listOf(cert())) is AdvertisedMatch.Mismatch)
+    }
+
+    @Test
+    fun transitionNetwork_offeringBoth_matches() {
+        val transition = listOf(cert(ssid = "Cafe", modes = listOf("wpa2-personal", "wpa3-personal")))
+        assertTrue(matchAdvertised("Cafe", setOf(WPA2_PERSONAL, WPA3_PERSONAL), transition) is AdvertisedMatch.Matches)
+    }
+
+    @Test
+    fun transitionNetwork_offeringOnlyWpa2_isMismatch() {
+        // The downgrade: devices are pushed onto WPA2 so the handshake can be cracked offline.
+        val transition = listOf(cert(ssid = "Cafe", modes = listOf("wpa2-personal", "wpa3-personal")))
+        val m = matchAdvertised("Cafe", setOf(WPA2_PERSONAL), transition) as AdvertisedMatch.Mismatch
+        assertEquals(setOf(WPA2_PERSONAL), m.advertised)
+    }
+
+    @Test
+    fun transitionNetwork_offeringOnlyWpa3_matches() {
+        // A 6 GHz access point can only offer WPA3.
+        val transition = listOf(cert(ssid = "Cafe", modes = listOf("wpa2-personal", "wpa3-personal")))
+        assertTrue(matchAdvertised("Cafe", setOf(WPA3_PERSONAL), transition) is AdvertisedMatch.Matches)
+    }
+
+    @Test
+    fun wpa2OnlyRegistration_offeringWpa2_matches() {
+        val wpa2 = listOf(cert(ssid = "Cafe", modes = listOf("wpa2-personal")))
+        assertTrue(matchAdvertised("Cafe", setOf(WPA2_PERSONAL), wpa2) is AdvertisedMatch.Matches)
+    }
+
+    @Test
+    fun enterpriseTransition_offeringOnlyWpa2_stillMatches() {
+        // Not held to the WPA3 rule: the pinned server protects the password, and eduroam sites mix access points.
+        assertTrue(matchAdvertised("eduroam", setOf(WPA2_ENTERPRISE), listOf(cert())) is AdvertisedMatch.Matches)
     }
 
     @Test

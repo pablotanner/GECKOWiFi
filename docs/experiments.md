@@ -17,6 +17,7 @@ back are in [acceptance-criteria.md](acceptance-criteria.md).
 | N1 | Router A with WPA2, registered with `auth_modes: ["wpa2-personal"]` and no portal | `REGISTERED` | |
 | N2 | B copies A's SSID as an open network | `CONFLICT` (security type not registered) | |
 | N3 | An SSID with no certificate | `UNVERIFIED`, no warning | |
+| N4 | A in WPA2/WPA3 transition mode, registered with `["wpa2-personal", "wpa3-personal"]`; B copies the SSID with WPA2 only | `CONFLICT` before joining (downgrade) | |
 
 ## With a captive portal
 

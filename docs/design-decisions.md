@@ -66,7 +66,10 @@ an identical twin. What can GECKO do for them?
 **Decision.** Two checks, neither needs the password:
 - **Before joining:** the advertised security type is compared with
   `auth_modes` (as for every network). A mismatch is flagged in the list, and
-  tapping it opens the registration sheet instead of connecting.
+  tapping it opens the registration sheet instead of connecting. For a
+  transition network (`wpa2-personal` and `wpa3-personal` registered), an
+  access point offering only WPA2 is a mismatch: that is the downgrade used to
+  capture a crackable handshake.
 - **After the user joins through Android:** if the SSID is registered here,
   GECKO runs the portal probe over that connection and judges the hops as for
   open networks. A fake network steals data through its login page, so that is
