@@ -129,6 +129,10 @@ hashes for the demo entries), [`lab/certs/ethz-eduroam.json`](../lab/certs/ethz-
 `api` (RFC 8908 API host). The pins are the trust anchor; the client does no
 Web PKI validation, and a domain without pins never verifies.
 
+Absent, or without domains: the network has no captive portal. The operator
+registers all its portal domains (design decision 1), so a portal seen on such
+a network is a `CONFLICT`, unless the certificate sets `ssid_shared`.
+
 ### Areas
 
 Kept as in upstream geopki, which means `coordinates` is **not** GeoJSON's

@@ -35,16 +35,18 @@ class EduroamLiveTest {
 
     /**
      * The whole lookup of the home list: proof verified over every certificate
-     * of the area, also those of other kinds the server holds, and exactly the
-     * lab's WiFi certificates read from extensions.wifi (D28).
+     * of the area, also those of other kinds the server holds, and the lab's
+     * WiFi certificates read from extensions.wifi (D28). Others may be
+     * registered in the area too.
      */
     @Test
     fun lookupAtTheLab_returnsTheWifiCertificates() = runTest {
         assumeTrue("map server not reachable", reachable(1234))
         val lookup = engine().registeredHere(eth.first, eth.second, null, 253)
         assertEquals(LookupStatus.OK, lookup.status)
-        assertEquals(setOf("mango-a", "eduroam-lab-sp", "ethz-eduroam-2026a", "eth-visitors-2026a"),
-            lookup.certificates.map { it.certificateId }.toSet())
+        val ids = lookup.certificates.map { it.certificateId }.toSet()
+        val lab = setOf("mango-a", "eduroam-lab-sp", "ethz-eduroam-2026a", "eth-visitors-2026a")
+        assertTrue("missing ${lab - ids}", ids.containsAll(lab))
         assertTrue(lookup.certificates.all { it.isEvaluable() && it.subject?.id?.isNotEmpty() == true })
     }
 

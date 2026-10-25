@@ -101,6 +101,31 @@ class PortalHopsVerificationTest {
     }
 
     @Test
+    fun portalOnNetworkRegisteredWithoutPortal_isConflict() = runTest {
+        // No portal block: the network has no captive portal (geocert-schema.md, wifi.portal),
+        // so any login page on it is an impostor's.
+        val noPortal = mangoA.copy(portal = null)
+        val portal = listOf(
+            hop(0, "http://connectivitycheck.gstatic.com/generate_204", 302),
+            hop(1, "https://login.example.lab/", 200, key = "keyAttacker")
+        )
+
+        assertEquals(VerificationState.CONFLICT, check(geckoReturning(noPortal), portal).overall.state)
+    }
+
+    @Test
+    fun portalOnSharedSsidRegisteredWithoutPortal_staysUnrecognized() = runTest {
+        // Another operator on the shared SSID may run this portal.
+        val shared = mangoA.copy(portal = null, wifi = mangoA.wifi.copy(ssidShared = true))
+        val portal = listOf(
+            hop(0, "http://connectivitycheck.gstatic.com/generate_204", 302),
+            hop(1, "https://login.example.lab/", 200, key = "keyAttacker")
+        )
+
+        assertEquals(VerificationState.UNRECOGNIZED, check(geckoReturning(shared), portal).overall.state)
+    }
+
+    @Test
     fun unregisteredDomain_withoutSsidScope_staysUnrecognized() = runTest {
         // The additive fallback: with no SSID asserted (ssid = null), certs may
         // exist here for other SSIDs without claiming this domain, so an unknown

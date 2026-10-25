@@ -199,6 +199,11 @@ class NetworkObserver(private val context: Context) {
     fun connectedSsid(): String? =
         wifi.connectionInfo?.ssid?.removeSurrounding("\"")?.takeIf { it.isNotBlank() && it != "<unknown ssid>" }
 
+    /** BSSID of the access point the device itself is connected to, or null (also without location permission). */
+    @Suppress("DEPRECATION")
+    fun connectedBssid(): String? =
+        wifi.connectionInfo?.bssid?.lowercase()?.takeIf { it != "02:00:00:00:00:00" }
+
     fun cellularNetwork(): Network? = connectivity.allNetworks.firstOrNull { network ->
         connectivity.getNetworkCapabilities(network)
             ?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true

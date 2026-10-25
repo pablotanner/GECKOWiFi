@@ -57,3 +57,26 @@ Protecting that traffic is the job of TLS, a VPN and so on.
 GECKO is meant to be part of the operating system's WiFi stack. The prototype
 is an app, so root takes the place of system privileges (for example reading
 the RADIUS server's certificates from `wpa_supplicant`). 
+## 5. Password networks: GECKO checks the portal, not the password
+
+**Question.** WPA2/WPA3-Personal networks can't be verified like an
+enterprise network: everyone who knows the password (every café guest) can run
+an identical twin. What can GECKO do for them?
+
+**Decision.** Two checks, neither needs the password:
+- **Before joining:** the advertised security type is compared with
+  `auth_modes` (as for every network). A mismatch is flagged in the list, and
+  tapping it opens the registration sheet instead of connecting.
+- **After the user joins through Android:** if the SSID is registered here,
+  GECKO runs the portal probe over that connection and judges the hops as for
+  open networks. A fake network steals data through its login page, so that is
+  what is compared. Without a portal the result is at most `REGISTERED`.
+
+Unregistered SSIDs (a travel router, a home network) are left alone.
+
+**Prototype limits (no root).**
+- Android's own "Sign in to network" notification can appear before GECKO's
+  verdict. A system-level GECKO would hold the portal until its check is done.
+- GECKO can't leave a network the device joined; the warning opens Android's
+  Wi-Fi settings instead.
+- Checks only run while the app is open.

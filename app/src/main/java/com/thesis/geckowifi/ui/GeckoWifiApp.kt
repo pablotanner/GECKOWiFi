@@ -1,5 +1,6 @@
 package com.thesis.geckowifi.ui
 
+import android.content.Intent
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.History
@@ -16,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -128,11 +130,16 @@ fun GeckoWifiApp(
                 if (check == null) {
                     LaunchedEffect(Unit) { navController.popBackStack() }
                 } else {
+                    val context = LocalContext.current
                     WarningScreen(
                         check = check,
                         onDisconnect = {
+                            // The device joined it through Android (a password network): only Android can leave it.
+                            val androidsOwn = !check.joined && !check.isEnterprise && !check.isDemo &&
+                                check.ssid.equals(viewModel.deviceSsid, ignoreCase = true)
                             viewModel.disconnect()
                             navController.popBackStack()
+                            if (androidsOwn) context.startActivity(Intent(android.provider.Settings.Panel.ACTION_WIFI))
                         },
                         onStay = { navController.popBackStack() },
                         onEvidence = { navController.navigate("check/$id") }

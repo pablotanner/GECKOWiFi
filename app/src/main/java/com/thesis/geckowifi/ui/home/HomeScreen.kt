@@ -122,7 +122,9 @@ fun HomeScreen(
             Toast.makeText(
                 context,
                 when {
-                    !network.isEnterprise -> "GECKO doesn't check password networks. Join ${network.ssid} in Android's settings."
+                    !network.isEnterprise && registeredSsids.contains(network.ssid.lowercase()) ->
+                        "Join ${network.ssid} in Android's settings. GECKO checks it once you're connected."
+                    !network.isEnterprise -> "Join ${network.ssid} in Android's settings."
                     viewModel.enterpriseAccessFor(network) == VerificationViewModel.EnterpriseAccess.NOT_REGISTERED ->
                         "${network.ssid} isn't registered with GECKO here, so GECKO can't sign you in. Join it in Android's settings."
                     else -> "GECKO couldn't look up ${network.ssid} yet, so it can't sign you in. Join it in Android's settings."
@@ -457,7 +459,8 @@ private fun supportingText(row: NetworkRow, ctx: ListContext, registered: Boolea
                     VerificationViewModel.EnterpriseAccess.UNKNOWN -> "$kind. Registration not looked up yet"
                 }
             }
-            !n.isOpen -> "Password network. Unsupported: TODO"
+            // Joined through Android; GECKO checks the connection afterwards, if the SSID is registered here.
+            !n.isOpen -> if (registered) "Password network. GECKO checks it once you join" else "Password network"
             labMode && row.accessPoints.size == 1 ->
                 listOfNotNull(n.bssid, n.channel?.let { "ch $it" }, n.rssi.takeIf { it != Int.MIN_VALUE }?.let { "$it dBm" })
                     .joinToString("  ")

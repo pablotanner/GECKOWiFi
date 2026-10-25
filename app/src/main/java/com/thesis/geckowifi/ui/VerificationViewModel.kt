@@ -329,6 +329,8 @@ class VerificationViewModel(
                     val joined = ssid != null && !ssid.equals(deviceSsid, ignoreCase = true)
                     deviceSsid = ssid
                     enterprise?.refreshInstalled()
+                    // Before the lookups below: a portal page may already be on its way to the user.
+                    if (joined) checkDeviceJoin(ssid)
                     // A WiFi-only device can usually reach the map server once it is on a network (D26).
                     if (joined) {
                         val joinedAt = System.currentTimeMillis()
@@ -488,9 +490,10 @@ class VerificationViewModel(
      * to the server: that AP *can* block the query, which surfaces as
      * UNREACHABLE and never as a warning. A known limitation, not a bug.
      * The TLS probe always goes over the joined WiFi - it has to see what
-     * that network presents.
+     * that network presents; [probeOver] is that network when the device joined
+     * it itself ([checkDeviceJoin]).
      */
-    private fun rebindGeckoClient() {
+    private fun rebindGeckoClient(probeOver: android.net.Network? = networkObserver.joinedNetwork) {
         val joined = networkObserver.joinedNetwork
         val cellular = networkObserver.cellularNetwork()
         // Without a join of its own, the device's Wi-Fi: bound, it works right after joining,
@@ -502,7 +505,7 @@ class VerificationViewModel(
             else -> QueryRoute.DEFAULT_ROUTE
         }
         engine.gecko = GeckoClient(baseUrl = SERVER_URL, network = cellular ?: wifi)
-        certProbe.network = joined
+        certProbe.network = probeOver
     }
 
     /** What [rebindGeckoClient] bound the map-server client to; read back when a check is published. */
@@ -857,8 +860,8 @@ class VerificationViewModel(
             return null
         }
 
-        // A secured network can't be joined without credentials; the list judges it
-        // from its scan instead ([advertisedMatch]) and never starts a check for it.
+        // A secured network can't be joined without credentials: the list judges it from its scan
+        // ([advertisedMatch]), and the portal is checked once the device joins it ([checkDeviceJoin]).
         if (!network.isOpen) return null
 
         step(network, steps, CheckStep.JOIN)
@@ -881,55 +884,107 @@ class VerificationViewModel(
                 engine.registeredHere(fix.latitude, fix.longitude, null, effectiveRadius(fix)).let {
                     applyLookup(it, fix, viaSsid = network.ssid)
                 }
-
-                step(network, steps, CheckStep.PORTAL)
-                val discovery = hopSource.discover(joined)
-                step(network, steps, CheckStep.COMPARE)
-                when (val outcome = discovery.outcome) {
-                    Discovery.Outcome.PortalReached -> {
-                        val check = engine.verifyPortalHops(
-                            networkKey, discovery.hops, judgeFinalPlainHop = true,
-                            fix.latitude, fix.longitude, null, effectiveRadius(fix), network.ssid,
-                            observedAuthModes = network.authModes
-                        )
-                        finishCheck(network, networkKey, fix, check.overall, "discovery", outcome, check.hops)
-                    }
-                    Discovery.Outcome.NoPortal -> {
-                        // No portal in the way: check the network's registered portal domain directly.
-                        val registered = registeredDomainFor(network.ssid)
-                        val ssidRegistered = registeredHere.any { it.wifi.ssid.equals(network.ssid, ignoreCase = true) }
-                        val result = if (registered == null && ssidRegistered) {
-                            // Registered without a login page: only the security type can be compared.
-                            engine.checkAdvertised(networkKey, network.ssid, network.authModes,
-                                fix.latitude, fix.longitude, null, effectiveRadius(fix))
-                        } else if (registered == null) {
-                            VerificationResult(VerificationState.UNVERIFIED, "",
-                                reason = "no captive portal seen, and nothing registered here lists a portal domain for ${network.ssid}")
-                        } else {
-                            verifyDomain(network, networkKey, registered, fix).let {
-                                it.copy(reason = "no captive portal seen (already logged in?) - checked registered $registered: ${it.reason}")
-                            }
-                        }
-                        finishCheck(network, networkKey, fix, result, "discovery", outcome,
-                            discovery.hops.map { HopVerdict(it, null) })
-                    }
-                    is Discovery.Outcome.Failed -> {
-                        // Judge what was seen: a key mismatch before the failure is still a CONFLICT.
-                        val partial = engine.verifyPortalHops(
-                            networkKey, discovery.hops, judgeFinalPlainHop = false,
-                            fix.latitude, fix.longitude, null, effectiveRadius(fix), network.ssid,
-                            observedAuthModes = network.authModes
-                        )
-                        val conflict = partial.overall.state == VerificationState.CONFLICT
-                        val result = if (conflict) partial.overall
-                        else VerificationResult(VerificationState.UNREACHABLE, discovery.hops.lastOrNull()?.host.orEmpty(),
-                            reason = "portal discovery failed: ${outcome.reason}")
-                        finishCheck(network, networkKey, fix, result, "discovery", outcome, partial.hops,
-                            failure = if (conflict) null else CheckFailure.PORTAL_FAILED)
-                    }
-                }
+                judgeJoined(joined, network, networkKey, fix, steps, ownJoin = true)
             } finally {
                 activeCheck = null
+            }
+        }
+    }
+
+    /**
+     * Checks a password network the device joined itself, through Android
+     * (GECKO can't join it without the password): whether it shows a captive
+     * portal, and whether that portal is the registered one. A fake network
+     * that knows the password steals data through its login page, so that is
+     * what is compared; the security type was already judged in the list.
+     *
+     * Only for SSIDs registered here (live or saved answer), so an
+     * unregistered network such as a travel router is left alone. Runs right
+     * after the join, without root: Android's own sign-in notification for
+     * the portal can still appear before the verdict.
+     */
+    private fun checkDeviceJoin(ssid: String) {
+        if (activeCheck != null) return
+        val over = networkObserver.deviceWifiNetwork ?: return
+        val fix = location?.takeIf { it.accuracyMeters <= MAX_QUERY_RADIUS_METERS } ?: return
+        val bssid = networkObserver.connectedBssid()
+        val candidates = scannedNetworks.filterIsInstance<ScannedNetwork.Real>().filter { it.ssid.equals(ssid, ignoreCase = true) }
+        val network = candidates.firstOrNull { it.bssid.equals(bssid, ignoreCase = true) } ?: candidates.firstOrNull() ?: return
+        // Open networks are joined and checked by GECKO itself; enterprise networks have their own flow.
+        if (network.isOpen || network.isEnterprise) return
+        if (registeredHere.none { it.wifi.ssid.equals(ssid, ignoreCase = true) }) return
+
+        val target = network.copy(bssid = bssid ?: network.bssid)
+        val steps = listOf(CheckStep.PORTAL, CheckStep.COMPARE)
+        step(target, steps, CheckStep.PORTAL)
+        checkJob = viewModelScope.launch {
+            try {
+                engine.onNetworkChanged(target.bssid ?: ssid)
+                rebindGeckoClient(probeOver = over)
+                judgeJoined(over, target, target.bssid ?: ssid, fix, steps, ownJoin = false)
+            } finally {
+                certProbe.network = networkObserver.joinedNetwork
+                activeCheck = null
+            }
+        }
+    }
+
+    /**
+     * Follows [over]'s redirects and judges them against the registration
+     * ([VerificationEngine.verifyPortalHops]). If no portal appears (HTTP 204:
+     * no portal, or already logged in), the domain registered for the SSID is
+     * probed instead, so a logged-in network is still checked. [ownJoin]: the
+     * app joined [over] itself and holds the connection; false when the device
+     * did ([checkDeviceJoin]).
+     */
+    private suspend fun judgeJoined(
+        over: android.net.Network, network: ScannedNetwork.Real, networkKey: String, fix: LocationFix,
+        steps: List<CheckStep>, ownJoin: Boolean
+    ) {
+        step(network, steps, CheckStep.PORTAL)
+        val discovery = hopSource.discover(over)
+        step(network, steps, CheckStep.COMPARE)
+        when (val outcome = discovery.outcome) {
+            Discovery.Outcome.PortalReached -> {
+                val check = engine.verifyPortalHops(
+                    networkKey, discovery.hops, judgeFinalPlainHop = true,
+                    fix.latitude, fix.longitude, null, effectiveRadius(fix), network.ssid,
+                    observedAuthModes = network.authModes
+                )
+                finishCheck(network, networkKey, fix, check.overall, "discovery", outcome, check.hops, ownJoin = ownJoin)
+            }
+            Discovery.Outcome.NoPortal -> {
+                // No portal in the way: check the network's registered portal domain directly.
+                val registered = registeredDomainFor(network.ssid)
+                val ssidRegistered = registeredHere.any { it.wifi.ssid.equals(network.ssid, ignoreCase = true) }
+                val result = if (registered == null && ssidRegistered) {
+                    // Registered without a login page: only the security type can be compared.
+                    engine.checkAdvertised(networkKey, network.ssid, network.authModes,
+                        fix.latitude, fix.longitude, null, effectiveRadius(fix))
+                } else if (registered == null) {
+                    VerificationResult(VerificationState.UNVERIFIED, "",
+                        reason = "no captive portal seen, and nothing registered here lists a portal domain for ${network.ssid}")
+                } else {
+                    verifyDomain(network, networkKey, registered, fix).let {
+                        it.copy(reason = "no captive portal seen (already logged in?) - checked registered $registered: ${it.reason}")
+                    }
+                }
+                finishCheck(network, networkKey, fix, result, "discovery", outcome,
+                    discovery.hops.map { HopVerdict(it, null) }, ownJoin = ownJoin)
+            }
+            is Discovery.Outcome.Failed -> {
+                // Judge what was seen: a key mismatch before the failure is still a CONFLICT.
+                val partial = engine.verifyPortalHops(
+                    networkKey, discovery.hops, judgeFinalPlainHop = false,
+                    fix.latitude, fix.longitude, null, effectiveRadius(fix), network.ssid,
+                    observedAuthModes = network.authModes
+                )
+                val conflict = partial.overall.state == VerificationState.CONFLICT
+                val result = if (conflict) partial.overall
+                else VerificationResult(VerificationState.UNREACHABLE, discovery.hops.lastOrNull()?.host.orEmpty(),
+                    reason = "portal discovery failed: ${outcome.reason}")
+                finishCheck(network, networkKey, fix, result, "discovery", outcome, partial.hops,
+                    failure = if (conflict) null else CheckFailure.PORTAL_FAILED, ownJoin = ownJoin)
             }
         }
     }
@@ -952,14 +1007,15 @@ class VerificationViewModel(
         mode: String,
         outcome: Discovery.Outcome? = null,
         hops: List<HopVerdict> = emptyList(),
-        failure: CheckFailure? = null
+        failure: CheckFailure? = null,
+        ownJoin: Boolean = true
     ) {
         checkLog?.append(
             PortalCheckLog.CheckEntry(
                 runId = UUID.randomUUID().toString(),
                 time = PortalCheckLog.isoTime(result.timestamp),
                 ssid = network.ssid, bssid = network.bssid, networkKey = networkKey,
-                mode = mode,
+                mode = if (ownJoin) mode else "$mode-device-join",
                 outcome = when (outcome) {
                     null -> null
                     is Discovery.Outcome.Failed -> "Failed: ${outcome.reason}"
@@ -974,9 +1030,9 @@ class VerificationViewModel(
             "discovery" -> if (outcome == Discovery.Outcome.NoPortal) "No login page appeared; the registered one was checked directly"
             else "Login page found by following the network's redirects"
             else -> null
-        }
+        }?.let { if (ownJoin) it else "Your connection: ${it.replaceFirstChar(Char::lowercase)}" }
         publish(network.ssid, network.bssid, networkKey, result, fix, hops, modeDescription,
-            joined = failure != CheckFailure.JOIN_FAILED, failure = failure)
+            joined = ownJoin && failure != CheckFailure.JOIN_FAILED, failure = failure)
     }
 
     /**

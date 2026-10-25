@@ -54,7 +54,7 @@ class SavedAnswerTest {
 
     @Test
     fun tooOld_doesNotApply() {
-        assertNull(answer(saved(age = Duration.ofHours(25))))
+        assertNull(answer(saved(age = Duration.ofHours(3))))
     }
 
     /**
@@ -79,8 +79,8 @@ class SavedAnswerTest {
 
     @Test
     fun isExpired_afterTheMaximumAge() {
-        assertFalse(saved(age = Duration.ofHours(23)).isExpired(now))
-        assertTrue(saved(age = Duration.ofHours(25)).isExpired(now))
+        assertFalse(saved(age = Duration.ofMinutes(119)).isExpired(now))
+        assertTrue(saved(age = Duration.ofMinutes(121)).isExpired(now))
     }
 
     @Test
