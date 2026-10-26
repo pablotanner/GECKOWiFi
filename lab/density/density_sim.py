@@ -29,8 +29,8 @@ X_BITS, Y_BITS, Z_BITS = 26, 25, 15   # longitude, latitude, altitude bits
 Z_MIN = -11000                        # altitude of z = 0, in metres (1 m per step)
 EARTH_RADIUS = 6371000.0
 
-# --- what the server sends, in bytes (estimates, protobuf overhead included) ---
-NODE = 22          # one tree node: bit strings and their lengths
+# --- what the server sends, in bytes (protobuf overhead included) --------------
+# Tree nodes are sized exactly, field by field (node_bytes).
 PRUNED_CHILD = 34  # a child hash for a subtree that isn't sent
 HASH = 34          # a certificate hash (today)
 ENTRY = 40         # a typed entry len(type) | type | hash (options A, A+)
@@ -59,7 +59,6 @@ PLACES = {
     "zurich-centre": Place(47.3781, 8.5402, 3000, 6, 3, "HB/Paradeplatz, OSM x2 (estimate)", 410),
     "midtown": Place(40.7529, -73.9803, 6000, 40, 4, "Midtown core ZIPs, Census 2021", 20),
     "upper-bound": Place(40.7587, -73.9787, 12000, 40, 4, "Rockefeller Center density over the whole lookup", 20),
-    "hk-worst": Place(22.3193, 114.1694, 100000, 25, 4,"Mong Kok small-unit towers, back-of-envelope", 10),
 }
 
 
@@ -153,9 +152,10 @@ def circle(px, py, rx, ry):
 
 
 def altitude_bits(low_m: float, high_m: float) -> str:
-    """Smallest altitude cell holding [low, high): the common prefix of both ends."""
-    a = format(int(low_m) - Z_MIN, f"0{Z_BITS}b")
-    b = format(int(math.ceil(high_m)) - Z_MIN - 1, f"0{Z_BITS}b")
+    """Smallest altitude cell holding [low, high], both ends included: the common
+    prefix of both ends (geopki's SmallestEnclosingZBitString)."""
+    a = format(int(low_m - Z_MIN), f"0{Z_BITS}b")
+    b = format(int(high_m - Z_MIN), f"0{Z_BITS}b")
     n = 0
     while n < Z_BITS and a[n] == b[n]:
         n += 1
@@ -257,23 +257,43 @@ def answer(nodes: dict, lookup: set[str]) -> set:
     return {n for n in nodes if any(n[0].startswith(q) or q.startswith(n[0]) for q in lookup)}
 
 
-def pruned_children(nodes: dict, sent: set) -> int:
-    """Existing children of sent nodes that aren't sent (they go as a hash)."""
-    pruned = 0
-    for xy, z in sent:
-        children = [(xy, z + "0"), (xy, z + "1")] if len(z) < Z_BITS else []
-        if z == "" and len(xy) < X_BITS + Y_BITS:
-            children += [(xy + "0", ""), (xy + "1", "")]
-        pruned += sum(1 for c in children if c in nodes and c not in sent)
-    return pruned
+def children(node) -> list:
+    """A node's possible children: in its altitude subtree, and in xy for the
+    root of an altitude subtree."""
+    xy, z = node
+    children = [(xy, z + "0"), (xy, z + "1")] if len(z) < Z_BITS else []
+    if z == "" and len(xy) < X_BITS + Y_BITS:
+        children += [(xy + "0", ""), (xy + "1", "")]
+    return children
+
+
+def varint_len(n: int) -> int:
+    return max(1, (n.bit_length() + 6) // 7)
+
+
+def node_bytes(xy: str, z: str, pruned: int, hashes: int) -> int:
+    """A geopki.Node as the server encodes it: bit strings top-aligned (xy in 64
+    bits, z in 16), zero fields left out (proto3), each hash a 34-byte field,
+    plus the field key and length in the Response."""
+    size = 0
+    for bits, width in ((xy, 64), (z, 16)):
+        value = int(bits.ljust(width, "0"), 2) if bits else 0
+        size += (1 + varint_len(value) if value else 0) + (1 + varint_len(len(bits)) if bits else 0)
+    size += pruned * PRUNED_CHILD + hashes * HASH
+    return 1 + varint_len(size) + size
 
 
 def predict(certificates, lookup: set[str]) -> dict:
-    """What the server sends for the lookup: counts, and the tree part in bytes."""
+    """What the server sends for the lookup: counts, and the tree part in bytes
+    (nodes and their child hashes, without the certificate hashes in them)."""
     nodes = build_tree(certificates)
     sent = answer(nodes, lookup)
     on_nodes = [c for n in sent for c in nodes[n]]
-    pruned = pruned_children(nodes, sent)
+    pruned = tree_bytes = 0
+    for node in sent:
+        p = sum(1 for c in children(node) if c in nodes and c not in sent)  # sent as a hash
+        pruned += p
+        tree_bytes += node_bytes(*node, p, len(nodes[node])) - len(nodes[node]) * HASH
     return {
         "nodes": len(sent),
         "altitude_nodes": sum(1 for _, z in sent if z),
@@ -281,7 +301,7 @@ def predict(certificates, lookup: set[str]) -> dict:
         "hashes": len(on_nodes),
         "certificates": len({cid for cid, _ in on_nodes}),
         "wifi": len({cid for cid, kind in on_nodes if kind == "wifi"}),
-        "tree_bytes": len(sent) * NODE + pruned * PRUNED_CHILD,
+        "tree_bytes": tree_bytes,
     }
 
 

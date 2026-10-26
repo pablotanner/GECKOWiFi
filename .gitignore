@@ -35,6 +35,9 @@ google-services.json
 # Test key material for the eduroam demo (lab/eduroam/make-pki.sh); back up separately
 lab-secrets/
 
+# Density experiment: generated certificates (lab/density/make_certs.py)
+lab/density/out/
+lab/density/__pycache__
 # Lab dashboard: output of the servers it starts, and its state
 lab/dashboard/logs/
 lab/dashboard/__pycache__
