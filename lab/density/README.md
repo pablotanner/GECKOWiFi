@@ -118,8 +118,7 @@ A WiFi lookup walks only the `wifi` branch; every other type costs one hash.
 
 Security is the same for both: a network attacker can't hide or relabel
 anything. The map server could file a WiFi certificate under the wrong
-type; auditors (or phones spot-checking random certificates) can detect it.
-Details: [docs/typed-leaves.md](../../docs/typed-leaves.md).
+type; requires auditors or something like that.
 
 ## 4. Results
 
@@ -139,19 +138,11 @@ k = 3 (Zürich) or 4 (Manhattan). "Today" = downloading everything:
 | Upper bound (12,000/km²) | 100 m | 19.7 MB | **6.4 MB** | **3.6 MB** |
 | Upper bound, k = 8 | 100 m | 37.3 MB | **8.9 MB** | **3.6 MB** |
 
-About 1 MB is comfortable and about 3 MB the limit (1 MB ≈ 1 s on a normal
-connection, ≈ 8 s on a slow captive network). So:
 
 - **Option A:** feasible in European cities, borderline in Midtown at 100 m,
   too big at the upper bound.
 - **Option A+:** feasible everywhere, at worst just over the limit for the
   rare 100 m lookup at the upper bound, and unchanged by k.
-- **Repeat visits** (certificates cached by hash) only download the tree
-  part: about a quarter less for A, about half for A+.
-- **Altitude filtering doesn't help much:** about 90 % of the tree's nodes
-  are altitude nodes, but even a perfect ±2-floor window only halves the
-  tree part, because each certificate's altitude chain is still sent down to
-  where it stops overlapping the window.
 
 ## 5. Checked against the real geopki server
 
@@ -245,8 +236,7 @@ folder).
 - **Certificate size:** `make_certs.py` pads every certificate to 2 KB, the
   simulation's assumption, so the experiment checks the tree, not the size.
   WiFi certificates could use the lab certificates (0.9–6.2 KB) as templates
-  instead; non-WiFi certificates don't exist yet, so their size stays a
-  parameter (report a range, e.g. 0.5–3 KB).
+  instead.
 - **Businesses** are random rectangles on one floor each, not real buildings.
 - **Zürich's density** is OpenStreetMap doubled; STATENT (per hectare) would
   replace the estimate.
