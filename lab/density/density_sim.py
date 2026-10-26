@@ -37,7 +37,8 @@ ENTRY = 40         # a typed entry len(type) | type | hash (options A, A+)
 BODY = 2000        # one certificate (lab certificates: 0.9-6.2 KB)
 
 SERVER_F = 0.1     # geopki server: certificate cells <= 0.1 x the certificate's area
-QUERY_F = 1.0      # app (GeoQueryEncoder): lookup cells ~ the circle's area
+QUERY_F = 0.1      # app (GeoQueryEncoder.F_GROW): lookup cells ~0.1 x the circle's area
+                   # (1.0 before 2026-10-26, as geopki's Go client: ~4x the circle covered)
 RADIUS_ERROR_FACTOR = 1.0052  # app: the lookup radius is inflated by this
 
 
@@ -172,12 +173,12 @@ def rectangle_cells(grid: Grid, x0: float, y0: float, x1: float, y1: float,
     return [(c, z) for c in xy]
 
 
-def lookup_cells(grid: Grid, radius: int) -> set[str]:
+def lookup_cells(grid: Grid, radius: int, query_f: float = QUERY_F) -> set[str]:
     """The cells the app sends for a lookup of this radius around the grid's point."""
     r = math.ceil(radius * RADIUS_ERROR_FACTOR)
     px, py = grid.x0, grid.y0
     return cover(grid, circle(px, py, r / grid.cx, r / grid.cy), px + r / grid.cx, py,
-                 math.pi * r * r, QUERY_F)
+                 math.pi * r * r, query_f)
 
 
 # --- the experiment -----------------------------------------------------------------
@@ -305,7 +306,8 @@ def predict(certificates, lookup: set[str]) -> dict:
     }
 
 
-def run(place: Place, radius: int, wifi_share: float, seed: int, shift: bool) -> dict:
+def run(place: Place, radius: int, wifi_share: float, seed: int, shift: bool,
+        query_f: float = QUERY_F) -> dict:
     rng = random.Random(seed)
     grid = Grid(place.lat, place.lng)
     # move the lookup point by up to 500 m, so that it lands at a different spot
@@ -314,7 +316,7 @@ def run(place: Place, radius: int, wifi_share: float, seed: int, shift: bool) ->
         grid.x0 += rng.uniform(-500, 500) / grid.cx
         grid.y0 += rng.uniform(-500, 500) / grid.cy
 
-    lookup = lookup_cells(grid, radius)
+    lookup = lookup_cells(grid, radius, query_f)
     lookup_m2 = sum(w * grid.cx * h * grid.cy for w, h in map(cell_size, lookup))
 
     # businesses far enough out that everything reaching the lookup cells is placed
@@ -350,6 +352,8 @@ def main():
     ap.add_argument("--wifi-share", type=float, default=0.5, help="share of businesses with WiFi (0.5)")
     ap.add_argument("--runs", type=int, default=1, help="lookups at different grid positions (1)")
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--query-f", type=float, default=QUERY_F,
+                    help=f"lookup cell size relative to the circle ({QUERY_F}; 1.0 = geopki's Go client)")
     args = ap.parse_args()
 
     print(f"{'place':14} {'r':>4} {'area km2':>9} {'xcircle':>7} {'certs':>6} {'wifi':>5} {'nodes':>6} "
@@ -357,7 +361,8 @@ def main():
     for name in args.place or list(PLACES):
         place = PLACES[name] if not args.k else replace(PLACES[name], k=args.k)
         for radius in args.radius or [25, 50, 100]:
-            results = [run(place, radius, args.wifi_share, args.seed + i, shift=args.runs > 1)
+            results = [run(place, radius, args.wifi_share, args.seed + i, shift=args.runs > 1,
+                           query_f=args.query_f)
                        for i in range(args.runs)]
             m = {key: statistics.median(r[key] for r in results) for key in results[0]}
             print(f"{name:14} {radius:4d} {m['lookup_km2']:9.4f} {m['x_circle']:7.1f} {m['certificates']:6.0f} "

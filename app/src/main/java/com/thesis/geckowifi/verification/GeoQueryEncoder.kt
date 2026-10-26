@@ -39,8 +39,16 @@ data class XYBitString(
  * Quirks of the reference (int32 remainder by C_X, pole flip, unsigned wrap
  * then mask) are copied on purpose: the goal is equivalence, verified by
  * GeoQueryEncoderGoldenTest against cmd/golden-dump output.
+ *
+ * [fGrow] sets the cell size: cells start at about fGrow x the circle's area.
+ * The Go client uses [REFERENCE_F_GROW] (cells the size of the circle, which
+ * together cover about 4x its area); the app uses the finer [F_GROW], which
+ * covers about half as much and so halves the answer (lab/density/README.md).
+ * Every cell touching the circle is kept either way, so the cover always
+ * contains the whole circle; finer cells only drop area outside it, whose
+ * certificates the app would discard (coversLocation).
  */
-class GeoQueryEncoder {
+class GeoQueryEncoder(private val fGrow: Double = F_GROW) {
 
     companion object {
         private val MIN_ALTITUDE: Int = D
@@ -50,8 +58,11 @@ class GeoQueryEncoder {
         // comm/query.go RADIUS_ERROR_FACTOR
         private const val RADIUS_ERROR_FACTOR = 1.0052
 
-        // cmd/geopki-client F_GROW
-        private const val F_GROW = 1.0
+        /** cmd/geopki-client F_GROW: what the golden vectors were made with. */
+        const val REFERENCE_F_GROW = 1.0
+
+        /** The app's cell size, see the class doc. */
+        const val F_GROW = 0.1
 
         // comm.S2CircleApproximator: 16 segments per quadrant = 64-gon
         private const val QUAD_SEGS = 16
@@ -219,7 +230,7 @@ class GeoQueryEncoder {
         val v0 = S2LatLng(circle.vertex(0))
         val initial = Voxel.fromGeodetic(v0.lngDegrees(), v0.latDegrees())
 
-        val maxArea = circle.area * F_GROW
+        val maxArea = circle.area * fGrow
         val currentArea = initial.loop().area
         val growSteps = log2(maxArea / currentArea)
 

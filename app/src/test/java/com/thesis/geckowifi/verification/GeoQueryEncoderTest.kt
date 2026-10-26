@@ -115,4 +115,72 @@ class GeoQueryEncoderTest {
         assertEquals(11349, min)
         assertEquals(11451, max)
     }
+
+    /** Area of the cells in m^2 (flat approximation, fine at these sizes). */
+    private fun List<XYBitString>.areaM2(lat: Double): Double = sumOf {
+        val xy = bitStringPairFromStringPair(it.bits, "").xy
+        val (minLng, minLat) = xy.geodeticCoordinates()
+        val metersPerDegree = 111_320.0
+        (undiscretizeX(xy.xMax()) - minLng) * metersPerDegree * Math.cos(Math.toRadians(lat)) *
+            (undiscretizeY(xy.yMax()) - minLat) * metersPerDegree
+    }
+
+    @Test
+    fun finerCells_stillCoverTheWholeCircle() {
+        // Every cell touching the circle is kept at any cell size, so points just
+        // inside the edge, in every direction, must stay covered.
+        val random = java.util.Random(1)
+        val metersPerDegree = 111_320.0
+        for (radius in listOf(10, 25, 50, 100, 253)) {
+            repeat(20) {
+                val lat = 47.3 + random.nextDouble() * 0.2
+                val lng = 8.4 + random.nextDouble() * 0.2
+                val cells = encoder.encodeQuery(lat, lng, radius)
+                for (step in 0 until 64) {
+                    val bearing = 2 * Math.PI * step / 64
+                    val pLat = lat + 0.999 * radius * Math.cos(bearing) / metersPerDegree
+                    val pLng = lng + 0.999 * radius * Math.sin(bearing) /
+                        (metersPerDegree * Math.cos(Math.toRadians(lat)))
+                    assertTrue(
+                        "r=$radius at ($lat, $lng): edge point at ${step * 360 / 64} deg not covered",
+                        cells.any { it.covers(pLat, pLng) }
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun finerCells_coverLessThanTheReferenceCells() {
+        // The point of F_GROW < REFERENCE_F_GROW: less area outside the circle.
+        val random = java.util.Random(2)
+        val reference = GeoQueryEncoder(fGrow = GeoQueryEncoder.REFERENCE_F_GROW)
+        for (radius in listOf(25, 50, 100)) {
+            val ratios = mutableMapOf<Double, MutableList<Double>>()
+            val cellCounts = mutableMapOf<Double, MutableList<Int>>()
+            repeat(200) {
+                val lat = 47.3 + random.nextDouble() * 0.2
+                val lng = 8.4 + random.nextDouble() * 0.2
+                val circle = Math.PI * radius * radius
+                for (f in listOf(1.0, 0.5, 0.25, 0.1, 0.05)) {
+                    val cells = GeoQueryEncoder(fGrow = f).encodeQuery(lat, lng, radius)
+                    ratios.getOrPut(f) { mutableListOf() } += cells.areaM2(lat) / circle
+                    cellCounts.getOrPut(f) { mutableListOf() } += cells.size
+                }
+            }
+            val median = { xs: List<Double> -> xs.sorted()[xs.size / 2] }
+            for ((f, xs) in ratios) {
+                println("r=$radius f=$f: median ${"%.2f".format(median(xs))}x the circle, " +
+                    "max ${"%.2f".format(xs.max())}x, median ${cellCounts[f]!!.sorted()[100]} cells")
+            }
+            assertTrue(
+                "r=$radius: finer cells should cover clearly less (median)",
+                median(ratios[GeoQueryEncoder.F_GROW]!!) < 0.7 * median(ratios[GeoQueryEncoder.REFERENCE_F_GROW]!!)
+            )
+            // the default encoder is the finer one
+            val lat = 47.37
+            val lng = 8.54
+            assertTrue(encoder.encodeQuery(lat, lng, radius).areaM2(lat) <= reference.encodeQuery(lat, lng, radius).areaM2(lat))
+        }
+    }
 }

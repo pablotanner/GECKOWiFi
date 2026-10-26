@@ -11,11 +11,12 @@ that checks the simulation against the real geopki server.
 ## The answer in short
 
 - **Small lookups are fine.** Within 25–50 m of the phone, filtered lookups
-  stay under about 0.8 MB even in Midtown Manhattan.
+  stay under about 0.4 MB even in Midtown Manhattan.
 - **Large lookups are not.** Indoors, location gets imprecise and the lookup
   area grows. At 100 m in a dense business district, downloading everything
-  is about 3.7 MB (Zürich centre) to 9 MB (Midtown), measured on the real
-  geopki server.
+  is about 1.7 MB (Zürich centre) to 4.2 MB (Midtown) with the app's lookup
+  cells, and twice that with geopki's default cells (3.7 and 9.1 MB, measured
+  on the real geopki server).
 - **Cap the lookup radius at 100 m and filter by type.**
 - **Filtering needs a change to the map tree.** The server can't just leave
   certificates out, or the phone can no longer tell "filtered" from
@@ -28,9 +29,14 @@ that checks the simulation against the real geopki server.
 
 - **Radius:** follows the phone's location error.
 - **Grid cells, not a circle:** the server answers for the grid cells
-  covering the circle, which are about 4 times its area (measured with the
-  app's encoder; 3–6× depending on where you stand). A 100 m lookup covers
-  **about 0.13 km²**, roughly 400 × 300 m: a few city blocks.
+  covering the circle. The app's cells (`GeoQueryEncoder.F_GROW = 0.1`) cover
+  about 1.7 times the circle's area (1.5–2× depending on where you stand),
+  so a 100 m lookup covers **about 0.05 km²**, roughly 230 × 230 m. geopki's
+  Go client uses cells the size of the circle (`F_GROW = 1`), which cover
+  about 4× (3–6×), 0.13 km². The extra
+  area lies outside the circle, where by its own estimate the phone isn't,
+  and the app discards its certificates anyway (`coversLocation`). Finer
+  cells do tell the map server the circle's position more precisely.
 - **All floors:** phone altitude is too unreliable to narrow down, so the
   lookup includes every floor of every building in those cells.
 
@@ -73,9 +79,10 @@ WiFi networks  ≈  business locations  ×  50 %   (those with their own network
 | Midtown Manhattan | 6,000 | US Census 2021 |
 | Rockefeller Center (0.05 km²) | ~14,500 | US Census 2021 |
 
-What matters is the density averaged over a lookup (0.13 km²), not the
-densest single spot. Rockefeller Center is smaller than one lookup, so the
-simulation's "upper bound" (12,000/km² over the whole lookup) is pessimistic.
+What matters is the density averaged over a lookup (about 0.05 km² at 100 m),
+not the densest single spot. Rockefeller Center is about the size of one
+lookup, so the simulation's "upper bound" (12,000/km² over the whole lookup)
+corresponds to a lookup right there: a real but extreme case.
 
 ## 3. Why the server can't simply filter
 
@@ -122,33 +129,37 @@ type; requires auditors or something like that.
 
 ## 4. Results
 
-`density_sim.py`, all floors, half of the businesses with WiFi,
-k = 3 (Zürich) or 4 (Manhattan). "Today" = downloading everything:
+`density_sim.py --runs 5` (medians over 5 grid positions), the app's lookup
+cells, all floors, half of the businesses with WiFi, k = 3 (Zürich) or 4
+(Manhattan). "Today" = downloading everything:
 
 | Place | Radius | Today | Option A | Option A+ |
 |---|---|---|---|---|
-| Zürich suburb | 25 m | 0.04 MB | 0.01 MB | 0.01 MB |
-| | 100 m | 0.43 MB | 0.18 MB | 0.09 MB |
-| Zürich centre | 25 m | 0.39 MB | 0.13 MB | 0.08 MB |
-| | 50 m | 1.42 MB | 0.56 MB | 0.34 MB |
-| | 100 m | 3.75 MB | **1.59 MB** | **0.98 MB** |
-| Midtown (6,000/km²) | 25 m | 0.85 MB | 0.22 MB | 0.14 MB |
-| | 50 m | 2.28 MB | 0.75 MB | 0.45 MB |
-| | 100 m | 9.10 MB | **3.08 MB** | **1.70 MB** |
-| Upper bound (12,000/km²) | 100 m | 19.7 MB | **6.4 MB** | **3.6 MB** |
-| Upper bound, k = 8 | 100 m | 37.3 MB | **8.9 MB** | **3.6 MB** |
+| Zürich suburb | 25 m | 0.03 MB | 0.01 MB | < 0.01 MB |
+| | 100 m | 0.21 MB | 0.09 MB | 0.04 MB |
+| Zürich centre | 25 m | 0.18 MB | 0.05 MB | 0.03 MB |
+| | 50 m | 0.51 MB | 0.17 MB | 0.11 MB |
+| | 100 m | 1.69 MB | **0.69 MB** | **0.40 MB** |
+| Midtown (6,000/km²) | 25 m | 0.46 MB | 0.12 MB | 0.08 MB |
+| | 50 m | 1.27 MB | 0.37 MB | 0.21 MB |
+| | 100 m | 4.24 MB | **1.38 MB** | **0.76 MB** |
+| Upper bound (12,000/km²) | 100 m | 8.16 MB | **2.48 MB** | **1.43 MB** |
+| Upper bound, k = 8 | 100 m | 15.6 MB | **3.39 MB** | **1.43 MB** |
 
+- **Option A:** feasible everywhere except the upper bound with many
+  certificate types (k = 8: 3.4 MB).
+- **Option A+:** feasible everywhere (at most 1.4 MB), and unchanged by k.
 
-- **Option A:** feasible in European cities, borderline in Midtown at 100 m,
-  too big at the upper bound.
-- **Option A+:** feasible everywhere, at worst just over the limit for the
-  rare 100 m lookup at the upper bound, and unchanged by k.
+With geopki's default cells (`--query-f 1`) all of these are about 2.2×
+larger.
 
 ## 5. Checked against the real geopki server
 
 The experiment loaded the simulation's businesses, as real certificates,
 into a throwaway geopki server and compared its answers with the
-simulation's prediction for the same certificates (2026-10-26):
+simulation's prediction for the same certificates (2026-10-26, with
+geopki's default lookup cells; the cell size doesn't change what is being
+checked, the server answers any set of cells the same way):
 
 | 100 m lookup | Zürich centre: measured / predicted | Midtown: measured / predicted |
 |---|---|---|
@@ -180,6 +191,10 @@ not model), and the certificate size (2 KB, padded; see *Open points*).
 5. **Filter by type:** option A as the minimum, **option A+ preferred** if the
    larger tree change is acceptable. 
 6. **Cache certificates by their hash.**
+7. **Compress the Answer:** Server compresses the body and marks it `Content-Encoding: gzip` and the client decompresses before reading. (MEASURED: at gzip level 1 it can fit around 1.6x more answers through same link, so worth it for bandwidth-bound server)
+7. **DONE** Finer lookup cells: about 2.2x
+   less of everything, at the cost of the map server learning the circle's
+   position more precisely. 
 
 ## 7. The scripts
 
@@ -204,8 +219,9 @@ It places businesses at random (10–50 m rectangles on random floors, as many
 per km² as the place's density), gives each k certificates, turns them into
 grid cells the way the geopki server does, builds the tree, makes the lookup
 the way the app does, and counts what the server would send. `--runs`
-repeats the lookup at different grid positions and prints medians. The byte
-sizes and densities are constants at the top of the file.
+repeats the lookup at different grid positions and prints medians;
+`--query-f 1` uses geopki's default lookup cells instead of the app's. The
+byte sizes and densities are constants at the top of the file.
 
 ### The experiment (only needed when the model changes)
 

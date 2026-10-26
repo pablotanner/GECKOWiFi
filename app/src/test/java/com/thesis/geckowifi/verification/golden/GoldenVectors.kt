@@ -93,7 +93,8 @@ object UnderTest {
      * doesn't need its own validation layer.
      */
     fun encode(lon: Double, lat: Double, alt: Double, radius: Long): EncodedQuery {
-        val encoder = GeoQueryEncoder()
+        // the Go client's cell size: the vectors come from cmd/golden-dump
+        val encoder = GeoQueryEncoder(fGrow = GeoQueryEncoder.REFERENCE_F_GROW)
         val radiusMeters = radius.toInt()
         val xy = encoder.encodeQuery(lat = lat, lng = lon, radiusMeters = radiusMeters)
             .map { it.toRawXYBitString() }
