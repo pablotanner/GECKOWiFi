@@ -11,11 +11,12 @@ import java.security.MessageDigest
 class NodeTest {
 
     @Test
+    // inner nodes are prefixed 0x03 since map version 2 (0x01 before)
     fun hash_ofEmptyRoot_isIntermediateHashOfFourDefaultHashes() {
         val root = Node(pair = ROOT_NODE)
 
         val expected = MessageDigest.getInstance("SHA-256").digest(
-            byteArrayOf(0x01) + DEFAULT_HASH.bytes + DEFAULT_HASH.bytes + DEFAULT_HASH.bytes + DEFAULT_HASH.bytes
+            byteArrayOf(0x03) + DEFAULT_HASH.bytes + DEFAULT_HASH.bytes + DEFAULT_HASH.bytes + DEFAULT_HASH.bytes
         )
 
         assertEquals(SHA256Hash(expected), root.hash())
@@ -29,7 +30,7 @@ class NodeTest {
         root.setXYLeftChild(child)
 
         val expected = MessageDigest.getInstance("SHA-256").digest(
-            byteArrayOf(0x01) + child.hash().bytes + DEFAULT_HASH.bytes + DEFAULT_HASH.bytes + DEFAULT_HASH.bytes
+            byteArrayOf(0x03) + child.hash().bytes + DEFAULT_HASH.bytes + DEFAULT_HASH.bytes + DEFAULT_HASH.bytes
         )
 
         assertEquals(SHA256Hash(expected), root.hash())

@@ -10,6 +10,9 @@ loading a make_certs.py file into it; never against the demo server.
 Per lookup radius it prints, measured vs. predicted:
   nodes, certificate hashes in them, distinct certificates, WiFi certificates,
   the tree part in bytes, and the whole answer raw and as transferred (gzip).
+Against a map-version-2 server (geopki typed-entries, nodes hold typed entries)
+it also asks for WiFi certificates only, as the app does (option A), and
+compares that answer with density_sim.py's A column.
 """
 import argparse
 import gzip
@@ -39,13 +42,15 @@ def field(number: int, wire: int, payload: bytes) -> bytes:
     return key + (payload if wire == 0 else varint(len(payload)) + payload)
 
 
-def request(cells: set[str]) -> bytes:
-    """geopki.Request: the lookup cells (bits top-aligned in 64) and all altitudes."""
+def request(cells: set[str], types: tuple[str, ...] = ()) -> bytes:
+    """geopki.Request: the lookup cells (bits top-aligned in 64), all altitudes,
+    and the certificate types wanted (empty = all)."""
     body = b""
     for bits in sorted(cells):
         cell = field(1, 0, varint(int(bits.ljust(64, "0"), 2))) + field(2, 0, varint(len(bits)))
         body += field(1, 2, cell)
-    return body + field(2, 0, varint(0)) + field(3, 0, varint(MAX_Z))
+    body += field(2, 0, varint(0)) + field(3, 0, varint(MAX_Z))
+    return body + b"".join(field(4, 2, t.encode()) for t in types)
 
 
 def fields(data: bytes):
@@ -79,7 +84,7 @@ def read_varint(data: bytes, i: int) -> tuple[int, int]:
 def parse(answer: bytes) -> dict:
     """Counts and byte sizes of a geopki.Response."""
     m = {"nodes": 0, "altitude_nodes": 0, "pruned": 0, "hashes": 0, "node_bytes": 0,
-         "certificates": [], "head_bytes": 0}
+         "certificates": [], "head_bytes": 0, "typed": False}
     for number, _, value, size in fields(answer):
         if number == 4:  # Node
             m["nodes"] += 1
@@ -89,8 +94,11 @@ def parse(answer: bytes) -> dict:
                     m["altitude_nodes"] += 1
                 elif n in (5, 6, 7, 8):
                     m["pruned"] += 1
-                elif n == 9:
+                elif n == 9:  # certificate hash (map version 1)
                     m["hashes"] += 1
+                elif n == 10:  # typed entry (map version 2)
+                    m["hashes"] += 1
+                    m["typed"] = True
         elif number == 5:  # certificate
             m["certificates"].append(value)
         else:  # signed heads, inclusion proof
@@ -98,10 +106,11 @@ def parse(answer: bytes) -> dict:
     return m
 
 
-def query(server: str, cells: set[str], certificates: bool) -> tuple[bytes, int, float]:
+def query(server: str, cells: set[str], certificates: bool,
+          types: tuple[str, ...] = ()) -> tuple[bytes, int, float]:
     """POSTs a lookup; returns the decoded answer, the bytes transferred and the time."""
     url = f"{server}/v1/query" + ("?c" if certificates else "")
-    req = urllib.request.Request(url, data=request(cells), method="POST",
+    req = urllib.request.Request(url, data=request(cells, types), method="POST",
                                  headers={"Accept-Encoding": "gzip",
                                           "Content-Type": "application/octet-stream"})
     start = time.perf_counter()
@@ -136,6 +145,7 @@ def main():
         bodies = m["certificates"]
         wifi = sum(1 for b in bodies if "wifi" in json.loads(b).get("extensions", {}))
         tree_bytes = m["node_bytes"]  # nodes incl. their hashes, as sent
+        entry = sim.ENTRY if m["typed"] else sim.HASH
         rows = [
             ("nodes", m["nodes"], predicted["nodes"]),
             ("  of which altitude nodes", m["altitude_nodes"], predicted["altitude_nodes"]),
@@ -144,7 +154,7 @@ def main():
             ("distinct certificates", len(bodies), predicted["certificates"]),
             ("  of which WiFi", wifi, predicted["wifi"]),
             ("tree part, bytes", tree_bytes,
-             predicted["tree_bytes"] + predicted["hashes"] * sim.HASH),
+             predicted["tree_bytes"] + predicted["hashes"] * entry),
             ("signed heads + proof, bytes", m["head_bytes"], None),
             ("certificate bodies, bytes", sum(len(b) for b in bodies), None),
         ]
@@ -155,6 +165,25 @@ def main():
         print(f"  {'whole answer, raw':32} {len(raw):12,}")
         print(f"  {'whole answer, transferred':32} {wire:12,}  ({wire / len(raw):.0%} of raw)")
         print(f"  {'without bodies (hashes only)':32} {len(proof_raw):12,}  transferred {proof_wire:,}\n")
+
+        if not m["typed"]:
+            continue
+        # option A, as the app asks: every node and entry, WiFi bodies only
+        a_raw, a_wire, a_seconds = query(args.server, cells, certificates=True, types=("wifi",))
+        a = parse(a_raw)
+        tree_a = predicted["tree_bytes"] + predicted["hashes"] * sim.ENTRY
+        wifi_bodies = predicted["wifi"] * sim.WIFI_BODY
+        print(f"  option A (Types = wifi), answer in {a_seconds:.2f} s")
+        print(f"  {'':32} {'measured':>12} {'predicted':>12}")
+        for label, measured, pred in [
+            ("certificate bodies sent", len(a["certificates"]), predicted["wifi"]),
+            ("tree part, bytes", a["node_bytes"], tree_a),
+            ("WiFi bodies, bytes", sum(len(b) for b in a["certificates"]), wifi_bodies),
+            ("whole answer, raw", len(a_raw), sim.answer_bytes(tree_a, wifi_bodies, 0, False)),
+            ("whole answer, transferred", a_wire, sim.answer_bytes(tree_a, wifi_bodies, 0, True)),
+        ]:
+            print(f"  {label:32} {measured:12,} {round(pred):12,}")
+        print(f"  {'A vs. all types, transferred':32} {a_wire / wire:12.0%}\n")
 
 
 if __name__ == "__main__":
