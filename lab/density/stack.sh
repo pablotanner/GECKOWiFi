@@ -12,7 +12,8 @@
 #   The WSL PostgreSQL and its databases (geopki_ext, geopki) are not touched.
 # - one new tree in the lab's Trillian (deleted again by `down`).
 # - a geopki server built from ~/Thesis/geopki-ext into ~/Thesis/density-exp,
-#   with its own keys, on port 1235. The demo server on 1234 keeps running.
+#   with its own keys, on port 1236. The demo server on 1234 and the realm
+#   server on 1235 (lab/realm) keep running.
 # - state (keys, tree id, logs) in ~/Thesis/density-exp, removed by `down`.
 set -euo pipefail
 export PATH="$PATH:/usr/local/go/bin"
@@ -22,7 +23,7 @@ TRILLIAN=${TRILLIAN_DIR:-$HOME/Thesis/trillian}
 STATE=$HOME/Thesis/density-exp
 PG=geopki-density-pg
 PG_PORT=5433
-PORT=1235
+PORT=1236
 TRILLIAN_ADMIN=127.0.0.1:8090
 
 cmd=${1:?usage: stack.sh up | load <file> | status | down}

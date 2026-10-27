@@ -318,14 +318,35 @@ servers, but the app showed things it couldn't know.
   maximum radius (253 m) instead of the device's accuracy (tens of metres), and
   the list shows only what reaches the device. One query serves both, and the
   saved answer still applies after a walk across the building. Checks keep
-  querying with the accuracy radius.
+  querying with the accuracy radius (1.6 × the reported accuracy, at most
+  100 m; lab/density/README.md). A saved answer records the radius it was
+  queried with: until 2026-10-26 the lookup after joining a network was saved
+  as covering 253 m, so it could stand in where it lacked registrations.
 - **Expired means deleted; elsewhere means unused.** An answer older than 24 h
   is deleted. One that only doesn't apply here is kept and used again on
   return, until a fresh lookup replaces it; deleting it would only lose data
   that is correct where it was fetched. Settings > Saved GECKO data says
   whether it is used here and how far away it was fetched. Realm records
   aren't tied to a place and keep their own signed expiry.
-- **Kept fresh while the app is open:** a lookup every 10 minutes and a few
+- **Looked up on need, not on a timer** (since 2026-10-27; before, a lookup
+  every 10 minutes, a workaround for the lab, whose map server most networks
+  can't reach). `savedAnswerUpkeep` decides, whenever the app opens, every 5
+  minutes while it is open, after the device joins a network, and when
+  Android reports working internet again (e.g. after a portal's login):
+  - no saved answer, or it expired, or a check of up to 100 m here wouldn't
+    fit inside it anymore: look the place up again, while the device is still
+    online, before e.g. a captive portal cuts it off;
+  - older than half its maximum age: fetch only the signed map head
+    (`/v1/get-smh`, a few hundred bytes). The same root hash means the same
+    map, so the answer is marked confirmed (`confirmedAt`) and its age counts
+    from then; a different one means a new lookup;
+  - otherwise: nothing, the list shows the saved answer.
+  The refresh button still always looks up. The root hash is compared, not the
+  timestamp: geopki signs the raw map head with ECDSA (`ecdsa.SignASN1`), which
+  on P-256 uses only the first 32 bytes, so only the root hash is covered by
+  the signature (`MapHeadTest`). A replayed old map head would still pass, as a
+  replayed answer does (docs/experiments.md, R2).
+- **Earlier: kept fresh by a timer:** a lookup every 10 minutes and a few
   seconds after the device joins a Wi-Fi network (when a WiFi-only device can
   usually reach the map server again), not while a check holds a network. On
   the Tab, a lookup 3 s after joining `GeckoTest` failed over the default

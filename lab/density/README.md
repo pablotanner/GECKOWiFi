@@ -179,19 +179,18 @@ checked, the server answers any set of cells the same way):
 What this doesn't check: the business counts, k and the WiFi share (inputs,
 not model), and the certificate size (2 KB, padded; see *Open points*).
 
-## 6. Decisions and recommendations
+## 6. Decisions
 
-1. **Check radius:** 1.6 × reported accuracy, at least 25 m, at most 100 m.
-2. **Location worse than 100 m:** wait for a better fix, use the saved answer,
-   or say "location too imprecise". Never query wider.
+1. **Check radius:** 1.6x reported accuracy, at least the lab setting
+   (default 50 m), at most 100 m (done: `checkRadius` in `VerificationViewModel`).
+2. **Location worse than 100 m** (accuracy worse than 62 m): the check is
+   refused as "location too imprecise" (done). Still open: wait a few seconds
+   for a better fix, or use the saved answer, before refusing. Never query wider.
 3. **Keep all floors** in the lookup.
-4. **The network list's lookup (D26)** should stop using 253 m: same radius as
-   a check, refresh only after moving, and ask the server whether the map
-   changed before downloading again.
-5. **Filter by type:** option A as the minimum, **option A+ preferred** if the
+4. **Filter by type:** option A as the minimum, **option A+ preferred** if the
    larger tree change is acceptable. 
-6. **Cache certificates by their hash.**
-7. **Compress the Answer:** Server compresses the body and marks it `Content-Encoding: gzip` and the client decompresses before reading. (MEASURED: at gzip level 1 it can fit around 1.6x more answers through same link, so worth it for bandwidth-bound server)
+5. **Cache certificates by their hash.**
+6. **Compress the Answer:** Server compresses the body and marks it `Content-Encoding: gzip` and the client decompresses before reading. (MEASURED: at gzip level 1 it can fit around 1.6x more answers through same link, so worth it for bandwidth-bound server)
 7. **DONE** Finer lookup cells: about 2.2x
    less of everything, at the cost of the map server learning the circle's
    position more precisely. 
@@ -239,13 +238,13 @@ folder).
 `stack.sh` keeps the experiment away from the demo setup:
 - its own PostgreSQL in a Docker container (`127.0.0.1:5433`); the WSL
   database `geopki_ext` isn't touched;
-- its own geopki server on port 1235 with its own keys; the demo server on
-  1234 keeps running;
+- its own geopki server on port 1236 with its own keys; the demo server on
+  1234 and the realm server on 1235 keep running;
 - one extra Trillian tree, deleted by `down`;
 - state in `~/Thesis/density-exp`, removed by `down`.
 
 `load` refuses certificates whose ID doesn't start with `synth-`, and
-`measure.py` refuses port 1234.
+`measure.py` refuses ports 1234 and 1235.
 
 ## Limits and open points
 

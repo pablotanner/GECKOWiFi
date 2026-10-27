@@ -63,7 +63,7 @@ show what that misses; they are expected misses, not bugs.
 |---|---|---|---|
 | S7 | B blocks the map server | `UNREACHABLE` | |
 | R1 | Proof changed in transit (mitmproxy between tablet and map server) | `CONFLICT`; an answer that no longer parses gives `UNREACHABLE` | |
-| R2 | B replays an older, validly signed answer | Accepted. The age check (`maxMapHeadAge`) is off, because the geopki server only signs when the map changes | |
+| R2 | B replays an older, validly signed answer | Accepted. The age check (`maxMapHeadAge`) is off, because the geopki server only signs when the map changes. It couldn't help anyway: the signature only covers the map head's root hash, not its timestamp (D26) | |
 | R3 | Wrong pinned map-server key in the app (another valid key) | `CONFLICT` | |
 
 ## Location
@@ -71,12 +71,12 @@ show what that misses; they are expected misses, not bugs.
 The location comes from the device. Spoof it with a mock-location app in the
 developer options (no root needed).
 
-| # | Scenario | Expected | Result |
-|---|---|---|---|
-| L1 | S1, with the location spoofed to an empty area | `UNVERIFIED`, no warning (the attack is missed) | |
-| L2 | S1, with the location spoofed just outside A's area (farther than the query radius) | `UNVERIFIED`, no warning: the map server still returns A's certificate, but its area doesn't reach the device, so it is dropped | |
-| L3 | Location accuracy worse than 253 m (the largest query radius) | Check refused ("Your location isn't precise enough"), not a silent `UNVERIFIED` | |
-| L4 | Two neighbouring certificates; move a few metres across the border | The result switches to the neighbour | |
+| # | Scenario                                                                             | Expected | Result |
+|---|--------------------------------------------------------------------------------------|---|---|
+| L1 | S1, with the location spoofed to an empty area                                       | `UNVERIFIED`, no warning (the attack is missed) | |
+| L2 | S1, with the location spoofed just outside A's area (farther than the query radius)  | `UNVERIFIED`, no warning: the map server still returns A's certificate, but its area doesn't reach the device, so it is dropped | |
+| L3 | Location accuracy worse than 62 m (a check queries 1.6x the accuracy, at most 100 m) | Check refused ("Your location isn't precise enough"), not a silent `UNVERIFIED` | |
+| L4 | Two neighbouring certificates; move a few metres across the border                   | The result switches to the neighbour | |
 
 ## Enterprise (eduroam)
 

@@ -1,11 +1,11 @@
 """Measures what a real geopki server sends for a lookup and compares it with
 density_sim.py's prediction for the same certificates (stdlib only).
 
-Run against the experiment server of lab/density/stack.sh (port 1235) after
+Run against the experiment server of lab/density/stack.sh (port 1236) after
 loading a make_certs.py file into it; never against the demo server.
 
     python lab/density/measure.py lab/density/out/zurich-centre-r100-s1.json
-    python lab/density/measure.py <file> --radius 25 --radius 50 --server http://localhost:1235
+    python lab/density/measure.py <file> --radius 25 --radius 50 --server http://localhost:1236
 
 Per lookup radius it prints, measured vs. predicted:
   nodes, certificate hashes in them, distinct certificates, WiFi certificates,
@@ -115,11 +115,11 @@ def query(server: str, cells: set[str], certificates: bool) -> tuple[bytes, int,
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("certs", help="file written by make_certs.py, loaded into the server")
-    ap.add_argument("--server", default="http://localhost:1235")
+    ap.add_argument("--server", default="http://localhost:1236")
     ap.add_argument("--radius", type=int, action="append", help="lookup radius in m (default 25, 50, 100)")
     args = ap.parse_args()
-    if args.server.rstrip("/").endswith(":1234"):
-        raise SystemExit("port 1234 is the demo server; measure against the experiment server (1235)")
+    if args.server.rstrip("/").endswith((":1234", ":1235")):
+        raise SystemExit("1234 is the demo server, 1235 the realm server; measure against the experiment server (1236)")
 
     with open(args.certs, encoding="utf-8") as f:
         meta = json.load(f)
