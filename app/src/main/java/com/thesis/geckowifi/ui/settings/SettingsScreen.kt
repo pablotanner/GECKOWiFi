@@ -14,6 +14,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.thesis.geckowifi.eduroam.AccountInfo
 import com.thesis.geckowifi.ui.EnterpriseController
+import com.thesis.geckowifi.ui.MAX_CHECK_RADIUS_METERS
 import com.thesis.geckowifi.ui.timeText
 import com.thesis.geckowifi.ui.viaDescription
 import android.content.Intent
@@ -159,7 +160,7 @@ private fun LabSection(viewModel: VerificationViewModel) {
                 value = radius,
                 onValueChange = { radius = it },
                 onValueChangeFinished = { viewModel.updateQueryRadius(radius.toInt()) },
-                valueRange = 10f..250f
+                valueRange = 10f..MAX_CHECK_RADIUS_METERS.toFloat()
             )
         }
 

@@ -11,9 +11,54 @@ import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-/** Whether [this] saved answer is older than [maxAge] at [now]; an expired answer is deleted, not kept (D26). */
+/** When [this] saved answer was last known to be current: fetched, or confirmed unchanged since (D26). */
+val SavedLookup.currentAt: Long get() = maxOf(fetchedAt, confirmedAt ?: 0L)
+
+/**
+ * Whether [this] saved answer was last known current more than [maxAge] before
+ * [now]; an expired answer is deleted, not kept (D26).
+ */
 fun SavedLookup.isExpired(now: Instant, maxAge: Duration = SAVED_REGISTRATION_MAX_AGE): Boolean =
-    Duration.between(Instant.ofEpochMilli(fetchedAt), now) > maxAge
+    Duration.between(Instant.ofEpochMilli(currentAt), now) > maxAge
+
+/**
+ * After this, a saved answer is checked against the server's map head while it
+ * is still usable (D26): half of [SAVED_REGISTRATION_MAX_AGE], so it is
+ * confirmed (or replaced) well before it expires.
+ */
+val SAVED_REGISTRATION_CONFIRM_AFTER: Duration = SAVED_REGISTRATION_MAX_AGE.dividedBy(2)
+
+/** What keeping the saved answer useful takes right now (D26). */
+enum class SavedAnswerUpkeep {
+    /** It covers here and is recent: nothing to do. */
+    NONE,
+
+    /** It covers here but is getting old: ask whether the map changed (a signed map head, a few hundred bytes). */
+    CONFIRM,
+
+    /** There is none, it expired, or it doesn't cover a check here: look the place up again. */
+    FETCH
+}
+
+/**
+ * Decides when GECKO looks the place up again (D26), instead of on a timer:
+ * when there's no usable saved answer, when a check of up to [checkRadiusMeters]
+ * at ([lat], [lng]) wouldn't fit inside it anymore (so it is replaced while the
+ * device is still online, before a captive portal cuts it off), or, once it is
+ * [confirmAfter] old, only if the map changed meanwhile.
+ */
+fun savedAnswerUpkeep(
+    saved: SavedLookup?,
+    lat: Double,
+    lng: Double,
+    checkRadiusMeters: Int,
+    now: Instant,
+    confirmAfter: Duration = SAVED_REGISTRATION_CONFIRM_AFTER
+): SavedAnswerUpkeep = when {
+    saved == null || !saved.appliesAt(lat, lng, checkRadiusMeters, now) -> SavedAnswerUpkeep.FETCH
+    Duration.between(Instant.ofEpochMilli(saved.currentAt), now) >= confirmAfter -> SavedAnswerUpkeep.CONFIRM
+    else -> SavedAnswerUpkeep.NONE
+}
 
 /**
  * Whether [this] saved answer still speaks for the circle ([lat], [lng], [radiusMeters])

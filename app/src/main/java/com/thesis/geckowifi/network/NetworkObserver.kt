@@ -191,6 +191,30 @@ class NetworkObserver(private val context: Context) {
         runCatching { connectivity.registerNetworkCallback(request, callback) }.onFailure { Log.w(TAG, "can't watch Wi-Fi: $it") }
     }
 
+    /** Held while [watchInternet] is active. */
+    private var internetCallback: ConnectivityManager.NetworkCallback? = null
+
+    /**
+     * Calls [onOnline] (any thread) whenever the device's default network gains
+     * working internet: Android validated it, which on a captive portal happens
+     * only after the login. That's when a WiFi-only device can reach the map
+     * server again (D26).
+     */
+    fun watchInternet(onOnline: () -> Unit) {
+        if (internetCallback != null) return
+        val validated = java.util.concurrent.ConcurrentHashMap<Network, Boolean>()
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                val now = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                if (now && validated.put(network, true) != true) onOnline()
+                if (!now) validated[network] = false
+            }
+            override fun onLost(network: Network) { validated.remove(network) }
+        }
+        internetCallback = callback
+        runCatching { connectivity.registerDefaultNetworkCallback(callback) }.onFailure { Log.w(TAG, "can't watch internet: $it") }
+    }
+
     /** Whether Wi-Fi is switched on; with it off, every join fails, so callers ask the user to turn it on first. */
     fun isWifiEnabled(): Boolean = runCatching { wifi.isWifiEnabled }.getOrDefault(true)
 

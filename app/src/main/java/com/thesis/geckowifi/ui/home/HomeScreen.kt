@@ -81,7 +81,7 @@ fun HomeScreen(
     onOpenCheck: (String) -> Unit
 ) {
     val context = LocalContext.current
-    LaunchedEffect(Unit) { viewModel.refresh() }
+    LaunchedEffect(Unit) { viewModel.ensureFresh() }
     // Lab mode: SSIDs expanded or collapsed by hand; otherwise registered ones start expanded.
     val expandOverrides = remember { mutableStateMapOf<String, Boolean>() }
 

@@ -50,6 +50,23 @@ class EduroamLiveTest {
         assertTrue(lookup.certificates.all { it.isEvaluable() && it.subject?.id?.isNotEmpty() == true })
     }
 
+    /**
+     * D26: an aging saved answer is confirmed by the signed map head alone. Its
+     * root hash must be the one the full answer was proven against, and verify
+     * against the pinned key.
+     */
+    @Test
+    fun mapHead_hasTheRootHashOfTheFullAnswer() = runTest {
+        assumeTrue("map server not reachable", reachable(1234))
+        val client = GeckoClient(baseUrl = "http://$host:1234")
+        val lookup = VerificationEngine(client, CertProbe(), DecisionCache(), GeoQueryEncoder())
+            .registeredHere(eth.first, eth.second, null, 50)
+        assertEquals(LookupStatus.OK, lookup.status)
+        val head = client.currentMapHead()
+        assertTrue("map head: $head", head is com.thesis.geckowifi.data.remote.MapHeadAnswer.Current)
+        assertEquals(lookup.mapRootHash, (head as com.thesis.geckowifi.data.remote.MapHeadAnswer.Current).rootHashBase64)
+    }
+
     @Test
     fun siteQuery_findsTheRegisteredSite() = runTest {
         assumeTrue("map server not reachable", reachable(1234))

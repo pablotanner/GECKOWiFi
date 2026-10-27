@@ -62,7 +62,8 @@ fun GeckoWifiApp(
         return
     }
 
-    // While the app is visible, GECKO keeps the saved answer for this place current (D26).
+    // While the app is visible, GECKO keeps the saved answer for this place useful (D26): it checks
+    // every few minutes and looks the place up only when the answer no longer covers it or the map changed.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(lifecycle, viewModel) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { viewModel.keepRegistrationsFresh() }

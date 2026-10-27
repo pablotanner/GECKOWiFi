@@ -21,7 +21,9 @@ data class LocationLookup(
     /** Whether the query went over the network the client was bound to. */
     val usedPreferredNetwork: Boolean? = null,
     /** Why the server couldn't be reached, for the log; null otherwise. */
-    val unreachableCause: String? = null
+    val unreachableCause: String? = null,
+    /** Root hash of the map the answer was proven against (base64); null without a verified answer. */
+    val mapRootHash: String? = null
 )
 
 /**

@@ -31,9 +31,9 @@ import androidx.compose.ui.unit.dp
 import com.thesis.geckowifi.data.local.SavedLookup
 import com.thesis.geckowifi.data.model.GeoCertificate
 import com.thesis.geckowifi.eduroam.SAVED_REGISTRATION_MAX_AGE
-import com.thesis.geckowifi.ui.REGISTRATION_REFRESH_INTERVAL_MS
 import com.thesis.geckowifi.ui.SAVED_AREA_RADIUS_METERS
 import com.thesis.geckowifi.ui.VerificationViewModel
+import com.thesis.geckowifi.verification.currentAt
 import com.thesis.geckowifi.ui.components.DetailRow
 import com.thesis.geckowifi.ui.components.SectionCard
 import com.thesis.geckowifi.ui.theme.MonoFontFamily
@@ -65,9 +65,9 @@ fun SavedDataScreen(viewModel: VerificationViewModel, onBack: () -> Unit) {
         ) {
             Text(
                 "The registrations are only used within ${SAVED_AREA_RADIUS_METERS} m of where they " +
-                    "were fetched and for ${SAVED_REGISTRATION_MAX_AGE.toHours()} hours." +
-                    "While the app is open, GECKO looks the place up again every ${REGISTRATION_REFRESH_INTERVAL_MS / 60_000} " +
-                    "minutes and whenever you join a network.",
+                    "were fetched, and for ${SAVED_REGISTRATION_MAX_AGE.toHours()} hours after GECKO last saw the map " +
+                    "unchanged. While the app is open, GECKO looks the place up again when you move away, when " +
+                    "the map changes, and when you join a network or get internet back.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -136,8 +136,10 @@ fun SavedDataScreen(viewModel: VerificationViewModel, onBack: () -> Unit) {
 @Composable
 private fun LookupSummary(lookup: SavedLookup, distanceMeters: Double?, appliesHere: Boolean?) {
     val ageMinutes = (System.currentTimeMillis() - lookup.fetchedAt) / 60_000
-    val leftMinutes = SAVED_REGISTRATION_MAX_AGE.toMinutes() - ageMinutes
+    // Valid counts from when it was last known current: fetched, or confirmed unchanged since (D26).
+    val leftMinutes = SAVED_REGISTRATION_MAX_AGE.toMinutes() - (System.currentTimeMillis() - lookup.currentAt) / 60_000
     DetailRow("Fetched", "${timeText(lookup.fetchedAt)} (${age(ageMinutes)} ago)", mono = false)
+    lookup.confirmedAt?.let { DetailRow("Map unchanged at", timeText(it), mono = false) }
     DetailRow("Over", lookup.viaDescription(), mono = false)
     DetailRow("Around", "%.5f, %.5f, within %d m".format(lookup.lat, lookup.lng, lookup.radiusMeters))
     lookup.mapHeadMillis?.let { DetailRow("Map signed", timeText(it), mono = false) }

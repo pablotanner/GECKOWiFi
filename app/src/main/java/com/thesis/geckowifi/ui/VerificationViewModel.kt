@@ -25,6 +25,9 @@ import com.thesis.geckowifi.verification.coversLocation
 import com.thesis.geckowifi.verification.distanceMeters
 import com.thesis.geckowifi.verification.isExpired
 import com.thesis.geckowifi.verification.savedAnswer
+import com.thesis.geckowifi.verification.SavedAnswerUpkeep
+import com.thesis.geckowifi.verification.savedAnswerUpkeep
+import com.thesis.geckowifi.data.remote.MapHeadAnswer
 import com.thesis.geckowifi.data.local.VerdictStore
 import com.thesis.geckowifi.eduroam.AccountStore
 import com.thesis.geckowifi.eduroam.Decision
@@ -110,13 +113,35 @@ data class EnterpriseEvidence(
     val timings: List<Pair<String, Long>> = emptyList()
 )
 
-/**
- * The map query's hard radius cap (see [com.thesis.geckowifi.verification.GeoQueryEncoder]).
- * When the location fix is less accurate than this, the query can't be made wide
- * enough to be sure it covers the device, so a check is refused rather than risking
- * a silent miss (see docs/experiments.md, L3).
- */
+/** The map query's hard radius cap (see [com.thesis.geckowifi.verification.GeoQueryEncoder]). */
 const val MAX_QUERY_RADIUS_METERS = 253
+
+/**
+ * Android's accuracy is a 68 % radius: the true position is outside it one time
+ * in three. A query of 1.6 x the accuracy contains it about 95 % of the time
+ * (normally distributed error), so a registration nearby isn't silently missed.
+ */
+const val ACCURACY_TO_RADIUS = 1.6
+
+/**
+ * The widest check (lab/density/README.md): it covers nearly all indoor fixes,
+ * and the answer grows with the radius squared. A fix that would need more
+ * (accuracy worse than [MAX_CHECK_ACCURACY_METERS]) is refused rather than
+ * queried narrower, which risks a silent miss (docs/experiments.md, L3), or
+ * wider, which costs megabytes in a dense area.
+ */
+const val MAX_CHECK_RADIUS_METERS = 100
+
+/** The worst reported accuracy a check accepts: [MAX_CHECK_RADIUS_METERS] / [ACCURACY_TO_RADIUS]. */
+const val MAX_CHECK_ACCURACY_METERS = MAX_CHECK_RADIUS_METERS / ACCURACY_TO_RADIUS
+
+/**
+ * Radius of a check: [settingMeters] (the lab's search radius), but never less
+ * than [ACCURACY_TO_RADIUS] x [accuracyMeters], and at most [MAX_CHECK_RADIUS_METERS].
+ */
+fun checkRadius(settingMeters: Int, accuracyMeters: Float): Int =
+    maxOf(settingMeters, ceil(accuracyMeters * ACCURACY_TO_RADIUS).toInt())
+        .coerceAtMost(MAX_CHECK_RADIUS_METERS)
 
 /**
  * Radius of the area the home list's lookup asks for and the saved answer then
@@ -126,10 +151,14 @@ const val MAX_QUERY_RADIUS_METERS = 253
  */
 const val SAVED_AREA_RADIUS_METERS = MAX_QUERY_RADIUS_METERS
 
-/** How often GECKO looks the place up again while the app is visible (D26). */
-const val REGISTRATION_REFRESH_INTERVAL_MS = 10 * 60_000L
+/**
+ * How often, while the app is visible, GECKO checks whether the saved answer
+ * still covers the device and is recent (D26). Only the check is periodic: it
+ * looks the place up only when [savedAnswerUpkeep] says so.
+ */
+const val UPKEEP_CHECK_INTERVAL_MS = 5 * 60_000L
 
-/** After the device joins a Wi-Fi network: waits before each lookup attempt until one is saved (D26). */
+/** After the device joins a Wi-Fi network: waits before each attempt, until the saved answer is current (D26). */
 private val JOIN_LOOKUP_DELAYS_MS = listOf(3_000L, 10_000L, 30_000L)
 
 /** How long the login-server check waits for the user to reconnect and the EAP handshake to run. */
@@ -296,15 +325,18 @@ class VerificationViewModel(
 
     /**
      * Radius actually used for a query: the user's setting, but never smaller
-     * than the GPS uncertainty, capped at the protocol max. A fixed radius
-     * narrower than the real uncertainty can miss the device's true position,
-     * so the registration isn't returned and the check goes silently
-     * UNVERIFIED (see docs/experiments.md, L3). Widening to the accuracy keeps
-     * the query honest about how precisely the device is actually located.
+     * than [ACCURACY_TO_RADIUS] x the reported accuracy, capped at
+     * [MAX_CHECK_RADIUS_METERS]. A radius narrower than the real uncertainty
+     * can miss the device's true position, so the registration isn't returned
+     * and the check goes silently UNVERIFIED (see docs/experiments.md, L3).
+     * Checks refuse a fix that isn't [preciseEnough], so the cap only ever
+     * applies to the setting.
      */
     private fun effectiveRadius(fix: LocationFix): Int =
-        maxOf(queryRadiusMeters, ceil(fix.accuracyMeters.toDouble()).toInt())
-            .coerceAtMost(MAX_QUERY_RADIUS_METERS)
+        checkRadius(queryRadiusMeters, fix.accuracyMeters)
+
+    /** Whether [fix] is precise enough for a check (see [MAX_CHECK_RADIUS_METERS]). */
+    private fun preciseEnough(fix: LocationFix): Boolean = fix.accuracyMeters <= MAX_CHECK_ACCURACY_METERS
 
     var labMode by mutableStateOf(trustPreferences.labMode)
         private set
@@ -333,18 +365,21 @@ class VerificationViewModel(
                     if (joined) checkDeviceJoin(ssid)
                     // A WiFi-only device can usually reach the map server once it is on a network (D26).
                     if (joined) {
-                        val joinedAt = System.currentTimeMillis()
-                        // A new network may need a moment (DHCP, the AP's own portal setup): a few tries, until an
-                        // answer fetched after the join is saved or the device moves on.
+                        // A new network may need a moment (DHCP, the AP's own portal setup): a few tries, until the
+                        // saved answer is current here or the device moves on. Nothing is fetched if it already is.
                         for (wait in JOIN_LOOKUP_DELAYS_MS) {
                             delay(wait)
                             if (!ssid.equals(deviceSsid, ignoreCase = true)) break
-                            if ((savedLookup?.fetchedAt ?: 0L) >= joinedAt) break
-                            refresh()
+                            if (savedAnswerIsCurrent()) break
+                            ensureFresh()
                         }
                     }
                 }
             }
+        }
+        // Also when the internet comes back otherwise, e.g. after a captive portal's login (D26).
+        runCatching {
+            networkObserver.watchInternet { viewModelScope.launch(Dispatchers.Main) { ensureFresh() } }
         }
     }
 
@@ -402,29 +437,42 @@ class VerificationViewModel(
 
     fun onPermissionResult(granted: Boolean) {
         hasLocationPermission = granted
-        if (granted) refresh()
+        if (granted) ensureFresh()
     }
 
-    /** When the last lookup started (epoch millis); paces [keepRegistrationsFresh]. */
-    private var lastLookupAt = 0L
-
-    /** A refresh was asked for while one ran; it runs when that one ends, so e.g. a join isn't lost. */
-    private var refreshQueued = false
+    /**
+     * An update asked for while one ran; it runs when that one ends, so e.g. a
+     * join isn't lost. True if any of them was a [refresh] (a lookup in any case).
+     */
+    private var queuedForce: Boolean? = null
 
     /**
-     * Re-scans nearby networks and re-queries GECKO for what's registered at the
-     * current location. Not while a check runs: it rebinds the map client to the
-     * network the check holds. [userInitiated]: the user asked (the refresh
-     * button), so a lookup that fails is said, not only shown in the list.
+     * Re-scans nearby networks and looks the place up again, whatever the saved
+     * answer says: the refresh button. [userInitiated]: the user asked, so a
+     * lookup that fails is said, not only shown in the list.
      */
-    fun refresh(userInitiated: Boolean = false) {
+    fun refresh(userInitiated: Boolean = false) = update(force = true, userInitiated = userInitiated)
+
+    /**
+     * Re-scans nearby networks and keeps the saved answer useful (D26): looks
+     * the place up only if [savedAnswerUpkeep] says so, confirms an aging answer
+     * against the server's map head, and otherwise shows the saved answer. What
+     * every automatic update calls: opening the app, the periodic check,
+     * joining a network, regaining internet.
+     */
+    fun ensureFresh() = update(force = false, userInitiated = false)
+
+    /**
+     * Not while a check runs: a lookup rebinds the map client to the network the
+     * check holds.
+     */
+    private fun update(force: Boolean, userInitiated: Boolean) {
         if (!hasLocationPermission || activeCheck != null) return
         if (isRefreshing) {
-            refreshQueued = true
+            queuedForce = force || queuedForce == true
             return
         }
         isRefreshing = true
-        lastLookupAt = System.currentTimeMillis()
         scannedNetworks = currentScanList()
         networkObserver.requestScan { scannedNetworks = currentScanList() }
         viewModelScope.launch {
@@ -438,49 +486,91 @@ class VerificationViewModel(
                 val fix = locationProvider.lastKnown() ?: locationProvider.awaitFix()
                 location = fix
                 if (fix != null) {
-                    rebindGeckoClient()
-                    val lookup = engine.registeredHere(
-                        lat = fix.latitude,
-                        lng = fix.longitude,
-                        // Not fix.altitude - see the doc comment below on why this
-                        // query deliberately never narrows by device altitude.
-                        altitude = null,
-                        // The whole saved area (D26); applyLookup narrows the list to the device.
-                        radiusMeters = SAVED_AREA_RADIUS_METERS
-                    )
-                    applyLookup(lookup, fix, viaSsid = deviceSsid)
-                    if (userInitiated) lookupFailureNotice(lookup.status)?.let(::showNotice)
+                    val now = java.time.Instant.now()
+                    dropExpiredLookup(now)
+                    val upkeep = if (force) SavedAnswerUpkeep.FETCH
+                        else savedAnswerUpkeep(savedLookup, fix.latitude, fix.longitude, MAX_CHECK_RADIUS_METERS, now)
+                    android.util.Log.i("GeckoLookup", "upkeep ${if (force) "FETCH (asked)" else upkeep}")
+                    when (upkeep) {
+                        SavedAnswerUpkeep.FETCH -> lookUpSavedArea(fix, userInitiated)
+                        SavedAnswerUpkeep.CONFIRM -> confirmSavedAnswer(fix)
+                        SavedAnswerUpkeep.NONE -> showSaved(fix)
+                    }
                 } else if (userInitiated) {
                     showNotice("No location yet, so GECKO can't look up what's registered here.")
                 }
             } finally {
                 isRefreshing = false
-                if (refreshQueued) {
-                    refreshQueued = false
-                    refresh()
+                queuedForce?.let { queued ->
+                    queuedForce = null
+                    update(force = queued, userInitiated = false)
                 }
             }
         }
     }
 
+    /** Looks up the whole saved area around [fix] and saves the answer (D26). */
+    private suspend fun lookUpSavedArea(fix: LocationFix, userInitiated: Boolean) {
+        rebindGeckoClient()
+        val lookup = engine.registeredHere(
+            lat = fix.latitude,
+            lng = fix.longitude,
+            // Not fix.altitude - see the doc comment below on why this
+            // query deliberately never narrows by device altitude.
+            altitude = null,
+            // The whole saved area (D26); applyLookup narrows the list to the device.
+            radiusMeters = SAVED_AREA_RADIUS_METERS
+        )
+        applyLookup(lookup, fix, viaSsid = deviceSsid, radiusMeters = SAVED_AREA_RADIUS_METERS)
+        if (userInitiated) lookupFailureNotice(lookup.status)?.let(::showNotice)
+    }
+
     /**
-     * Keeps the saved answer current while the app is visible (D26): a lookup
-     * every [REGISTRATION_REFRESH_INTERVAL_MS], and a missed one as soon as the
-     * app comes back. Together with the lookup after joining a network, GECKO
-     * has a fresh answer for where the user is whenever it can reach the map
-     * server. Runs until cancelled; the UI ties it to the started lifecycle, so
-     * nothing runs (and no location is asked for) in the background.
+     * Asks the server for its signed map head (a few hundred bytes): unchanged
+     * means the saved answer is still exactly current, so it is marked confirmed
+     * instead of downloaded again; changed means a new lookup. Unreachable: the
+     * saved answer stays as it is, still usable until it expires.
+     */
+    private suspend fun confirmSavedAnswer(fix: LocationFix) {
+        val saved = savedLookup ?: return lookUpSavedArea(fix, userInitiated = false)
+        rebindGeckoClient()
+        when (val head = engine.gecko.currentMapHead()) {
+            // The root hash, not the timestamp: only the root hash is covered by the signature.
+            is MapHeadAnswer.Current -> if (saved.mapRootHash != null && head.rootHashBase64 == saved.mapRootHash) {
+                val confirmed = saved.copy(confirmedAt = System.currentTimeMillis())
+                registrationCache?.saveLookup(confirmed)
+                savedLookup = confirmed
+                android.util.Log.i("GeckoLookup", "map unchanged (root ${saved.mapRootHash}): saved answer confirmed")
+                showSaved(fix)
+            } else {
+                lookUpSavedArea(fix, userInitiated = false)
+            }
+            is MapHeadAnswer.Unreachable -> showSaved(fix)
+            is MapHeadAnswer.ProofFailure -> {
+                android.util.Log.w("GeckoLookup", "map head: ${head.reason}")
+                showSaved(fix)
+            }
+        }
+    }
+
+    /** Whether the saved answer covers a check here and needs nothing (see [savedAnswerUpkeep]). */
+    private fun savedAnswerIsCurrent(): Boolean {
+        val fix = location ?: return false
+        return savedAnswerUpkeep(savedLookup, fix.latitude, fix.longitude, MAX_CHECK_RADIUS_METERS,
+            java.time.Instant.now()) == SavedAnswerUpkeep.NONE
+    }
+
+    /**
+     * Keeps the saved answer useful while the app is visible (D26): checks every
+     * [UPKEEP_CHECK_INTERVAL_MS] whether it still covers the device and is
+     * recent, and looks up only when it doesn't. Runs until cancelled; the UI
+     * ties it to the started lifecycle, so nothing runs (and no location is
+     * asked for) in the background.
      */
     suspend fun keepRegistrationsFresh() {
         while (true) {
-            val due = lastLookupAt + REGISTRATION_REFRESH_INTERVAL_MS - System.currentTimeMillis()
-            if (due > 0) {
-                delay(due)
-            } else {
-                refresh()
-                // Skipped while a check runs: try again shortly instead of a whole interval later.
-                delay(60_000)
-            }
+            ensureFresh()
+            delay(UPKEEP_CHECK_INTERVAL_MS)
         }
     }
 
@@ -580,19 +670,24 @@ class VerificationViewModel(
      * server isn't reachable (common on a WiFi-only device before joining), the
      * saved answer stands in, marked as saved, if it is recent and covers this
      * place. A failed proof is never papered over with saved data.
+     *
+     * [radiusMeters] must be the radius [lookup] was made with: the saved answer
+     * is only used where that circle covers the check (appliesAt). Recording a
+     * wider one would let a 50 m answer stand in 200 m away, where it lacks the
+     * registrations, and the check would go silently UNVERIFIED.
      */
-    private fun applyLookup(lookup: LocationLookup, fix: LocationFix, viaSsid: String?) {
+    private fun applyLookup(lookup: LocationLookup, fix: LocationFix, viaSsid: String?, radiusMeters: Int) {
         android.util.Log.i("GeckoLookup", "${lookup.status}, ${lookup.certificates.size} certificates, route $boundRoute, via $viaSsid${lookup.unreachableCause?.let { ": $it" }.orEmpty()}")
         if (lookup.status == LookupStatus.OK) {
-            // The answer covers the whole saved area; the list shows what reaches the device.
+            // The answer covers the whole queried area; the list shows what reaches the device.
             registeredHere = lookup.certificates.filter { it.coversLocation(fix.latitude, fix.longitude, effectiveRadius(fix)) }
             certLookup = LookupStatus.OK
             registrationsSavedAt = null
             val saved = SavedLookup(
                 fetchedAt = System.currentTimeMillis(), lat = fix.latitude, lng = fix.longitude,
-                radiusMeters = SAVED_AREA_RADIUS_METERS, route = boundRoute.label(),
+                radiusMeters = radiusMeters, route = boundRoute.label(),
                 viaSsid = viaSsid.takeIf { boundRoute == QueryRoute.JOINED_WIFI || boundRoute == QueryRoute.DEFAULT_ROUTE },
-                mapHeadMillis = lookup.mapHeadMillis, certificates = lookup.certificates
+                mapHeadMillis = lookup.mapHeadMillis, mapRootHash = lookup.mapRootHash, certificates = lookup.certificates
             )
             registrationCache?.saveLookup(saved)
             savedLookup = saved
@@ -602,17 +697,23 @@ class VerificationViewModel(
         dropExpiredLookup(now)
         val saved = savedLookup
         // Only where the saved answer is complete (D26): elsewhere an empty list would claim "nothing registered".
-        if (lookup.status == LookupStatus.UNREACHABLE && saved != null &&
-            saved.appliesAt(fix.latitude, fix.longitude, effectiveRadius(fix), now)
-        ) {
-            registeredHere = saved.certificates.filter { it.isValidAt(now) && it.coversLocation(fix.latitude, fix.longitude, effectiveRadius(fix)) }
-            certLookup = LookupStatus.OK
-            registrationsSavedAt = saved.fetchedAt
-            return
-        }
+        if (lookup.status == LookupStatus.UNREACHABLE && saved != null && showSaved(fix)) return
         registeredHere = lookup.certificates
         certLookup = lookup.status
         registrationsSavedAt = null
+    }
+
+    /**
+     * Shows the saved answer in the network list, marked as saved, if it
+     * [applies][appliesAt] here; false (and nothing changed) if it doesn't.
+     */
+    private fun showSaved(fix: LocationFix): Boolean {
+        val now = java.time.Instant.now()
+        val saved = savedLookup?.takeIf { it.appliesAt(fix.latitude, fix.longitude, effectiveRadius(fix), now) } ?: return false
+        registeredHere = saved.certificates.filter { it.isValidAt(now) && it.coversLocation(fix.latitude, fix.longitude, effectiveRadius(fix)) }
+        certLookup = LookupStatus.OK
+        registrationsSavedAt = saved.fetchedAt
+        return true
     }
 
     /** What to tell the user after a refresh they asked for didn't get a live answer; null if it did. */
@@ -694,7 +795,7 @@ class VerificationViewModel(
             pendingNotice = "Waiting for your location. GECKO needs it to look up the network's registration."
             return
         }
-        if (fix.accuracyMeters > MAX_QUERY_RADIUS_METERS) {
+        if (!preciseEnough(fix)) {
             publish(network.ssid, network.bssid, network.bssid ?: network.ssid,
                 VerificationResult(VerificationState.UNREACHABLE, network.ssid,
                     reason = "location too imprecise (±${fix.accuracyMeters.toInt()} m)"),
@@ -865,9 +966,9 @@ class VerificationViewModel(
         val networkKey = network.bssid ?: network.ssid
         val steps = listOf(CheckStep.JOIN, CheckStep.LOOKUP, CheckStep.PORTAL, CheckStep.COMPARE)
 
-        if (fix.accuracyMeters > MAX_QUERY_RADIUS_METERS) {
+        if (!preciseEnough(fix)) {
             val result = VerificationResult(VerificationState.UNREACHABLE, "",
-                reason = "location too imprecise (±${fix.accuracyMeters.toInt()} m); a reliable check needs it within $MAX_QUERY_RADIUS_METERS m")
+                reason = "location too imprecise (±${fix.accuracyMeters.toInt()} m); a reliable check needs it within ${MAX_CHECK_ACCURACY_METERS.toInt()} m")
             publish(network.ssid, network.bssid, networkKey, result, fix, failure = CheckFailure.LOW_ACCURACY)
             return null
         }
@@ -893,8 +994,9 @@ class VerificationViewModel(
                 step(network, steps, CheckStep.LOOKUP)
                 rebindGeckoClient()
                 // The startup query ran before any network was joined; redo it now the server is reachable.
-                engine.registeredHere(fix.latitude, fix.longitude, null, effectiveRadius(fix)).let {
-                    applyLookup(it, fix, viaSsid = network.ssid)
+                val radius = effectiveRadius(fix)
+                engine.registeredHere(fix.latitude, fix.longitude, null, radius).let {
+                    applyLookup(it, fix, viaSsid = network.ssid, radiusMeters = radius)
                 }
                 judgeJoined(joined, network, networkKey, fix, steps, ownJoin = true)
             } finally {
@@ -918,7 +1020,7 @@ class VerificationViewModel(
     private fun checkDeviceJoin(ssid: String) {
         if (activeCheck != null) return
         val over = networkObserver.deviceWifiNetwork ?: return
-        val fix = location?.takeIf { it.accuracyMeters <= MAX_QUERY_RADIUS_METERS } ?: return
+        val fix = location?.takeIf { preciseEnough(it) } ?: return
         val bssid = networkObserver.connectedBssid()
         val candidates = scannedNetworks.filterIsInstance<ScannedNetwork.Real>().filter { it.ssid.equals(ssid, ignoreCase = true) }
         val network = candidates.firstOrNull { it.bssid.equals(bssid, ignoreCase = true) } ?: candidates.firstOrNull() ?: return
