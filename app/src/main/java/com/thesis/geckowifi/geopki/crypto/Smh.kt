@@ -17,14 +17,19 @@ import geopki.SignedMapHead as ProtoSignedMapHead
 
 data class CtLogServer(val logId: ByteArray, val signedTreeHead: ByteArray)
 
+/** The map format this client understands (geopki `crypto.MapHeadVersion`). */
+const val MAP_HEAD_VERSION = 2
+
 data class MapHead(
+    val version: Int,
     val rootHash: SHA256Hash,
     val timestamp: Long,
     val coveredCtLogServers: List<CtLogServer>
 ) {
-    /** The bytes the signature is computed over. */
+    /** The bytes the signature is computed over: version (BE32) | root | timestamp (BE64) | logs. */
     fun tbsBytes(): ByteArray {
         val out = ByteArrayOutputStream()
+        out.write(bigEndianIntBytes(version))
         out.write(rootHash.bytes)
         out.write(bigEndianLongBytes(timestamp))
         coveredCtLogServers.forEach {
@@ -37,7 +42,9 @@ data class MapHead(
 
 class SignedMapHead(val mapHead: MapHead, val signature: ByteArray) {
 
-    fun verify(publicKey: PublicKey): Boolean = verifyEcdsaAsn1(publicKey, mapHead.tbsBytes(), signature)
+    /** Whether the signature is valid and the map is of [MAP_HEAD_VERSION]. */
+    fun verify(publicKey: PublicKey): Boolean =
+        mapHead.version == MAP_HEAD_VERSION && verifyEcdsaAsn1(publicKey, mapHead.tbsBytes(), signature)
 
     fun toProto(): ProtoSignedMapHead = ProtoSignedMapHead(
         RootHash = mapHead.rootHash.bytes.toByteString(),
@@ -45,7 +52,8 @@ class SignedMapHead(val mapHead: MapHead, val signature: ByteArray) {
         CoveredCTLogServers = mapHead.coveredCtLogServers.map {
             ProtoCTLogServer(LogId = it.logId.toByteString(), SignedTreeHead = it.signedTreeHead.toByteString())
         },
-        Signature = signature.toByteString()
+        Signature = signature.toByteString(),
+        Version = mapHead.version
     )
 
     /** Re-serializes this SMH (including the signature). Mirrors Go's `SignedMapHead.Marshal`. */
@@ -54,6 +62,7 @@ class SignedMapHead(val mapHead: MapHead, val signature: ByteArray) {
     companion object {
         fun fromProto(proto: ProtoSignedMapHead): SignedMapHead = SignedMapHead(
             mapHead = MapHead(
+                version = proto.Version,
                 rootHash = bytesToHash(proto.RootHash.toByteArray()),
                 timestamp = proto.Timestamp,
                 coveredCtLogServers = proto.CoveredCTLogServers.map {
@@ -103,23 +112,28 @@ data class SignedConsistencyHead(
 }
 
 /**
- * Verifies an ASN.1/X9.62-DER ECDSA signature over the raw, UN-hashed [data] -
- * matches Go's `ecdsa.VerifyASN1(pub, tbsBytes, sig)`.
+ * Verifies an ASN.1/X9.62-DER ECDSA signature over the SHA-256 of [data] -
+ * matches Go's `ecdsa.VerifyASN1(pub, sha256(tbsBytes), sig)` since map
+ * version 2.
  *
- * Confirmed against the live geopki server (2026-09-11): despite the `hash`
- * parameter name in Go's `crypto/ecdsa` API, `smh.go`'s `Sign`/`Verify` pass
- * `TBSBytes()` straight through with no SHA-256 step - `ecdsa.SignASN1`/
- * `VerifyASN1` do not hash their input themselves. Using `SHA256withECDSA`
- * here (which hashes internally) silently fails against every real
- * signature; `NONEwithECDSA` is the correct algorithm name for "raw ECDSA,
- * caller supplies the exact bytes to sign".
+ * Version 1 signed the raw TBS bytes (`NONEwithECDSA` here), and ECDSA on
+ * P-256 only uses the first 32 bytes of its input: only the root hash was
+ * signed, the timestamp, logs and SCH size were not (see
+ * `evidence/findings/geopki-signature-covers-only-root-hash.md`).
  */
 internal fun verifyEcdsaAsn1(publicKey: PublicKey, data: ByteArray, signature: ByteArray): Boolean {
-    val verifier = Signature.getInstance("NONEwithECDSA")
+    val verifier = Signature.getInstance("SHA256withECDSA")
     verifier.initVerify(publicKey)
     verifier.update(data)
     return verifier.verify(signature)
 }
+
+internal fun bigEndianIntBytes(value: Int): ByteArray = byteArrayOf(
+    (value ushr 24).toByte(),
+    (value ushr 16).toByte(),
+    (value ushr 8).toByte(),
+    value.toByte()
+)
 
 internal fun bigEndianLongBytes(value: Long): ByteArray = byteArrayOf(
     (value ushr 56).toByte(),

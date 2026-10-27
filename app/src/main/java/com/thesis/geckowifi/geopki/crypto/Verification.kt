@@ -32,19 +32,28 @@ import geopki.trillian.Proof as ProtoTrillianProof
  */
 class GeoPkiVerificationException(message: String) : Exception(message)
 
-/** The subset of `comm.Query` (Go) needed to check response completeness. */
+/**
+ * The subset of `comm.Query` (Go) needed to check a response: its region, the
+ * certificate [types] asked for (empty = all), and whether certificate bodies
+ * were asked for ([withCertificates]); only then can a missing body be told
+ * from one that wasn't wanted.
+ */
 data class GeoPkiQuery(
     val xyBitStrings: List<RawXYBitString>,
     val minAltitude: Int,
-    val maxAltitude: Int
+    val maxAltitude: Int,
+    val types: List<String> = emptyList(),
+    val withCertificates: Boolean = false
 ) {
     companion object {
-        fun fromProtoRequest(request: ProtoRequest): GeoPkiQuery = GeoPkiQuery(
+        fun fromProtoRequest(request: ProtoRequest, withCertificates: Boolean): GeoPkiQuery = GeoPkiQuery(
             xyBitStrings = request.XYBitStrings.map {
                 RawXYBitString(xyBitString = it.geopki_XYBitString.toULong(), xyBitStringLen = it.XYBitStringLen)
             },
             minAltitude = request.MinAltitude,
-            maxAltitude = request.MaxAltitude
+            maxAltitude = request.MaxAltitude,
+            types = request.Types,
+            withCertificates = withCertificates
         )
     }
 }
@@ -55,7 +64,9 @@ private fun Int.toUnsignedLong(): Long = this.toLong() and 0xFFFFFFFFL
 /**
  * Verifies a received [response] against [query] and the server's
  * [publicKey], returning the set of all certificate hashes (as unpadded
- * URL-safe base64) it vouches for. Performs no consistency (append-only log)
+ * URL-safe base64) it vouches for, of every type. Every delivered certificate
+ * must be listed under exactly its own types, and if [GeoPkiQuery.withCertificates],
+ * none of a requested type may be missing. Performs no consistency (append-only log)
  * checks - see [ensureConsistency] for that.
  *
  * Throws [GeoPkiVerificationException] on any failure. Never returns a
@@ -130,20 +141,43 @@ fun verifyResponse(response: ProtoResponse, query: GeoPkiQuery, publicKey: Publi
         }
     }
 
+    // The tree is verified: its entries are exactly the certificates of the
+    // queried area, each listed under its types.
     val certificateHashStrings = HashSet<String>()
+    val listedTypes = HashMap<String, MutableSet<String>>()
+    val required = HashSet<String>()
+    val requested = query.types.toSet()
     for (node in nodes) {
-        for (h in node.certificateHashes) {
-            certificateHashStrings += base64UrlNoPad(h.bytes)
+        for (raw in node.entries) {
+            val entry = parseEntry(raw)
+            val hashString = base64UrlNoPad(entry.hash.bytes)
+            certificateHashStrings += hashString
+            listedTypes.getOrPut(hashString) { HashSet() } += entry.type
+            if (requested.isEmpty() || entry.type in requested) required += hashString
         }
     }
 
+    // A server can't relabel a certificate it delivers.
+    val delivered = HashSet<String>()
     for (certificate in response.Certificates) {
-        val hash = SHA256Hash.sha256(certificate.toByteArray())
-        val hashString = base64UrlNoPad(hash.bytes)
-        if (hashString !in certificateHashStrings) {
+        val bytes = certificate.toByteArray()
+        val hashString = base64UrlNoPad(SHA256Hash.sha256(bytes).bytes)
+        val types = listedTypes[hashString] ?: throw GeoPkiVerificationException(
+            "certificate with hash '$hashString' is part of the response but is not contained in any node"
+        )
+        val own = certificateTypes(bytes)
+        if (own != types) {
             throw GeoPkiVerificationException(
-                "certificate with hash '$hashString' is part of the response but is not contained in any node"
+                "certificate with hash '$hashString' is listed under types $types but has $own"
             )
+        }
+        delivered += hashString
+    }
+
+    if (query.withCertificates) {
+        val missing = required - delivered
+        if (missing.isNotEmpty()) {
+            throw GeoPkiVerificationException("response withheld ${missing.size} certificate(s) of a requested type")
         }
     }
 
@@ -226,7 +260,7 @@ private fun parseNode(n: ProtoNode): Node {
         xyRightChildHash = bytesToHashOrNull(n.XYRightChildHash?.toByteArray()),
         zLeftChildHash = bytesToHashOrNull(n.ZLeftChildHash?.toByteArray()),
         zRightChildHash = bytesToHashOrNull(n.ZRightChildHash?.toByteArray()),
-        certificateHashes = n.CertificateHashes.map { bytesToHash(it.toByteArray()) }
+        entries = n.Entries.map { it.toByteArray() }
     )
 }
 

@@ -7,7 +7,6 @@ import com.thesis.geckowifi.data.model.GeoCertificateFormat
 import com.thesis.geckowifi.geopki.bitstring.RawXYBitString
 import com.thesis.geckowifi.geopki.crypto.GeoPkiQuery
 import com.thesis.geckowifi.geopki.crypto.GeoPkiVerificationException
-import com.thesis.geckowifi.geopki.crypto.SHA256Hash
 import com.thesis.geckowifi.geopki.crypto.SignedMapHead
 import java.security.PublicKey
 import java.util.Base64
@@ -194,11 +193,14 @@ class GeckoClient(
                     ProtoXYBitString(geopki_XYBitString = it.xyBitString.toLong(), XYBitStringLen = it.xyBitStringLen)
                 },
                 MinAltitude = minAltitude,
-                MaxAltitude = maxAltitude
+                MaxAltitude = maxAltitude,
+                // Only WiFi certificates come with bodies; the tree still lists
+                // every certificate here, with its types (map version 2).
+                Types = listOf(GeoCertificateFormat.WIFI)
             )
 
             val httpRequest = Request.Builder()
-                .url("$baseUrl/v1/query?c") // ?c = include full certificates
+                .url("$baseUrl/v1/query?c") // ?c = include full certificates (of the requested types)
                 .post(ProtoRequest.ADAPTER.encode(protoRequest).toRequestBody(octetStream))
                 .build()
 
@@ -219,12 +221,21 @@ class GeckoClient(
                     return@withContext GeckoResponse.Unreachable("malformed response: ${e.message}")
                 }
 
-                val query = GeoPkiQuery(rawBitStrings, minAltitude, maxAltitude)
+                // Completeness the other direction (see docs/acceptance-criteria.md, AC3)
+                // is part of verifyResponse: with `?c`, every certificate the signed
+                // tree lists as WiFi must come with its body. A missing one was
+                // withheld - an attacker on the (cleartext) query path stripping it
+                // from an otherwise valid answer - not "nothing registered here", so
+                // it is a proof failure and surfaces as a CONFLICT. Certificates of
+                // other types are listed in the tree but not sent.
+                val query = GeoPkiQuery(
+                    rawBitStrings, minAltitude, maxAltitude,
+                    types = protoRequest.Types, withCertificates = true
+                )
 
-                val referencedHashes = try {
-                    val hashes = verifyResponse(protoResponse, query, publicKey)
+                try {
+                    verifyResponse(protoResponse, query, publicKey)
                     ensureConsistency(protoResponse, publicKey)
-                    hashes
                 } catch (e: GeoPkiVerificationException) {
                     return@withContext GeckoResponse.ProofFailure(e.message ?: "proof verification failed")
                 }
@@ -242,34 +253,13 @@ class GeckoClient(
                     }
                 }
 
-                // Completeness the other direction (see docs/acceptance-criteria.md, AC3).
-                // This query uses `?c`, so the server includes the full certificate
-                // for every certificate the signed tree references. A referenced
-                // hash with no certificate delivered means the certificate was
-                // withheld - an attacker on the (cleartext) query path stripping it
-                // from an otherwise valid answer - not that nothing is registered
-                // here. Treat it as a proof failure (hostile) so it surfaces as a
-                // CONFLICT, instead of being read as silent "nothing registered".
-                // verifyResponse already enforces the reverse (no certificate
-                // without a node), so together the delivered set must equal exactly
-                // what the tree references.
-                val deliveredHashes = protoResponse.Certificates.mapTo(HashSet()) {
-                    Base64.getUrlEncoder().withoutPadding().encodeToString(SHA256Hash.sha256(it.toByteArray()).bytes)
-                }
-                val withheld = referencedHashes - deliveredHashes
-                if (withheld.isNotEmpty()) {
-                    return@withContext GeckoResponse.ProofFailure(
-                        "response withheld ${withheld.size} certificate(s) its own signed proof references"
-                    )
-                }
-
                 // verifyResponse already confirmed every certificate here is
                 // referenced by a hash inside the signed, root-hash-checked
                 // node tree - only the JSON decoding below remains unverified,
                 // and is done per-certificate so one malformed entry doesn't
                 // discard every other (possibly hostile) certificate at this
-                // location. Certificates of other kinds (no wifi extension)
-                // counted for the proof above and are left out here.
+                // location. The server only sends WiFi certificates; any
+                // other one (a certificate with several types) is left out here.
                 val certificates = ArrayList<GeoCertificate>(protoResponse.Certificates.size)
                 var unparsedCount = 0
                 for (raw in protoResponse.Certificates) {

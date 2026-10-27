@@ -39,7 +39,8 @@ class Node(
     xyRightChildHash: SHA256Hash? = null,
     zLeftChildHash: SHA256Hash? = null,
     zRightChildHash: SHA256Hash? = null,
-    val certificateHashes: List<SHA256Hash> = emptyList()
+    /** The entries of the certificates at this node (map version 2, see [newEntry]). */
+    val entries: List<ByteArray> = emptyList()
 ) {
     var xyLeftChild: Node? = null
         private set
@@ -112,16 +113,21 @@ class Node(
         zRightChild = child
     }
 
-    fun sortedCertificateHashes(): List<SHA256Hash> =
-        certificateHashes.sortedWith(compareBy(UNSIGNED_BYTE_ARRAY_COMPARATOR) { it.bytes })
+    /** The entries sorted bytewise, as Postgres sorts them in geopki's `smt_hash`. */
+    fun sortedEntries(): List<ByteArray> = entries.sortedWith(UNSIGNED_BYTE_ARRAY_COMPARATOR)
 
-    fun concatenatedCertificateHashes(): ByteArray {
+    fun concatenatedEntries(): ByteArray {
         val out = ByteArrayOutputStream()
-        sortedCertificateHashes().forEach { out.write(it.bytes) }
+        sortedEntries().forEach { out.write(it) }
         return out.toByteArray()
     }
 
-    /** Computes this node's hash: a SHA-256 leaf hash, or an intermediate-node hash over its children. */
+    /**
+     * Computes this node's hash: a SHA-256 leaf hash, or an intermediate-node hash
+     * over its children. Prefixes 0x02 (leaf) and 0x03 (inner) since map version
+     * 2; version 1 used 0x00 and 0x01 over plain hashes, so no node of one can
+     * hash like a node of the other.
+     */
     fun hash(): SHA256Hash {
         check(pair.xyBitStringLen <= XY_BITS && pair.zBitStringLen <= Z_BITS) {
             "invalid bit string pair with sizes (${pair.xyBitStringLen}, ${pair.zBitStringLen})"
@@ -129,22 +135,22 @@ class Node(
 
         if (pair.xyBitStringLen == XY_BITS && pair.zBitStringLen == Z_BITS) {
             val out = ByteArrayOutputStream()
-            out.write(0x00)
-            out.write(concatenatedCertificateHashes())
+            out.write(0x02)
+            out.write(concatenatedEntries())
             return SHA256Hash.sha256(out.toByteArray())
         }
 
         val out = ByteArrayOutputStream()
-        out.write(0x01)
+        out.write(0x03)
         out.write(xyLeftChildHash(true)!!.bytes)
         out.write(xyRightChildHash(true)!!.bytes)
         out.write(zLeftChildHash(true)!!.bytes)
         out.write(zRightChildHash(true)!!.bytes)
 
-        return if (certificateHashes.isEmpty()) {
+        return if (entries.isEmpty()) {
             SHA256Hash.sha256(out.toByteArray())
         } else {
-            val certHash = SHA256Hash.sha256(concatenatedCertificateHashes())
+            val certHash = SHA256Hash.sha256(concatenatedEntries())
             out.write(certHash.bytes)
             SHA256Hash.sha256(out.toByteArray())
         }

@@ -22,6 +22,9 @@ message SignedMapHead {
   repeated CTLogServer CoveredCTLogServers = 3;
 
   bytes Signature = 4;
+
+  // the map format, see crypto.MapHeadVersion
+  uint32 Version = 5;
 }
 
 // a node corresponds to a database row
@@ -40,8 +43,12 @@ message Node {
   optional bytes ZLeftChildHash = 7;
   optional bytes ZRightChildHash = 8;
 
-  // (optional) a list of certificate hashes
-  repeated bytes CertificateHashes = 9;
+  // the entries of the certificates at this node, one per type a
+  // certificate has: len(type) | type | SHA-256(certificate), see crypto.NewEntry.
+  // Field 9 held plain certificate hashes (map version 1); reserved, so an old
+  // client finds no hashes and fails its root check instead of misreading entries
+  reserved 9;
+  repeated bytes Entries = 10;
 }
 
 message Response {

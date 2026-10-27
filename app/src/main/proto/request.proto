@@ -13,4 +13,8 @@ message Request {
   repeated XYBitString XYBitStrings = 1;
   uint32 MinAltitude = 2;
   uint32 MaxAltitude = 3;
+
+  // with ?c: only the certificates of these types (extension names) are
+  // included; empty = all. The nodes and entries are complete either way
+  repeated string Types = 4;
 }
