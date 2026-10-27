@@ -1,5 +1,6 @@
 package com.thesis.geckowifi.data.remote
 
+import com.thesis.geckowifi.geopki.crypto.MAP_HEAD_VERSION
 import com.thesis.geckowifi.geopki.crypto.MapHead
 import com.thesis.geckowifi.geopki.crypto.SHA256Hash
 import com.thesis.geckowifi.geopki.crypto.SignedMapHead
@@ -16,13 +17,13 @@ class MapHeadTest {
     private val keys = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
     private val signedAt = 1_793_000_000_123_456_789L // nanoseconds, as geopki signs
 
-    /** geopki signs the raw to-be-signed bytes (ecdsa.SignASN1, no hashing step). */
+    /** geopki signs the SHA-256 of the to-be-signed bytes (map version 2). */
     private fun signed(head: MapHead): ByteArray {
-        val signer = Signature.getInstance("NONEwithECDSA").apply { initSign(keys.private); update(head.tbsBytes()) }
+        val signer = Signature.getInstance("SHA256withECDSA").apply { initSign(keys.private); update(head.tbsBytes()) }
         return SignedMapHead(head, signer.sign()).toProtoBytes()
     }
 
-    private val head = MapHead(SHA256Hash.sha256("root".toByteArray()), signedAt, emptyList())
+    private val head = MapHead(MAP_HEAD_VERSION, SHA256Hash.sha256("root".toByteArray()), signedAt, emptyList())
 
     @Test
     fun validSignature_givesTheRootHash() {
@@ -39,17 +40,20 @@ class MapHeadTest {
     }
 
     /**
-     * geopki signs root hash | timestamp | ... raw with ECDSA (ecdsa.SignASN1),
-     * which uses only the first 32 bytes of its input on P-256: the root hash.
-     * The timestamp is not covered, so a saved answer is compared by root hash.
+     * Map version 1 signed the raw bytes, of which ECDSA on P-256 used only the
+     * root hash, so a changed timestamp still verified. Version 2 signs their
+     * SHA-256: every field is covered.
      */
     @Test
-    fun alteredTimestamp_stillVerifies_soOnlyTheRootHashIsSigned() {
+    fun alteredTimestamp_isAProofFailure() {
         val proto = geopki.SignedMapHead.ADAPTER.decode(signed(head))
         val forged = geopki.SignedMapHead.ADAPTER.encode(proto.copy(Timestamp = signedAt + 3_600_000_000_000L))
-        val answer = GeckoClient.mapHeadFrom(forged, keys.public)
-        assertTrue(answer is MapHeadAnswer.Current)
-        assertEquals(head.rootHash.bytes.toList(), (answer as MapHeadAnswer.Current).rootHash.toList())
+        assertTrue(GeckoClient.mapHeadFrom(forged, keys.public) is MapHeadAnswer.ProofFailure)
+    }
+
+    @Test
+    fun mapHeadOfAnotherVersion_isAProofFailure() {
+        assertTrue(GeckoClient.mapHeadFrom(signed(head.copy(version = 1)), keys.public) is MapHeadAnswer.ProofFailure)
     }
 
     @Test

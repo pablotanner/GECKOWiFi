@@ -13,10 +13,9 @@ class SmhTest {
         initialize(ECGenParameterSpec("secp256r1"))
     }.generateKeyPair()
 
-    // Matches production: geopki signs the raw TBS bytes with no SHA-256 step
-    // (see Smh.kt's verifyEcdsaAsn1 doc) - "NONEwithECDSA", not "SHA256withECDSA".
+    // geopki signs the SHA-256 of the TBS bytes since map version 2
     private fun sign(privateKey: java.security.PrivateKey, data: ByteArray): ByteArray =
-        Signature.getInstance("NONEwithECDSA").apply {
+        Signature.getInstance("SHA256withECDSA").apply {
             initSign(privateKey)
             update(data)
         }.sign()
@@ -27,7 +26,8 @@ class SmhTest {
         val mapHead = MapHead(
             rootHash = SHA256Hash(ByteArray(32) { it.toByte() }),
             timestamp = 1_700_000_000L,
-            coveredCtLogServers = listOf(CtLogServer(byteArrayOf(1, 2, 3), byteArrayOf(4, 5, 6)))
+            coveredCtLogServers = listOf(CtLogServer(byteArrayOf(1, 2, 3), byteArrayOf(4, 5, 6))),
+            version = MAP_HEAD_VERSION
         )
         val signature = sign(keyPair.private, mapHead.tbsBytes())
         val smh = SignedMapHead(mapHead, signature)
@@ -41,7 +41,8 @@ class SmhTest {
         val mapHead = MapHead(
             rootHash = SHA256Hash(ByteArray(32) { it.toByte() }),
             timestamp = 1_700_000_000L,
-            coveredCtLogServers = emptyList()
+            coveredCtLogServers = emptyList(),
+            version = MAP_HEAD_VERSION
         )
         val signature = sign(keyPair.private, mapHead.tbsBytes())
 
@@ -55,7 +56,12 @@ class SmhTest {
     fun signedMapHead_rejectsWrongKey() {
         val keyPair = generateEcKeyPair()
         val otherKeyPair = generateEcKeyPair()
-        val mapHead = MapHead(SHA256Hash(ByteArray(32) { it.toByte() }), 1L, emptyList())
+        val mapHead = MapHead(
+            rootHash = SHA256Hash(ByteArray(32) { it.toByte() }),
+            timestamp = 1L,
+            coveredCtLogServers = emptyList(),
+            version = MAP_HEAD_VERSION
+        )
         val signature = sign(keyPair.private, mapHead.tbsBytes())
 
         assertFalse(SignedMapHead(mapHead, signature).verify(otherKeyPair.public))
@@ -80,7 +86,8 @@ class SmhTest {
         val mapHead = MapHead(
             rootHash = SHA256Hash(ByteArray(32) { it.toByte() }),
             timestamp = 123L,
-            coveredCtLogServers = listOf(CtLogServer(byteArrayOf(9, 8), byteArrayOf(7, 6)))
+            coveredCtLogServers = listOf(CtLogServer(byteArrayOf(9, 8), byteArrayOf(7, 6))),
+            version = MAP_HEAD_VERSION
         )
         val smh = SignedMapHead(mapHead, signature = byteArrayOf(1, 2, 3))
 

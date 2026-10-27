@@ -1,6 +1,7 @@
 package com.thesis.geckowifi.geopki.crypto
 
 import com.thesis.geckowifi.geopki.bitstring.RawXYBitString
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.security.KeyFactory
@@ -12,14 +13,12 @@ import geopki.SignedMapHead as ProtoSignedMapHead
 
 /**
  * Regression test against REAL bytes captured from a locally-running
- * netsec-ethz/geopki server on 2026-09-11 (see `app/src/test/resources/
- * geopki-fixtures/`) - genuine upstream parity, not just self-consistency
- * like the rest of the crypto test suite. This is what caught the one real
- * bug found in steps 1-4: `SignedMapHead`/`SignedConsistencyHead` verify
- * must use "NONEwithECDSA" (raw, un-hashed ECDSA over TBSBytes()), not
- * "SHA256withECDSA" - `ecdsa.SignASN1`/`VerifyASN1` in Go's `crypto/ecdsa`
- * do not hash their input themselves despite the `hash []byte` parameter
- * name, and `smh.go` passes `TBSBytes()` straight through.
+ * geopki server (see `app/src/test/resources/geopki-fixtures/`, captured by
+ * `lab/golden/regen.sh` from the map-version-2 server) - genuine upstream
+ * parity, not just self-consistency like the rest of the crypto test suite.
+ * The first capture (2026-09-11, map version 1) showed geopki signed the raw
+ * TBS bytes ("NONEwithECDSA"); version 2 signs their SHA-256
+ * ("SHA256withECDSA"), so every field is covered.
  *
  * Also confirms: the Wire field mapping for SignedMapHead/SignedConsistencyHead
  * matches the live server exactly, the reconstructed `SignedConsistencyHead`
@@ -58,13 +57,13 @@ class LiveFixtureTest {
                 RawXYBitString(xyBitString = it.geopki_XYBitString.toULong(), xyBitStringLen = it.XYBitStringLen)
             },
             minAltitude = protoRequest.MinAltitude,
-            maxAltitude = protoRequest.MaxAltitude
+            maxAltitude = protoRequest.MaxAltitude,
+            types = protoRequest.Types
         )
 
         val verified = verifyResponse(protoResponse, query, publicKey)
 
-        // The captured response's one certificate is a real registered test
-        // certificate ("test-benign-ap-001" / wifi.test.local) - see cert0.json.
+        // The captured response holds the golden WiFi certificates at HB - see cert0.json.
         assertTrue(verified.isNotEmpty())
     }
 
@@ -76,41 +75,31 @@ class LiveFixtureTest {
 
     /**
      * Completeness (see docs/acceptance-criteria.md AC3, and GeckoClient): the honest
-     * captured response delivers every certificate its proof references, and a
-     * stripped copy - same signed nodes, certificate bytes removed - is caught
-     * as withholding. Replicates GeckoClient's referenced-vs-delivered check
-     * against real server bytes.
+     * captured `?c` response delivers every WiFi certificate its proof lists, and a
+     * stripped copy - same signed nodes, certificate bytes removed - is rejected
+     * as withholding by verifyResponse, against real server bytes.
      */
-    private fun deliveredHashes(response: ProtoResponse): Set<String> =
-        response.Certificates.mapTo(HashSet()) {
-            java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(SHA256Hash.sha256(it.toByteArray()).bytes)
-        }
-
     @Test
-    fun honestResponse_deliversEveryReferencedCertificate() {
+    fun honestResponse_deliversEveryCertificateOfTheRequestedType() {
         val protoRequest = ProtoRequest.ADAPTER.decode(fixture("request.bin"))
         val protoResponse = ProtoResponse.ADAPTER.decode(fixture("response.bin"))
-        val query = GeoPkiQuery.fromProtoRequest(protoRequest)
+        val query = GeoPkiQuery.fromProtoRequest(protoRequest, withCertificates = true)
 
-        val referenced = verifyResponse(protoResponse, query, publicKey)
-        assertTrue("fixture should reference at least one certificate", referenced.isNotEmpty())
-        assertTrue("honest response withholds nothing", (referenced - deliveredHashes(protoResponse)).isEmpty())
+        assertTrue("fixture should ask for WiFi certificates", protoRequest.Types == listOf("wifi"))
+        assertTrue("fixture should deliver a certificate", protoResponse.Certificates.isNotEmpty())
+        verifyResponse(protoResponse, query, publicKey) // throws on withholding
     }
 
     @Test
     fun strippedResponse_isDetectedAsWithholding() {
         val protoRequest = ProtoRequest.ADAPTER.decode(fixture("request.bin"))
         val protoResponse = ProtoResponse.ADAPTER.decode(fixture("response.bin"))
-        val query = GeoPkiQuery.fromProtoRequest(protoRequest)
+        val query = GeoPkiQuery.fromProtoRequest(protoRequest, withCertificates = true)
 
         // Same signed map head and nodes; only the certificate bytes removed.
         val stripped = protoResponse.copy(Certificates = emptyList())
 
-        // The proof still verifies (nodes untouched) and still references the cert,
-        val referenced = verifyResponse(stripped, query, publicKey)
-        assertTrue(referenced.isNotEmpty())
-        // but the certificate is no longer delivered -> withholding is detectable.
-        assertTrue("stripped cert must be flagged as withheld",
-            (referenced - deliveredHashes(stripped)).isNotEmpty())
+        val e = assertThrows(GeoPkiVerificationException::class.java) { verifyResponse(stripped, query, publicKey) }
+        assertTrue(e.message!!, e.message!!.contains("withheld"))
     }
 }

@@ -25,29 +25,29 @@ class VerificationTest {
         initialize(ECGenParameterSpec("secp256r1"))
     }.generateKeyPair()
 
-    // Matches production: geopki signs the raw TBS bytes with no SHA-256 step.
+    // geopki signs the SHA-256 of the TBS bytes since map version 2
     private fun sign(privateKey: PrivateKey, data: ByteArray): ByteArray =
-        Signature.getInstance("NONEwithECDSA").apply {
+        Signature.getInstance("SHA256withECDSA").apply {
             initSign(privateKey)
             update(data)
         }.sign()
 
     private fun signedMapHeadProto(rootHash: SHA256Hash, privateKey: PrivateKey): geopki.SignedMapHead {
-        val mapHead = MapHead(rootHash = rootHash, timestamp = 1L, coveredCtLogServers = emptyList())
+        val mapHead = MapHead(rootHash = rootHash, timestamp = 1L, coveredCtLogServers = emptyList(), version = MAP_HEAD_VERSION)
         val signature = sign(privateKey, mapHead.tbsBytes())
         return SignedMapHead(mapHead, signature).toProto()
     }
 
     private fun rootProtoNode(
         zLeftChildHash: ByteArray? = null,
-        certificateHashes: List<ByteArray> = emptyList()
+        entries: List<ByteArray> = emptyList()
     ) = geopki.Node(
         geopki_XYBitString = 0L,
         XYBitStringLen = 0,
         ZBitString = 0,
         ZBitStringLen = 0,
         ZLeftChildHash = zLeftChildHash?.toByteString(),
-        CertificateHashes = certificateHashes.map { it.toByteString() }
+        Entries = entries.map { it.toByteString() }
     )
 
     private val fullRangeQuery = GeoPkiQuery(
@@ -72,13 +72,13 @@ class VerificationTest {
     @Test
     fun verifyResponse_returnsCertificateHashWhenPresentInNodeAndBody() {
         val keyPair = generateEcKeyPair()
-        val certBytes = "hello geopki".toByteArray()
-        val certHash = SHA256Hash.sha256(certBytes)
-        val rootHash = Node(pair = ROOT_NODE, certificateHashes = listOf(certHash)).hash()
+        val certBytes = """{"extensions":{"wifi":{}}}""".toByteArray()
+        val entry = newEntry("wifi", SHA256Hash.sha256(certBytes))
+        val rootHash = Node(pair = ROOT_NODE, entries = listOf(entry)).hash()
 
         val response = geopki.Response(
             geopki_SignedMapHead = signedMapHeadProto(rootHash, keyPair.private),
-            Nodes = listOf(rootProtoNode(certificateHashes = listOf(certHash.bytes))),
+            Nodes = listOf(rootProtoNode(entries = listOf(entry))),
             Certificates = listOf(certBytes.toByteString())
         )
 

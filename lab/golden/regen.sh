@@ -23,5 +23,7 @@ bash lab/density/stack.sh load "$OUT/certs.json"
 
 (cd "$GEOPKI_DIR" && go run ./cmd/golden-dump -address http://127.0.0.1:1236 \
     -points "$OUT/points.json" -out "$REPO/app/src/test/resources/golden/golden.json")
+python3 "$REPO/lab/golden/capture_fixtures.py" http://127.0.0.1:1236 \
+    "$REPO/app/src/test/resources/golden/golden.json" "$REPO/app/src/test/resources/geopki-fixtures"
 bash lab/density/stack.sh down
-echo "done: app/src/test/resources/golden/golden.json"
+echo "done: app/src/test/resources/golden/golden.json and geopki-fixtures/"

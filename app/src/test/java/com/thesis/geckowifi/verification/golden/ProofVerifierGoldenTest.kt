@@ -29,6 +29,8 @@ class ProofVerifierGoldenTest(private val v: ProofVector, @Suppress("unused") pr
                 q.minAlt,
                 q.maxAlt,
                 GoldenVectors.publicKeyDer,
+                v.types,
+                v.withCertificates,
             )
         }
 

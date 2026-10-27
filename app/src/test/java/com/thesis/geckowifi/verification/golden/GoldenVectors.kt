@@ -46,6 +46,8 @@ data class ProofVector(
     val accept: Boolean,
     val certHashes: List<String> = emptyList(), // base64url, no padding
     val err: String? = null,
+    val types: List<String> = emptyList(), // requested certificate types, empty = all
+    val withCertificates: Boolean = false, // queried with ?c
 )
 
 @Serializable
@@ -137,12 +139,16 @@ object UnderTest {
         minAlt: Int,
         maxAlt: Int,
         publicKeyDer: ByteArray,
+        types: List<String> = emptyList(),
+        withCertificates: Boolean = false,
     ): Set<String> {
         val protoResponse = ProtoResponse.ADAPTER.decode(response)
         val query = GeoPkiQuery(
             xyBitStrings = xy.map { (value, len) -> RawXYBitString(xyBitString = value, xyBitStringLen = len) },
             minAltitude = minAlt,
-            maxAltitude = maxAlt
+            maxAltitude = maxAlt,
+            types = types,
+            withCertificates = withCertificates
         )
         val publicKey = KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(publicKeyDer))
 
