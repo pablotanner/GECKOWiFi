@@ -10,20 +10,24 @@ that checks the simulation against the real geopki server.
 
 ## The answer in short
 
-- **Small lookups are fine.** Within 25–50 m of the phone, filtered lookups
-  stay under about 0.4 MB even in Midtown Manhattan.
-- **Large lookups are not.** Indoors, location gets imprecise and the lookup
-  area grows. At 100 m in a dense business district, downloading everything
-  is about 1.7 MB (Zürich centre) to 4.2 MB (Midtown) with the app's lookup
-  cells, and twice that with geopki's default cells (3.7 and 9.1 MB, measured
-  on the real geopki server).
-- **Cap the lookup radius at 100 m and filter by type.**
+- **Small lookups are fine.** Within 25–50 m of the phone, a compressed
+  lookup stays under 0.6 MB even in Midtown Manhattan, downloading everything.
+- **With the app's finer cells and compression (both done), large lookups
+  are fine in European cities too.** At 100 m, downloading everything costs
+  0.7 MB in Zürich's centre and 1.9 MB in Midtown (measured and simulated;
+  without either change it was 3.7 and 9.1 MB on the real geopki server).
+- **Cap the lookup radius at 100 m.** Beyond that, even compressed answers
+  grow too fast.
+- **Filtering by type is what keeps the densest districts and future growth
+  in check:** at Rockefeller-Center density, everything is 3.7–7.5 MB even
+  compressed, depending on how many certificate types there are; with type
+  filtering it's 0.3–0.8 MB.
 - **Filtering needs a change to the map tree.** The server can't just leave
   certificates out, or the phone can no longer tell "filtered" from
   "withheld by an attacker".
-- **Two designs work: A (typed entries) and A+ (type-first tree).** Both
-  make 100 m lookups feasible in European cities. A+ also stays small in the
-  densest districts, and doesn't grow when new certificate types appear.
+- **Two designs work: A (typed entries) and A+ (type-first tree).** A keeps
+  every lookup under 0.8 MB, A+ under 0.35 MB, and A+ doesn't grow when new
+  certificate types appear.
 
 ## 1. How big is a lookup?
 
@@ -116,7 +120,7 @@ A WiFi lookup walks only the `wifi` branch; every other type costs one hash.
 
 | | Option A | Option A+ |
 |---|---|---|
-| Saves (simulated) | 2–7× | 3–12× |
+| Saves at 100 m (simulated, raw / compressed) | 3–5× / 4–10× | 6–16× / 8–23× |
 | Grows when other types are added | yes | **no** |
 | Change to geopki | node hash and leaf contents | also how certificates are placed in the tree, queries, checks |
 | Trees / signatures | one / one | one / one |
@@ -129,29 +133,39 @@ type; requires auditors or something like that.
 
 ## 4. Results
 
-`density_sim.py --runs 5` (medians over 5 grid positions), the app's lookup
-cells, all floors, half of the businesses with WiFi, k = 3 (Zürich) or 4
-(Manhattan). "Today" = downloading everything:
+`density_sim.py --runs 5` and `--runs 5 --gzip` (medians over 5 grid
+positions): the app's lookup cells, all floors, half of the businesses with
+WiFi, k = 3 (Zürich) or 4 (Manhattan), WiFi certificates of 875 B on average
+(the lab certificates as templates), others of 2.1 KB. "Today" = downloading
+everything; "compressed" = as the geopki server now sends it (gzip, measured
+ratios, section 5):
 
-| Place | Radius | Today | Option A | Option A+ |
+| Place | Radius | Today: raw / compressed | Option A: raw / compressed | Option A+: raw / compressed |
 |---|---|---|---|---|
-| Zürich suburb | 25 m | 0.03 MB | 0.01 MB | < 0.01 MB |
-| | 100 m | 0.21 MB | 0.09 MB | 0.04 MB |
-| Zürich centre | 25 m | 0.18 MB | 0.05 MB | 0.03 MB |
-| | 50 m | 0.51 MB | 0.17 MB | 0.11 MB |
-| | 100 m | 1.69 MB | **0.69 MB** | **0.40 MB** |
-| Midtown (6,000/km²) | 25 m | 0.46 MB | 0.12 MB | 0.08 MB |
-| | 50 m | 1.27 MB | 0.37 MB | 0.21 MB |
-| | 100 m | 4.24 MB | **1.38 MB** | **0.76 MB** |
-| Upper bound (12,000/km²) | 100 m | 8.16 MB | **2.48 MB** | **1.43 MB** |
-| Upper bound, k = 8 | 100 m | 15.6 MB | **3.39 MB** | **1.43 MB** |
+| Zürich suburb | 25 m | 0.03 / 0.01 MB | 0.01 / < 0.01 MB | < 0.01 / < 0.01 MB |
+| | 100 m | 0.20 / 0.08 MB | 0.07 / 0.02 MB | 0.03 / 0.01 MB |
+| Zürich centre | 25 m | 0.18 / 0.09 MB | 0.04 / 0.01 MB | 0.02 / 0.01 MB |
+| | 50 m | 0.50 / 0.23 MB | 0.14 / 0.04 MB | 0.07 / 0.02 MB |
+| | 100 m | 1.63 / **0.72** MB | 0.57 / **0.16** MB | 0.29 / **0.09** MB |
+| Midtown (6,000/km²) | 25 m | 0.46 / 0.22 MB | 0.09 / 0.03 MB | 0.05 / 0.02 MB |
+| | 50 m | 1.25 / 0.58 MB | 0.30 / 0.09 MB | 0.14 / 0.05 MB |
+| | 100 m | 4.16 / **1.91** MB | 1.15 / **0.32** MB | 0.53 / **0.17** MB |
+| Upper bound (12,000/km²) | 100 m | 8.01 / **3.73** MB | 2.02 / **0.58** MB | 0.96 / **0.33** MB |
+| Upper bound, k = 8 | 100 m | 15.8 / **7.54** MB | 2.92 / **0.79** MB | 0.96 / **0.33** MB |
 
-- **Option A:** feasible everywhere except the upper bound with many
-  certificate types (k = 8: 3.4 MB).
-- **Option A+:** feasible everywhere (at most 1.4 MB), and unchanged by k.
+About 1 MB is comfortable and about 3 MB the limit (1 MB ≈ 1 s on a normal
+connection, ≈ 8 s on a slow captive network). So, compressed:
+
+- **Today (no type filter):** fine in European cities up to 100 m (0.7 MB),
+  borderline in Midtown (1.9 MB), too big at the upper bound (3.7–7.5 MB).
+- **Option A:** at most 0.8 MB everywhere, but grows with k.
+- **Option A+:** at most 0.33 MB everywhere, unchanged by k.
+- **Repeat visits** (certificates cached by hash) only download the tree
+  part: compressed, about a quarter less for A and half for A+.
 
 With geopki's default cells (`--query-f 1`) all of these are about 2.2×
-larger.
+larger. An earlier version of this table assumed 2 KB per WiFi certificate;
+real ones are 875 B on average, which makes A and A+ about twice as small.
 
 ## 5. Checked against the real geopki server
 
@@ -173,11 +187,35 @@ checked, the server answers any set of cells the same way):
 - The simulation predicts the returned certificates **exactly**, and nodes
   and the tree part **within 1–2 % (25–100 m), on the high side**, so its
   results are slightly conservative.
-- The server **doesn't compress** these answers (transferred = raw).
 - The signed heads and inclusion proof add only 279 bytes.
 
+### Compression (2026-10-27)
+
+Measured with geopki's compression (gzip level 1, in the geocert-extensions
+PR), the app's lookup cells, and realistic certificates: WiFi ones made from
+the lab certificates with their own names, domains and key hashes, others
+filled with random words.
+
+| Lookup | Whole answer: raw → gzip | Tree part (nodes, hashes) | Certificate bodies |
+|---|---|---|---|
+| Zürich centre, 25 m | 211 KB → 101 KB (48 %) | 25 % | 53 % |
+| Zürich centre, 50 m | 502 KB → 224 KB (45 %) | 22 % | 52 % |
+| Zürich centre, 100 m | 1.77 MB → 0.76 MB (43 %) | 21 % | 51 % |
+| Midtown, 25 m | 495 KB → 236 KB (48 %) | 27 % | 51 % |
+| Midtown, 50 m | 1.24 MB → 0.58 MB (47 %) | 24 % | 52 % |
+| Midtown, 100 m | 4.41 MB → 2.00 MB (45 %) | 24 % | 51 % |
+
+- Clients that don't ask for compression get the same bytes as before.
+- The simulation uses 24 % for the tree, 52 % for non-WiFi bodies and 50 %
+  for WiFi bodies (`GZIP_*`). WiFi bodies alone measured 35 % together and
+  65 % each on its own; synthetic ones are more alike than real ones, so 50 %
+  is a middle estimate. With these ratios it reproduces the six measured
+  answers within 1 % raw and within 3 % compressed, from the same
+  certificates.
+
 What this doesn't check: the business counts, k and the WiFi share (inputs,
-not model), and the certificate size (2 KB, padded; see *Open points*).
+not model), and the size and compression of certificate types that don't
+exist yet (non-WiFi: 2.1 KB, an assumption).
 
 ## 6. Decisions
 
@@ -190,7 +228,7 @@ not model), and the certificate size (2 KB, padded; see *Open points*).
 4. **Filter by type:** option A as the minimum, **option A+ preferred** if the
    larger tree change is acceptable. 
 5. **Cache certificates by their hash.**
-6. **Compress the Answer:** Server compresses the body and marks it `Content-Encoding: gzip` and the client decompresses before reading. (MEASURED: at gzip level 1 it can fit around 1.6x more answers through same link, so worth it for bandwidth-bound server)
+6. **DONE Compress the Answer:** Server compresses the body and marks it `Content-Encoding: gzip` and the client decompresses before reading. (MEASURED: at gzip level 1 it can fit around 1.6x more answers through same link, so worth it for bandwidth-bound server). In the geocert-extensions PR, for `/v1/query` and `/v1/certificates`; answers shrink to 43–48 % (section 5), and the app's HTTP client decompresses them transparently.
 7. **DONE** Finer lookup cells: about 2.2x
    less of everything, at the cost of the map server learning the circle's
    position more precisely. 
@@ -219,8 +257,9 @@ per km² as the place's density), gives each k certificates, turns them into
 grid cells the way the geopki server does, builds the tree, makes the lookup
 the way the app does, and counts what the server would send. `--runs`
 repeats the lookup at different grid positions and prints medians;
-`--query-f 1` uses geopki's default lookup cells instead of the app's. The
-byte sizes and densities are constants at the top of the file.
+`--query-f 1` uses geopki's default lookup cells instead of the app's;
+`--gzip` gives sizes as sent compressed. The byte sizes, compression ratios
+and densities are constants at the top of the file.
 
 ### The experiment (only needed when the model changes)
 
@@ -248,10 +287,12 @@ folder).
 
 ## Limits and open points
 
-- **Certificate size:** `make_certs.py` pads every certificate to 2 KB, the
-  simulation's assumption, so the experiment checks the tree, not the size.
-  WiFi certificates could use the lab certificates (0.9–6.2 KB) as templates
-  instead.
+- **Certificate size:** WiFi certificates are made from the lab certificates
+  (875 B on average; which template how often is an assumption, `TEMPLATES`
+  in `make_certs.py`). Non-WiFi certificates have no format yet: 2.1 KB of
+  random words is an assumption, and only matters for "today".
+- **WiFi body compression** (50 %) is an estimate between the measured 35 %
+  and 65 %.
 - **Businesses** are random rectangles on one floor each, not real buildings.
 - **Zürich's density** is OpenStreetMap doubled; STATENT (per hectare) would
   replace the estimate.

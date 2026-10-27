@@ -34,7 +34,17 @@ EARTH_RADIUS = 6371000.0
 PRUNED_CHILD = 34  # a child hash for a subtree that isn't sent
 HASH = 34          # a certificate hash (today)
 ENTRY = 40         # a typed entry len(type) | type | hash (options A, A+)
-BODY = 2000        # one certificate (lab certificates: 0.9-6.2 KB)
+WIFI_BODY = 875    # a WiFi certificate: average of the lab certificates as templates
+                   # (make_certs.py; 0.5-5 KB, the large ones embed CA certificates)
+OTHER_BODY = 2100  # a certificate of another type: no format yet, an assumption
+                   # (make_certs.py --other-bytes)
+
+# --- with --gzip: what is left of the raw size after compression (gzip level 1,
+# as the geopki server sends answers to clients that ask; lab/density/README.md)
+GZIP_TREE = 0.24        # nodes and their hashes or entries: measured 21-27 %
+GZIP_OTHER_BODY = 0.52  # non-WiFi certificates: measured 51-53 %
+GZIP_WIFI_BODY = 0.50   # WiFi certificates: an estimate, measured 35 % together and
+                        # 65 % each alone (synthetic ones are more alike than real ones)
 
 SERVER_F = 0.1     # geopki server: certificate cells <= 0.1 x the certificate's area
 QUERY_F = 0.1      # app (GeoQueryEncoder.F_GROW): lookup cells ~0.1 x the circle's area
@@ -306,8 +316,15 @@ def predict(certificates, lookup: set[str]) -> dict:
     }
 
 
+def answer_bytes(tree: float, wifi_bodies: float, other_bodies: float, gzip: bool) -> float:
+    """An answer's size from its parts, raw or as sent compressed."""
+    if not gzip:
+        return tree + wifi_bodies + other_bodies
+    return tree * GZIP_TREE + wifi_bodies * GZIP_WIFI_BODY + other_bodies * GZIP_OTHER_BODY
+
+
 def run(place: Place, radius: int, wifi_share: float, seed: int, shift: bool,
-        query_f: float = QUERY_F) -> dict:
+        query_f: float = QUERY_F, gzip: bool = False) -> dict:
     rng = random.Random(seed)
     grid = Grid(place.lat, place.lng)
     # move the lookup point by up to 500 m, so that it lands at a different spot
@@ -326,7 +343,11 @@ def run(place: Place, radius: int, wifi_share: float, seed: int, shift: bool,
 
     everything = predict(certificates, lookup)                                  # today, A
     wifi_branch = predict([c for c in certificates if c[1] == "wifi"], lookup)  # A+
-    bodies = everything["wifi"] * BODY
+    wifi_bodies = everything["wifi"] * WIFI_BODY
+    other_bodies = (everything["certificates"] - everything["wifi"]) * OTHER_BODY
+    tree_today = everything["tree_bytes"] + everything["hashes"] * HASH
+    tree_a = everything["tree_bytes"] + everything["hashes"] * ENTRY
+    tree_a_plus = wifi_branch["tree_bytes"] + wifi_branch["hashes"] * ENTRY
 
     return {
         "lookup_km2": lookup_m2 / 1e6,
@@ -335,11 +356,11 @@ def run(place: Place, radius: int, wifi_share: float, seed: int, shift: bool,
         "wifi": everything["wifi"],
         "nodes": everything["nodes"],
         "altitude_nodes": everything["altitude_nodes"],
-        "today": everything["tree_bytes"] + everything["hashes"] * HASH + everything["certificates"] * BODY,
-        "A": everything["tree_bytes"] + everything["hashes"] * ENTRY + bodies,
-        "A_repeat": everything["tree_bytes"] + everything["hashes"] * ENTRY,
-        "A+": wifi_branch["tree_bytes"] + wifi_branch["hashes"] * ENTRY + bodies,
-        "A+_repeat": wifi_branch["tree_bytes"] + wifi_branch["hashes"] * ENTRY,
+        "today": answer_bytes(tree_today, wifi_bodies, other_bodies, gzip),
+        "A": answer_bytes(tree_a, wifi_bodies, 0, gzip),
+        "A_repeat": answer_bytes(tree_a, 0, 0, gzip),
+        "A+": answer_bytes(tree_a_plus, wifi_bodies, 0, gzip),
+        "A+_repeat": answer_bytes(tree_a_plus, 0, 0, gzip),
     }
 
 
@@ -354,15 +375,16 @@ def main():
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--query-f", type=float, default=QUERY_F,
                     help=f"lookup cell size relative to the circle ({QUERY_F}; 1.0 = geopki's Go client)")
+    ap.add_argument("--gzip", action="store_true", help="sizes as sent compressed (measured ratios, see GZIP_*)")
     args = ap.parse_args()
 
     print(f"{'place':14} {'r':>4} {'area km2':>9} {'xcircle':>7} {'certs':>6} {'wifi':>5} {'nodes':>6} "
-          f"{'alt%':>5} | {'today':>7} {'A':>7} {'A rep':>7} {'A+':>7} {'A+ rep':>7}  MB")
+          f"{'alt%':>5} | {'today':>7} {'A':>7} {'A rep':>7} {'A+':>7} {'A+ rep':>7}  MB{', gzip' if args.gzip else ''}")
     for name in args.place or list(PLACES):
         place = PLACES[name] if not args.k else replace(PLACES[name], k=args.k)
         for radius in args.radius or [25, 50, 100]:
             results = [run(place, radius, args.wifi_share, args.seed + i, shift=args.runs > 1,
-                           query_f=args.query_f)
+                           query_f=args.query_f, gzip=args.gzip)
                        for i in range(args.runs)]
             m = {key: statistics.median(r[key] for r in results) for key in results[0]}
             print(f"{name:14} {radius:4d} {m['lookup_km2']:9.4f} {m['x_circle']:7.1f} {m['certificates']:6.0f} "

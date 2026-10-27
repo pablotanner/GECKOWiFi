@@ -41,3 +41,5 @@ lab/density/__pycache__
 # Lab dashboard: output of the servers it starts, and its state
 lab/dashboard/logs/
 lab/dashboard/__pycache__
+# Evidence for the thesis: raw data, measurements, sources (evidence/README.md)
+evidence/
