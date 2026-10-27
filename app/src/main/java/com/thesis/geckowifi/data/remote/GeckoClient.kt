@@ -8,6 +8,8 @@ import com.thesis.geckowifi.geopki.bitstring.RawXYBitString
 import com.thesis.geckowifi.geopki.crypto.GeoPkiQuery
 import com.thesis.geckowifi.geopki.crypto.GeoPkiVerificationException
 import com.thesis.geckowifi.geopki.crypto.SHA256Hash
+import com.thesis.geckowifi.geopki.crypto.SignedMapHead
+import java.security.PublicKey
 import java.util.Base64
 import com.thesis.geckowifi.geopki.crypto.ensureConsistency
 import com.thesis.geckowifi.geopki.crypto.verifyResponse
@@ -22,10 +24,27 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.ResponseBody
 import kotlin.time.Duration
 import geopki.Request as ProtoRequest
 import geopki.Response as ProtoResponse
+import geopki.SignedMapHead as ProtoSignedMapHead
 import geopki.XYBitString as ProtoXYBitString
+
+/** What [GeckoClient.currentMapHead] found. */
+sealed class MapHeadAnswer {
+    /**
+     * Verified against the pinned server key. Only [rootHash] is compared: it
+     * is what the signature covers (see [GeckoResponse.Success.mapRootHash]).
+     */
+    class Current(val rootHash: ByteArray) : MapHeadAnswer() {
+        val rootHashBase64: String get() = Base64.getEncoder().encodeToString(rootHash)
+    }
+
+    data class Unreachable(val cause: String) : MapHeadAnswer()
+
+    data class ProofFailure(val reason: String) : MapHeadAnswer()
+}
 
 sealed class GeckoResponse {
     /**
@@ -57,6 +76,12 @@ sealed class GeckoResponse {
         val usedPreferredNetwork: Boolean = false,
         /** When the map server signed the map head this answer is proven against (epoch millis). */
         val mapHeadMillis: Long? = null,
+        /**
+         * Root hash of that map head (base64). Unlike [mapHeadMillis] it is covered
+         * by the signature: geopki signs the raw map head with ECDSA, which on
+         * P-256 uses only its first 32 bytes, the root hash.
+         */
+        val mapRootHash: String? = null,
         /**
          * Set when this isn't a live answer but a saved one standing in for an
          * unreachable server (docs/eduroam-decisions.md, D21, D25): when it was
@@ -183,8 +208,10 @@ class GeckoClient(
                     return@withContext GeckoResponse.Unreachable("HTTP ${httpResponse.code}")
                 }
 
-                val bytes = httpResponse.body?.bytes()
+                val body = httpResponse.body
                     ?: return@withContext GeckoResponse.Unreachable("empty response body")
+                val bytes = readCapped(body, MAX_ANSWER_BYTES)
+                    ?: return@withContext GeckoResponse.Unreachable("answer larger than ${MAX_ANSWER_BYTES / 1_000_000} MB")
 
                 val protoResponse = try {
                     ProtoResponse.ADAPTER.decode(bytes)
@@ -255,10 +282,33 @@ class GeckoClient(
                     }
                 }
                 GeckoResponse.Success(certificates, unparsedCount, usedPreferredNetwork,
-                    protoResponse.geopki_SignedMapHead?.Timestamp?.let { it / 1_000_000L })
+                    protoResponse.geopki_SignedMapHead?.Timestamp?.let { it / 1_000_000L },
+                    protoResponse.geopki_SignedMapHead?.RootHash?.toByteArray()?.let(Base64.getEncoder()::encodeToString))
             }
         } catch (e: Exception) {
             GeckoResponse.Unreachable(e.message ?: e::class.java.simpleName)
+        }
+    }
+
+    /**
+     * The map server's current signed map head (`GET /v1/get-smh`, a few hundred
+     * bytes), to tell whether a saved answer is still current without
+     * downloading it again (D26): the same root hash means the same map. Like
+     * a replayed full answer (docs/experiments.md, R2), a replayed old map head
+     * would pass: freshness of the map head is open either way.
+     */
+    suspend fun currentMapHead(): MapHeadAnswer = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder().url("$baseUrl/v1/get-smh").get().build()
+            executeWithFallback(request).first.use { response ->
+                if (!response.isSuccessful) return@withContext MapHeadAnswer.Unreachable("HTTP ${response.code}")
+                val body = response.body ?: return@withContext MapHeadAnswer.Unreachable("empty response body")
+                val bytes = readCapped(body, MAX_MAP_HEAD_BYTES)
+                    ?: return@withContext MapHeadAnswer.Unreachable("map head larger than $MAX_MAP_HEAD_BYTES bytes")
+                mapHeadFrom(bytes, PinnedServerKey.publicKey)
+            }
+        } catch (e: Exception) {
+            MapHeadAnswer.Unreachable(e.message ?: e::class.java.simpleName)
         }
     }
 
@@ -297,6 +347,41 @@ class GeckoClient(
         }.getOrNull()?.let { "\"$it\"" } ?: "(no certificate_id)"
 
     companion object {
+        /**
+         * The largest answer the client reads. The query often goes over the
+         * network being checked, so an attacker could otherwise send an endless
+         * (or, with gzip, a tiny but huge-when-unpacked) body and exhaust the
+         * app's memory. Real answers stay far below: a few MB for a 100 m check
+         * in a dense business district, about 10 MB for the network list's
+         * 253 m lookup in a city centre (lab/density/README.md).
+         */
+        const val MAX_ANSWER_BYTES = 32_000_000L
+
+        /** A signed map head is a few hundred bytes. */
+        const val MAX_MAP_HEAD_BYTES = 64_000L
+
+        /** Parses and verifies a serialized signed map head against [publicKey]. */
+        internal fun mapHeadFrom(bytes: ByteArray, publicKey: PublicKey): MapHeadAnswer {
+            val smh = try {
+                SignedMapHead.fromProto(ProtoSignedMapHead.ADAPTER.decode(bytes))
+            } catch (e: Exception) {
+                return MapHeadAnswer.Unreachable("malformed map head: ${e.message}")
+            }
+            if (!smh.verify(publicKey)) return MapHeadAnswer.ProofFailure("signature on the map head is invalid")
+            return MapHeadAnswer.Current(smh.mapHead.rootHash.bytes)
+        }
+
+        /**
+         * The body's bytes, or null if it is longer than [max]. Reads at most
+         * max + 1 bytes (after OkHttp's transparent gunzip), whatever the server
+         * claims in Content-Length.
+         */
+        internal fun readCapped(body: ResponseBody, max: Long): ByteArray? {
+            val source = body.source()
+            if (source.request(max + 1)) return null
+            return source.readByteArray()
+        }
+
         private fun buildClient(network: Network?): OkHttpClient =
             OkHttpClient.Builder().apply {
                 if (network != null) {

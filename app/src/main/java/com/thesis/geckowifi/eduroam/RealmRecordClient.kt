@@ -2,6 +2,7 @@ package com.thesis.geckowifi.eduroam
 
 import android.net.Network
 import com.thesis.geckowifi.BuildConfig
+import com.thesis.geckowifi.data.remote.GeckoClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Dns
@@ -49,11 +50,19 @@ class RealmRecordClient(
                 when {
                     response.code == 404 -> RealmFetch.NotFound
                     !response.isSuccessful -> RealmFetch.Unreachable("HTTP ${response.code}")
-                    else -> response.body?.bytes()?.let { RealmFetch.Fetched(it) } ?: RealmFetch.Unreachable("empty response body")
+                    else -> response.body?.let { body ->
+                        GeckoClient.readCapped(body, MAX_RECORD_BYTES)?.let { RealmFetch.Fetched(it) }
+                            ?: RealmFetch.Unreachable("record larger than $MAX_RECORD_BYTES bytes")
+                    } ?: RealmFetch.Unreachable("empty response body")
                 }
             }
         } catch (e: Exception) {
             RealmFetch.Unreachable(e.message ?: e::class.java.simpleName)
         }
+    }
+
+    companion object {
+        /** Records are a few KB (CA certificates included); more is an attacker's body, see [GeckoClient.MAX_ANSWER_BYTES]. */
+        const val MAX_RECORD_BYTES = 1_000_000L
     }
 }

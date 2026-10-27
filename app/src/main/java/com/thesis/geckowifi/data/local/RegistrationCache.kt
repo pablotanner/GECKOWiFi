@@ -30,6 +30,13 @@ data class SavedLookup(
     val viaSsid: String? = null,
     /** When the map server signed the map head the answer was proven against (epoch millis). */
     val mapHeadMillis: Long? = null,
+    /** Root hash of that map head (base64): what "the map hasn't changed" is checked against (D26). */
+    val mapRootHash: String? = null,
+    /**
+     * When the server's signed map head was last seen with the same [mapRootHash]
+     * (epoch millis): the map, and so this answer, was still current then (D26).
+     */
+    val confirmedAt: Long? = null,
     val certificates: List<GeoCertificate>
 )
 
