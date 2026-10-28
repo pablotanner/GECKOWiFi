@@ -155,7 +155,7 @@ object MapServerDecoder {
     }
 
     /** A typed entry `len(type) | type | SHA-256` as (type, hash in hex), or null if malformed. */
-    private fun entry(e: ByteString): Pair<String, String>? {
+    internal fun entry(e: ByteString): Pair<String, String>? {
         if (e.size == 0) return null
         val n = e[0].toInt() and 0xFF
         if (e.size != 1 + n + 32) return null
@@ -163,12 +163,12 @@ object MapServerDecoder {
     }
 
     /** The top [len] bits of a top-aligned [width]-bit value, or "(root)". */
-    private fun bits(value: Long, len: Int, width: Int): String =
+    internal fun bits(value: Long, len: Int, width: Int): String =
         if (len == 0) "(root)" else (0 until len).joinToString("") { if ((value ushr (width - 1 - it)) and 1L == 1L) "1" else "0" }
 
-    private fun nanosToText(nanos: Long): String =
+    internal fun nanosToText(nanos: Long): String =
         Instant.ofEpochSecond(Math.floorDiv(nanos, 1_000_000_000L), Math.floorMod(nanos, 1_000_000_000L)).toString()
 
-    private fun hex(b: ByteString) = b.hex()
+    internal fun hex(b: ByteString) = b.hex()
     private fun hex(b: ByteArray) = b.joinToString("") { "%02x".format(it) }
 }

@@ -34,7 +34,10 @@ import com.thesis.geckowifi.di.AppModule
 import com.thesis.geckowifi.ui.evidence.EvidenceScreen
 import com.thesis.geckowifi.ui.history.HistoryScreen
 import com.thesis.geckowifi.ui.home.HomeScreen
+import com.thesis.geckowifi.data.remote.MapServerTrace
+import com.thesis.geckowifi.ui.lab.AnswerMapScreen
 import com.thesis.geckowifi.ui.lab.CheckLogScreen
+import com.thesis.geckowifi.ui.lab.ProofPathScreen
 import com.thesis.geckowifi.ui.lab.MapServerTrafficScreen
 import com.thesis.geckowifi.ui.onboarding.PermissionScreen
 import com.thesis.geckowifi.ui.settings.SavedDataScreen
@@ -127,7 +130,28 @@ fun GeckoWifiApp(
                 )
             }
             composable("lab/checks") { CheckLogScreen(onBack = { navController.popBackStack() }) }
-            composable("lab/traffic") { MapServerTrafficScreen(onBack = { navController.popBackStack() }) }
+            composable("lab/traffic") {
+                MapServerTrafficScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenMap = { navController.navigate("lab/traffic/$it/map") },
+                    onOpenProof = { navController.navigate("lab/traffic/$it/proof") }
+                )
+            }
+            composable("lab/traffic/{at}/map") { entry ->
+                val at = entry.arguments?.getString("at")?.toLongOrNull()
+                AnswerMapScreen(
+                    exchange = MapServerTrace.exchanges.value.firstOrNull { it.startedMillis == at },
+                    onBack = { navController.popBackStack() },
+                    onOpenProof = { navController.navigate("lab/traffic/$at/proof") }
+                )
+            }
+            composable("lab/traffic/{at}/proof") { entry ->
+                val at = entry.arguments?.getString("at")?.toLongOrNull()
+                ProofPathScreen(
+                    exchange = MapServerTrace.exchanges.value.firstOrNull { it.startedMillis == at },
+                    onBack = { navController.popBackStack() }
+                )
+            }
             composable("saved") { SavedDataScreen(viewModel, onBack = { navController.popBackStack() }) }
             composable("check/{id}") { entry ->
                 EvidenceScreen(

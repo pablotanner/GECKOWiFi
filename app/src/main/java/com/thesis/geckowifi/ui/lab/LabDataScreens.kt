@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,6 +28,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -71,6 +73,8 @@ private class LabRecord(
     val subtitle: String,
     val tone: RecordTone,
     val json: () -> JsonElement,
+    /** Further views of this record, shown when it is open: label to action. */
+    val links: List<Pair<String, () -> Unit>> = emptyList(),
 )
 
 private enum class RecordTone { OK, FAILED, NEUTRAL }
@@ -122,9 +126,9 @@ fun CheckLogScreen(onBack: () -> Unit) {
  * (lab mode, kept in memory only; see [MapServerTrace]).
  */
 @Composable
-fun MapServerTrafficScreen(onBack: () -> Unit) {
+fun MapServerTrafficScreen(onBack: () -> Unit, onOpenMap: (Long) -> Unit = {}, onOpenProof: (Long) -> Unit = {}) {
     val exchanges by MapServerTrace.exchanges.collectAsState()
-    val records = remember(exchanges) { exchanges.map(::exchangeRecord) }
+    val records = remember(exchanges) { exchanges.map { exchangeRecord(it, onOpenMap, onOpenProof) } }
     LabRecordsScreen(
         title = "Map server traffic",
         intro = "The last ${MapServerTrace.CAPACITY} requests to the map server and what came back, decoded. The outcome is the " +
@@ -136,7 +140,7 @@ fun MapServerTrafficScreen(onBack: () -> Unit) {
     )
 }
 
-private fun exchangeRecord(e: MapServerExchange) = LabRecord(
+private fun exchangeRecord(e: MapServerExchange, onOpenMap: (Long) -> Unit, onOpenProof: (Long) -> Unit) = LabRecord(
     key = "${e.startedMillis}:${e.kind}:${System.identityHashCode(e)}",
     title = "${e.kind.replaceFirstChar { it.uppercase() }} · ${e.outcome}",
     subtitle = listOfNotNull(
@@ -149,7 +153,10 @@ private fun exchangeRecord(e: MapServerExchange) = LabRecord(
         e.outcome.startsWith("Proof failure") -> RecordTone.FAILED
         else -> RecordTone.NEUTRAL
     },
-    json = { MapServerDecoder.decode(e) }
+    json = { MapServerDecoder.decode(e) },
+    links = if (e.kind == "lookup" && e.response != null) {
+        listOf("Map" to { onOpenMap(e.startedMillis) }, "Proof path" to { onOpenProof(e.startedMillis) })
+    } else emptyList()
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -197,6 +204,15 @@ private fun LabRecordsScreen(
                             copy(context, record.title, prettyJson.encodeToString(JsonElement.serializer(), tree))
                         }
                     )
+                }
+                if (isOpen && record.links.isNotEmpty()) {
+                    item(key = "${record.key}/links") {
+                        Row(Modifier.padding(horizontal = Space.lg), horizontalArrangement = Arrangement.spacedBy(Space.sm)) {
+                            record.links.forEach { (label, action) ->
+                                OutlinedButton(onClick = action, modifier = Modifier.heightIn(min = 48.dp)) { Text(label) }
+                            }
+                        }
+                    }
                 }
                 if (isOpen) {
                     val tree = trees.getOrPut(record.key, record.json)
