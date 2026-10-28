@@ -10,7 +10,7 @@
 set -uo pipefail
 export PATH="$PATH:/usr/local/go/bin"
 REPO=$(cd "$(dirname "$0")/../../.." && pwd)
-GEOPKI=${GEOPKI_DIR:-$HOME/Thesis/geopki-ext}
+GEOPKI=${GEOPKI_DIR:-$HOME/Thesis/geopki-typed}
 RADIUS="$HOME/gecko-radius"
 INSTANCES="legit attacker-b1 attacker-b2"
 
@@ -40,15 +40,28 @@ map-start)
     cd "$GEOPKI" || { echo "no $GEOPKI"; exit 1; }
     set -a; source .envrc; set +a
     [ -n "${CLOG_ID:-}" ] || { echo "CLOG_ID missing in $GEOPKI/.envrc"; exit 1; }
-    echo "--- $(date '+%F %T') started by the dashboard" >> server.log
-    setsid nohup go run ./cmd/geopki-server --address=0.0.0.0 --port=1234 \
-        --trillian-address=127.0.0.1:8090 --clog-id="$CLOG_ID" >> server.log 2>&1 < /dev/null &
-    for i in $(seq 1 90); do
-        sleep 1
-        if listening 1234; then echo "map server listening after ${i}s (tree $CLOG_ID)"; exit 0; fi
-        if ! pgrep -f 'cmd/geopki-server' >/dev/null; then echo "map server exited:"; tail -n 15 server.log; exit 1; fi
+    for attempt in 1 2; do
+        echo "--- $(date '+%F %T') started by the dashboard" >> server.log
+        setsid nohup go run ./cmd/geopki-server --address=0.0.0.0 --port=1234 \
+            --trillian-address=127.0.0.1:8090 --clog-id="$CLOG_ID" >> server.log 2>&1 < /dev/null &
+        for i in $(seq 1 90); do
+            sleep 1
+            if listening 1234; then echo "map server listening after ${i}s (tree $CLOG_ID)"; exit 0; fi
+            pgrep -f 'cmd/geopki-server' >/dev/null || break
+        done
+        if pgrep -f 'cmd/geopki-server' >/dev/null; then
+            echo "not listening after 90 s, last log lines:"; tail -n 15 server.log; exit 1
+        fi
+        # After Docker starts, the Trillian log server crash-loops until MySQL is
+        # up, and Docker can keep forwarding 8090 to the dead instance: the
+        # server then gets "unknown service trillian.TrillianLog". Restarting
+        # the container fixes the forwarding.
+        if [ $attempt = 1 ] && tail -n 5 server.log | grep -q "unknown service trillian.TrillianLog"; then
+            echo "Trillian's port forwarding is stale, restarting its log server container"
+            docker restart deployment-trillian-log-server-1 >/dev/null && sleep 5 && continue
+        fi
+        echo "map server exited:"; tail -n 15 server.log; exit 1
     done
-    echo "not listening after 90 s, last log lines:"; tail -n 15 server.log; exit 1
     ;;
 map-stop)
     pkill -f 'go run ./cmd/geopki-server'

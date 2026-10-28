@@ -11,7 +11,7 @@
 # expired certificate that the release must remove again.
 set -euo pipefail
 export PATH="$PATH:/usr/local/go/bin"
-export GEOPKI_DIR=${GEOPKI_DIR:-$HOME/Thesis/geopki-ext}
+export GEOPKI_DIR=${GEOPKI_DIR:-$HOME/Thesis/geopki-typed}
 REPO=$(pwd)
 OUT=$(mktemp -d)
 trap 'rm -rf "$OUT"' EXIT

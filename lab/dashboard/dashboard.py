@@ -44,7 +44,7 @@ GENUINE_IP = "192.168.137.10"
 ATTACKER_IP = "192.168.137.20"
 ROUTER_A = {"ssh": "mango-a", "wan": "192.168.137.50", "gateway": LAPTOP_IP, "lan": "192.168.8.1", "fas": GENUINE_IP}
 ROUTER_B = {"ssh": "mango-b", "wan": "192.168.8.115", "gateway": "192.168.8.1", "lan": "192.168.247.1", "fas": ATTACKER_IP}
-GEOPKI_DIR = "~/Thesis/geopki-ext"
+GEOPKI_DIR = "~/Thesis/geopki-typed"  # map version 2 (typed entries) since 2026-10-27
 GEOPKI_DB = "geopki_ext"
 RELAY_PORTS = (1812, 1814, 1816)
 RADIUS_PORT = {"legit": 1812, "attacker-b1": 1814, "attacker-b2": 1816}
@@ -563,7 +563,7 @@ def evaluate(raw, state):
         if len(servers) > 1:
             problems.append(f"{len(servers)} instances are running")
         if s.get("cwd") and not s["cwd"].rstrip("/").endswith(GEOPKI_DIR.split("/")[-1]):
-            problems.append(f"it runs from {s['cwd']}, the old server (flat schema v3), not {GEOPKI_DIR}")
+            problems.append(f"it runs from {s['cwd']}, an older server (geopki-ext: map version 1, geopki: flat schema v3), not {GEOPKI_DIR}")
         if w.get("envrc_clog_id") and s.get("clog_id") != w.get("envrc_clog_id"):
             problems.append(f"tree --clog-id={s.get('clog_id')}, but .envrc has {w['envrc_clog_id']} (a command from shell history?)")
         if s.get("database") and s["database"] != GEOPKI_DB:

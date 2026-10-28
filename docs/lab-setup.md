@@ -43,16 +43,24 @@ access point it is checking.
 ## Map server
 
 The server is [geopki](https://github.com/netsec-ethz/geopki) with GeoCert
-extensions, running in WSL2 (Ubuntu 22.04, PostgreSQL 14): `~/Thesis/geopki-ext`,
-branch `lab-admin` of the fork (`geocert-extensions`, the upstream pull request,
-plus the admin dashboard). Database `geopki_ext`, Trillian tree
-`8686676202186529070`. Trillian runs in Docker from
-`trillian/examples/deployment` and restarts on its own. `.envrc` holds
-`DATABASE_URL`, `CERT_INSERT_KEY`, `PRIVATE_KEY` and `CLOG_ID`; copies of the
-secrets are in `lab-secrets/geopki/`.
+extensions, running in WSL2 (Ubuntu 22.04, PostgreSQL 14): `~/Thesis/geopki-typed`,
+branch `typed-entries` of the fork (a worktree of `~/Thesis/geopki-ext`, branch
+`geocert-extensions`: the upstream pull request plus the admin dashboard), with
+map version 2: typed entries (option A) and map heads signed over their SHA-256.
+Database `geopki_ext`, Trillian tree `5071664774311177592`. Trillian runs in
+Docker from `trillian/examples/deployment` and restarts on its own. `.envrc`
+holds `DATABASE_URL`, `CERT_INSERT_KEY`, `PRIVATE_KEY` and `CLOG_ID`; copies of
+the secrets are in `lab-secrets/geopki/`.
+
+The map was migrated on 2026-10-27: the same six certificates re-inserted into
+a fresh schema, on a new Trillian tree (the server refuses to start on a log
+whose latest map head is version 1). The version-1 map (`~/Thesis/geopki-ext`,
+tree `8686676202186529070`) can be restored from
+`lab-secrets/geopki/geopki_ext-before-migration-20261027-1449.dump` and that
+server's unchanged `~/Thesis/geopki-ext/.envrc`.
 
 ```bash
-cd ~/Thesis/geopki-ext
+cd ~/Thesis/geopki-typed
 source .envrc
 go run ./cmd/geopki-server --address=0.0.0.0 --port=1234 \
   --trillian-address=127.0.0.1:8090 --clog-id=$CLOG_ID

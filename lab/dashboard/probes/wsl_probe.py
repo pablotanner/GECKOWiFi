@@ -15,7 +15,7 @@ import time
 import urllib.error
 import urllib.request
 
-GEOPKI = os.path.expanduser(sys.argv[1] if len(sys.argv) > 1 else "~/Thesis/geopki-ext")
+GEOPKI = os.path.expanduser(sys.argv[1] if len(sys.argv) > 1 else "~/Thesis/geopki-typed")
 RADIUS = os.path.expanduser("~/gecko-radius")
 INSTANCES = ["legit", "attacker-b1", "attacker-b2"]
 TICK = os.sysconf("SC_CLK_TCK")

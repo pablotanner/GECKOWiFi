@@ -11,14 +11,14 @@
 # - PostgreSQL in its own Docker container (geopki-density-pg, 127.0.0.1:5433).
 #   The WSL PostgreSQL and its databases (geopki_ext, geopki) are not touched.
 # - one new tree in the lab's Trillian (deleted again by `down`).
-# - a geopki server built from ~/Thesis/geopki-ext into ~/Thesis/density-exp,
+# - a geopki server built from ~/Thesis/geopki-typed into ~/Thesis/density-exp,
 #   with its own keys, on port 1236. The demo server on 1234 and the realm
 #   server on 1235 (lab/realm) keep running.
 # - state (keys, tree id, logs) in ~/Thesis/density-exp, removed by `down`.
 set -euo pipefail
 export PATH="$PATH:/usr/local/go/bin"
 
-GEOPKI=${GEOPKI_DIR:-$HOME/Thesis/geopki-ext}
+GEOPKI=${GEOPKI_DIR:-$HOME/Thesis/geopki-typed}
 TRILLIAN=${TRILLIAN_DIR:-$HOME/Thesis/trillian}
 STATE=$HOME/Thesis/density-exp
 PG=geopki-density-pg
