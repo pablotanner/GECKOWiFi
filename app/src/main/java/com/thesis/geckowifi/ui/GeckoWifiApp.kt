@@ -34,6 +34,8 @@ import com.thesis.geckowifi.di.AppModule
 import com.thesis.geckowifi.ui.evidence.EvidenceScreen
 import com.thesis.geckowifi.ui.history.HistoryScreen
 import com.thesis.geckowifi.ui.home.HomeScreen
+import com.thesis.geckowifi.ui.lab.CheckLogScreen
+import com.thesis.geckowifi.ui.lab.MapServerTrafficScreen
 import com.thesis.geckowifi.ui.onboarding.PermissionScreen
 import com.thesis.geckowifi.ui.settings.SavedDataScreen
 import com.thesis.geckowifi.ui.settings.SettingsScreen
@@ -116,7 +118,16 @@ fun GeckoWifiApp(
             composable("history") {
                 HistoryScreen(viewModel.checks, onOpenCheck = { navController.navigate("check/$it") })
             }
-            composable("settings") { SettingsScreen(viewModel, onOpenSavedData = { navController.navigate("saved") }) }
+            composable("settings") {
+                SettingsScreen(
+                    viewModel,
+                    onOpenSavedData = { navController.navigate("saved") },
+                    onOpenCheckLog = { navController.navigate("lab/checks") },
+                    onOpenMapServerTraffic = { navController.navigate("lab/traffic") }
+                )
+            }
+            composable("lab/checks") { CheckLogScreen(onBack = { navController.popBackStack() }) }
+            composable("lab/traffic") { MapServerTrafficScreen(onBack = { navController.popBackStack() }) }
             composable("saved") { SavedDataScreen(viewModel, onBack = { navController.popBackStack() }) }
             composable("check/{id}") { entry ->
                 EvidenceScreen(

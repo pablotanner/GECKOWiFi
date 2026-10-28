@@ -22,6 +22,15 @@ fun SavedLookup.isExpired(now: Instant, maxAge: Duration = SAVED_REGISTRATION_MA
     Duration.between(Instant.ofEpochMilli(currentAt), now) > maxAge
 
 /**
+ * Whether a verdict from [verdictMillis] still shows as a network's state in the
+ * network list: for as long as a saved answer would be used, [maxAge]. An older
+ * one is history (the History tab keeps it); in the list, without a date, it
+ * would read as a statement about now.
+ */
+fun isRecentVerdict(verdictMillis: Long, now: Instant, maxAge: Duration = SAVED_REGISTRATION_MAX_AGE): Boolean =
+    Duration.between(Instant.ofEpochMilli(verdictMillis), now) <= maxAge
+
+/**
  * After this, a saved answer is checked against the server's map head while it
  * is still usable (D26): half of [SAVED_REGISTRATION_MAX_AGE], so it is
  * confirmed (or replaced) well before it expires.

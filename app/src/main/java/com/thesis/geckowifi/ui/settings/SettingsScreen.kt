@@ -17,8 +17,6 @@ import com.thesis.geckowifi.ui.EnterpriseController
 import com.thesis.geckowifi.ui.MAX_CHECK_RADIUS_METERS
 import com.thesis.geckowifi.ui.timeText
 import com.thesis.geckowifi.ui.viaDescription
-import android.content.Intent
-import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -48,11 +46,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
-import androidx.core.content.FileProvider
-import com.thesis.geckowifi.di.AppModule
 import com.thesis.geckowifi.ui.SERVER_URL
 import com.thesis.geckowifi.ui.VerificationViewModel
 import com.thesis.geckowifi.ui.components.DetailRow
@@ -69,7 +64,12 @@ import com.thesis.geckowifi.verification.LookupStatus
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(viewModel: VerificationViewModel, onOpenSavedData: () -> Unit = {}) {
+fun SettingsScreen(
+    viewModel: VerificationViewModel,
+    onOpenSavedData: () -> Unit = {},
+    onOpenCheckLog: () -> Unit = {},
+    onOpenMapServerTraffic: () -> Unit = {}
+) {
     Column(Modifier.fillMaxWidth()) {
         TopAppBar(title = { Text("Settings") })
         Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = Space.xxl)) {
@@ -128,7 +128,7 @@ fun SettingsScreen(viewModel: VerificationViewModel, onOpenSavedData: () -> Unit
                 Switch(checked = viewModel.labMode, onCheckedChange = null)
             }
 
-            if (viewModel.labMode) LabSection(viewModel)
+            if (viewModel.labMode) LabSection(viewModel, onOpenCheckLog, onOpenMapServerTraffic)
         }
     }
 }
@@ -148,8 +148,7 @@ private fun ScopeLine(covered: Boolean, text: String) {
 }
 
 @Composable
-private fun LabSection(viewModel: VerificationViewModel) {
-    val context = LocalContext.current
+private fun LabSection(viewModel: VerificationViewModel, onOpenCheckLog: () -> Unit, onOpenMapServerTraffic: () -> Unit) {
     Column(Modifier.padding(horizontal = Space.lg), verticalArrangement = Arrangement.spacedBy(Space.md)) {
         SectionHeader("Lab", Modifier.padding(start = 0.dp))
 
@@ -191,27 +190,26 @@ private fun LabSection(viewModel: VerificationViewModel) {
 
         SectionCard("Check log") {
             Text(
-                "Every check is written as one JSON line with all login-page hops and verdicts.",
+                "Every check is written as one JSON line with all login-page hops and verdicts. The file is what " +
+                    "experiments keep (adb pull, or the dashboard's pull checks); here you can read it and share it.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            OutlinedButton(
-                onClick = {
-                    val file = AppModule.portalCheckLog.latestFile()
-                    if (file == null) {
-                        Toast.makeText(context, "No checks logged yet", Toast.LENGTH_SHORT).show()
-                    } else {
-                        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-                        val share = Intent(Intent.ACTION_SEND).apply {
-                            type = "application/json"
-                            putExtra(Intent.EXTRA_STREAM, uri)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }
-                        context.startActivity(Intent.createChooser(share, "Share check log"))
-                    }
-                },
-                modifier = Modifier.padding(top = Space.md).heightIn(min = 48.dp)
-            ) { Text("Share latest log") }
+            OutlinedButton(onClick = onOpenCheckLog, modifier = Modifier.padding(top = Space.md).heightIn(min = 48.dp)) {
+                Text("Open check log")
+            }
+        }
+
+        SectionCard("Map server traffic") {
+            Text(
+                "The last requests to the map server and its answers, decoded: the cells asked for, the signed map " +
+                    "head, the tree with its typed entries, and the certificates.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            OutlinedButton(onClick = onOpenMapServerTraffic, modifier = Modifier.padding(top = Space.md).heightIn(min = 48.dp)) {
+                Text("Open map server traffic")
+            }
         }
     }
 }

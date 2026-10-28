@@ -67,6 +67,17 @@ class PortalCheckLog(private val dir: File) {
         dir.listFiles { f -> f.name.startsWith("checks-") && f.name.endsWith(".jsonl") }
             ?.maxByOrNull { it.lastModified() }
 
+    /** The logged checks as their JSON lines, newest first, at most [limit] (for the lab screen). */
+    fun recentLines(limit: Int = 200): List<String> =
+        dir.listFiles { f -> f.name.startsWith("checks-") && f.name.endsWith(".jsonl") }
+            .orEmpty()
+            .sortedByDescending { it.name } // checks-<date>.jsonl
+            .asSequence()
+            .flatMap { runCatching { it.readLines() }.getOrDefault(emptyList()).asReversed().asSequence() }
+            .filter { it.isNotBlank() }
+            .take(limit)
+            .toList()
+
     /** Appends [entry]; returns the file written, or null if the directory isn't writable. */
     fun append(entry: CheckEntry): File? {
         val line = json.encodeToString(CheckEntry.serializer(), entry)

@@ -182,6 +182,16 @@ class GeckoClient(
         bitStrings: List<XYBitString>,
         minAltitude: Int,
         maxAltitude: Int
+    ): GeckoResponse {
+        val trace = ExchangeRecorder("lookup", "$baseUrl/v1/query?c")
+        return queryLocation(bitStrings, minAltitude, maxAltitude, trace).also { trace.finish(it.outcome()) }
+    }
+
+    private suspend fun queryLocation(
+        bitStrings: List<XYBitString>,
+        minAltitude: Int,
+        maxAltitude: Int,
+        trace: ExchangeRecorder
     ): GeckoResponse = withContext(Dispatchers.IO) {
         try {
             val publicKey = PinnedServerKey.publicKey
@@ -199,12 +209,15 @@ class GeckoClient(
                 Types = listOf(GeoCertificateFormat.WIFI)
             )
 
+            val requestBytes = ProtoRequest.ADAPTER.encode(protoRequest)
+            trace.request = requestBytes
             val httpRequest = Request.Builder()
                 .url("$baseUrl/v1/query?c") // ?c = include full certificates (of the requested types)
-                .post(ProtoRequest.ADAPTER.encode(protoRequest).toRequestBody(octetStream))
+                .post(requestBytes.toRequestBody(octetStream))
                 .build()
 
             val (rawResponse, usedPreferredNetwork) = executeWithFallback(httpRequest)
+            trace.viaPreferredNetwork = usedPreferredNetwork
             rawResponse.use { httpResponse ->
                 if (!httpResponse.isSuccessful) {
                     return@withContext GeckoResponse.Unreachable("HTTP ${httpResponse.code}")
@@ -214,6 +227,7 @@ class GeckoClient(
                     ?: return@withContext GeckoResponse.Unreachable("empty response body")
                 val bytes = readCapped(body, MAX_ANSWER_BYTES)
                     ?: return@withContext GeckoResponse.Unreachable("answer larger than ${MAX_ANSWER_BYTES / 1_000_000} MB")
+                trace.response = bytes
 
                 val protoResponse = try {
                     ProtoResponse.ADAPTER.decode(bytes)
@@ -287,19 +301,33 @@ class GeckoClient(
      * a replayed full answer (docs/experiments.md, R2), a replayed old map head
      * would pass: freshness of the map head is open either way.
      */
-    suspend fun currentMapHead(): MapHeadAnswer = withContext(Dispatchers.IO) {
-        try {
-            val request = Request.Builder().url("$baseUrl/v1/get-smh").get().build()
-            executeWithFallback(request).first.use { response ->
-                if (!response.isSuccessful) return@withContext MapHeadAnswer.Unreachable("HTTP ${response.code}")
-                val body = response.body ?: return@withContext MapHeadAnswer.Unreachable("empty response body")
-                val bytes = readCapped(body, MAX_MAP_HEAD_BYTES)
-                    ?: return@withContext MapHeadAnswer.Unreachable("map head larger than $MAX_MAP_HEAD_BYTES bytes")
-                mapHeadFrom(bytes, PinnedServerKey.publicKey)
+    suspend fun currentMapHead(): MapHeadAnswer {
+        val trace = ExchangeRecorder("map head", "$baseUrl/v1/get-smh")
+        val answer = withContext(Dispatchers.IO) {
+            try {
+                val request = Request.Builder().url("$baseUrl/v1/get-smh").get().build()
+                val (response, usedPreferredNetwork) = executeWithFallback(request)
+                trace.viaPreferredNetwork = usedPreferredNetwork
+                response.use {
+                    if (!it.isSuccessful) return@withContext MapHeadAnswer.Unreachable("HTTP ${it.code}")
+                    val body = it.body ?: return@withContext MapHeadAnswer.Unreachable("empty response body")
+                    val bytes = readCapped(body, MAX_MAP_HEAD_BYTES)
+                        ?: return@withContext MapHeadAnswer.Unreachable("map head larger than $MAX_MAP_HEAD_BYTES bytes")
+                    trace.response = bytes
+                    mapHeadFrom(bytes, PinnedServerKey.publicKey)
+                }
+            } catch (e: Exception) {
+                MapHeadAnswer.Unreachable(e.message ?: e::class.java.simpleName)
             }
-        } catch (e: Exception) {
-            MapHeadAnswer.Unreachable(e.message ?: e::class.java.simpleName)
         }
+        trace.finish(
+            when (answer) {
+                is MapHeadAnswer.Current -> "OK"
+                is MapHeadAnswer.Unreachable -> "Unreachable: ${answer.cause}"
+                is MapHeadAnswer.ProofFailure -> "Proof failure: ${answer.reason}"
+            }
+        )
+        return answer
     }
 
     /**
@@ -383,6 +411,14 @@ class GeckoClient(
                 }
             }.build()
     }
+}
+
+/** The lab trace's one-line outcome of a lookup (see [MapServerTrace]). */
+private fun GeckoResponse.outcome(): String = when (this) {
+    is GeckoResponse.Success -> "OK, ${certificates.size} WiFi certificate(s)" +
+        if (unparsedCount > 0) ", $unparsedCount unreadable" else ""
+    is GeckoResponse.Unreachable -> "Unreachable: $cause"
+    is GeckoResponse.ProofFailure -> "Proof failure: $cause"
 }
 
 /**

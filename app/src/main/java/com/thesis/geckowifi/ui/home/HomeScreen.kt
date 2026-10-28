@@ -1,5 +1,6 @@
 package com.thesis.geckowifi.ui.home
 
+import com.thesis.geckowifi.verification.isRecentVerdict
 import android.content.Intent
 import android.provider.Settings
 import android.widget.Toast
@@ -290,8 +291,10 @@ private fun ListContext.open(network: ScannedNetwork) {
     }
 }
 
+/** The newest verdict for these access points, if it is recent enough to stand for now ([isRecentVerdict]). */
 private fun ListContext.latestFor(aps: List<ScannedNetwork>): CheckDetail? =
     aps.mapNotNull { viewModel.latestCheckFor(it.bssid ?: it.ssid) }.maxByOrNull { it.result.timestamp }
+        ?.takeIf { isRecentVerdict(it.result.timestamp, java.time.Instant.now()) }
 
 private fun LazyListScope.networkSection(title: String, rows: List<NetworkRow>, registered: Boolean, ctx: ListContext) {
     if (rows.isEmpty()) return

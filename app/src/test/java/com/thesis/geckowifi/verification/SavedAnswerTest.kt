@@ -118,4 +118,14 @@ class SavedAnswerTest {
             here.first, here.second, null, 50, "eth-visitors")
         assertEquals(VerificationState.CONFLICT, wrongKey.overall.state)
     }
+
+    @Test
+    fun aVerdictShowsInTheListOnlyWhileASavedAnswerWouldBeUsed() {
+        val now = java.time.Instant.parse("2026-10-28T10:00:00Z")
+        val at = { ago: java.time.Duration -> now.minus(ago).toEpochMilli() }
+        assertTrue(isRecentVerdict(at(java.time.Duration.ofMinutes(5)), now))
+        assertTrue(isRecentVerdict(at(com.thesis.geckowifi.eduroam.SAVED_REGISTRATION_MAX_AGE), now))
+        assertFalse(isRecentVerdict(at(com.thesis.geckowifi.eduroam.SAVED_REGISTRATION_MAX_AGE.plusMinutes(1)), now))
+        assertFalse(isRecentVerdict(at(java.time.Duration.ofDays(2)), now))
+    }
 }
