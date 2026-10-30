@@ -25,7 +25,7 @@ def main(host: str, port: int, secret: bytes) -> int:
     # PAP password hiding (RFC 2865, 5.2), one 16-byte block is enough for "ping".
     pw = b"ping".ljust(16, b"\0")
     hidden = bytes(a ^ b for a, b in zip(pw, hashlib.md5(secret + req_auth).digest()))
-    attrs = attr(1, b"radius-ping@gecko.sp.test") + attr(2, hidden) + attr(80, b"\0" * 16)
+    attrs = attr(1, b"radius-ping@gecko.ch") + attr(2, hidden) + attr(80, b"\0" * 16)
     packet = bytearray(struct.pack("!BBH", 1, ident, 20 + len(attrs)) + req_auth + attrs)
     packet[-16:] = hmac.new(secret, bytes(packet), hashlib.md5).digest()
 

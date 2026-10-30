@@ -80,10 +80,10 @@ GeoCert, indexed by (federation, realm) instead of location (D19). In a real
 deployment it lives in the map with inclusion proofs. **Shortcut:** a signed
 static endpoint with one lab key stands in for that.
 
-## D7. One CA for onboarding and homeuni.test (**shortcut**, as briefed)
+## D7. One CA for onboarding and uni-wipkingen.ch (**shortcut**, as briefed)
 One FreeRADIUS EAP module serves both identities with one certificate
-(SANs `radius.homeuni.test`, `gecko-onboard.sp.test`), so both pins share
-`GECKO-Lab-CA`. The B2 attacker gets a certificate from the same CA for the
+(SANs `radius-service.uni-wipkingen.ch`, `onboard.gecko.ch`), so both pins share
+`Uni Wipkingen CA`. The B2 attacker gets a certificate from the same CA for the
 onboarding name only: it passes onboarding (the threat model assumes it can)
 and fails the realm pin on the name. In production the onboarding CA would be
 a separate, OS-bundled one.
@@ -106,7 +106,7 @@ be known in advance, and every participating SP must handle it locally.
   network with an anonymous login to fetch credentials; Design A follows the
   pattern with verifiable answers.
 
-**Shortcut:** `gecko@gecko.sp.test` / `gecko` / `gecko-onboard.sp.test` and the
+**Shortcut:** `fetch@gecko.ch` / `gecko` / `onboard.gecko.ch` and the
 lab CA are app constants.
 
 ## D9. Cleartext HTTP stays app-wide
@@ -237,15 +237,15 @@ verified answer for the place, the session is not needed.
   installed profiles stay.
 
 ## D22. The lab has its own federation, `eduroam-lab`
-The lab site certificate and the Home University realm record used to name the
-federation `eduroam`. GECKO then treated the made-up `homeuni.test` as a member
+The lab site certificate and the Uni Wipkingen realm record used to name the
+federation `eduroam`. GECKO then treated the made-up `uni-wipkingen.ch` as a member
 of real eduroam: at ETH (registered with federation `eduroam`), the lab account
-`alice@homeuni.test` matched as a visitor, and GECKO installed a profile for
+`pablo@uni-wipkingen.ch` matched as a visitor, and GECKO installed a profile for
 the real `eduroam` pinned to the lab server. Nothing leaked, since the pin
 would have stopped the handshake, but a lab account must never be offered at a
 production network. The lab now uses `eduroam-lab` everywhere: the site
 certificate `eduroam-lab-sp` (re-registered), the record
-`/v1/realm/eduroam-lab/homeuni.test` (re-signed; the `eduroam/` copy was
+`/v1/realm/eduroam-lab/uni-wipkingen.ch` (re-signed; the `eduroam/` copy was
 deleted). The `govroam` record stays as the second federation for the scoping
 tests. A record the app saved before the rename is still validly signed for
 `eduroam`, so delete the saved data on devices that used the lab before.

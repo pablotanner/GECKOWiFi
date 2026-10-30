@@ -4,9 +4,9 @@
 # small overlay. Never touches /etc/freeradius itself; re-run it any time to
 # rebuild the copies (e.g. after changing this script).
 #
-#   legit        port 1812  GECKO-Lab-CA cert, alice + gecko (VLAN 99, 60 s), both realms local
-#   attacker-b1  port 1814  Rogue-CA cert (scene 2)
-#   attacker-b2  port 1816  GECKO-Lab-CA cert for gecko-onboard.sp.test only (scene 3)
+#   legit        port 1812  Uni Wipkingen CA cert, pablo + gecko (VLAN 99, 60 s), both realms local
+#   attacker-b1  port 1814  Rogue CA cert (scene 2)
+#   attacker-b2  port 1816  Uni Wipkingen CA cert for onboard.gecko.ch only (scene 3)
 #
 # Run inside WSL from the repo: bash lab/eduroam/radius/setup-instances.sh
 set -euo pipefail
@@ -135,16 +135,16 @@ EOF
     printf '%s\n' "$users" > "$dir/mods-config/files/authorize"
 
     # Both realms are handled locally, never proxied. In production only
-    # gecko.<sp-domain> would be local; homeuni.test would be proxied to the
+    # gecko.<sp-domain> would be local; uni-wipkingen.ch would be proxied to the
     # federation (the visitor's home IdP). nostrip: the users file keys on the
     # full user@realm.
     cat >> "$dir/proxy.conf" <<'EOF'
 
 # --- gecko eduroam demo ---
-realm gecko.sp.test {
+realm gecko.ch {
 	nostrip
 }
-realm homeuni.test {
+realm uni-wipkingen.ch {
 	nostrip
 }
 EOF
@@ -157,17 +157,17 @@ LEGIT_USERS=$(cat <<EOF
 # Onboarding identity (Design A, phase 1): public credentials, walled-garden
 # VLAN 99, at most 60 s. Only accepted when it is the outer identity too
 # (policy gecko_inner_check).
-gecko@gecko.sp.test	Cleartext-Password := "gecko"
+fetch@gecko.ch	Cleartext-Password := "gecko"
 	Tunnel-Type = VLAN,
 	Tunnel-Medium-Type = IEEE-802,
 	Tunnel-Private-Group-Id = "99",
 	Session-Timeout = 60
 
-# Test account of the home IdP homeuni.test (normal access).
-alice@homeuni.test	Cleartext-Password := "$ALICE_PASSWORD"
+# Test account of the home IdP uni-wipkingen.ch (normal access).
+pablo@uni-wipkingen.ch	Cleartext-Password := "$TEST_PASSWORD"
 EOF
 )
-build legit radius-legit gecko-lab-ca "$RADIUS_SECRET_A" "$LEGIT_USERS" 1812
+build legit radius-service uni-wipkingen-ca "$RADIUS_SECRET_A" "$LEGIT_USERS" 1812
 
 cat > "$BASE/legit/policy.d/gecko" <<'EOF'
 # The onboarding identity must be the same outside and inside the tunnel. A
@@ -175,10 +175,10 @@ cat > "$BASE/legit/policy.d/gecko" <<'EOF'
 # carry a real inner identity (that would hand the inner exchange to the SP),
 # and the walled garden must not be reachable with a real outer identity.
 gecko_inner_check {
-	if (&outer.request:User-Name == "gecko@gecko.sp.test" && &User-Name != "gecko@gecko.sp.test") {
+	if (&outer.request:User-Name == "fetch@gecko.ch" && &User-Name != "fetch@gecko.ch") {
 		reject
 	}
-	if (&User-Name == "gecko@gecko.sp.test" && &outer.request:User-Name != "gecko@gecko.sp.test") {
+	if (&User-Name == "fetch@gecko.ch" && &outer.request:User-Name != "fetch@gecko.ch") {
 		reject
 	}
 }
@@ -204,9 +204,9 @@ sed -i -E '0,/^authorize \{/s//authorize {\n\tgecko_inner_check/' "$BASE/legit/s
 sed -i -E '0,/^post-auth \{/s//post-auth {\n\tgecko_copy_reply/' "$BASE/legit/sites-enabled/inner-tunnel"
 
 # --- attackers: accept the public GECKO identity, log everything ---
-ATTACKER_USERS='gecko@gecko.sp.test	Cleartext-Password := "gecko"'
+ATTACKER_USERS='fetch@gecko.ch	Cleartext-Password := "gecko"'
 build attacker-b1 radius-rogue rogue-ca "$RADIUS_SECRET_B" "$ATTACKER_USERS" 1814
-build attacker-b2 radius-b2 gecko-lab-ca "$RADIUS_SECRET_B" "$ATTACKER_USERS" 1816
+build attacker-b2 radius-b2 uni-wipkingen-ca "$RADIUS_SECRET_B" "$ATTACKER_USERS" 1816
 
 # --- attacker credential-harvesting overlay (lab only) ----------------------
 # Stock FreeRADIUS validates the inner MSCHAPv2 exchange and throws it away; it
@@ -231,7 +231,7 @@ EOF
 # Capture the inner MSCHAPv2 hash of any identity that is not the public GECKO
 # onboarding identity, in the EAP round where the client sends its response.
 capture_mschap {
-	if (&User-Name != "gecko@gecko.sp.test" && "%{mschap:NT-Response}") {
+	if (&User-Name != "fetch@gecko.ch" && "%{mschap:NT-Response}") {
 		capture_hash
 	}
 }

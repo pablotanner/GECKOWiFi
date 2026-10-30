@@ -169,7 +169,7 @@ bash lab/eduroam/radius/stop.sh all           # stop every instance
 Is everything up? (`404`/`200` = reachable)
 ```powershell
 curl.exe -s -o NUL -w "%{http_code}`n" http://192.168.137.1:1234/                        # map server
-curl.exe -s -o NUL -w "%{http_code}`n" http://192.168.137.1:1235/v1/realm/homeuni.test   # realm server
+curl.exe -s -o NUL -w "%{http_code}`n" http://192.168.137.1:1235/v1/realm/uni-wipkingen.ch   # realm server
 wsl -e pgrep -ax freeradius                                                               # RADIUS instances
 ```
 
@@ -180,7 +180,7 @@ bash lab/eduroam/radius/count-inner.sh $(ls -t ~/gecko-radius/logs/attacker-b1-*
 bash lab/eduroam/radius/test-radius.sh        # all instances up: 11 checks with eapol_test
 ```
 Log files: `~/gecko-radius/logs/<instance>-<time>.log` in WSL. Test password for
-`alice@homeuni.test`: `ALICE_PASSWORD` in `lab-secrets/radius/secrets.env`.
+`pablo@uni-wipkingen.ch`: `TEST_PASSWORD` in `lab-secrets/radius/secrets.env`.
 
 ### eduroam demo: Router A (legit SP)
 ```powershell

@@ -25,7 +25,7 @@ sealed interface PinSource {
         val issuedAt: Instant,
         val expiresAt: Instant,
         val supportUrl: String?,
-        /** The home institution's name, from the record ("Home University"). */
+        /** The home institution's name, from the record ("Uni Wipkingen"). */
         val displayName: String?
     ) : PinSource
 

@@ -44,18 +44,18 @@ Tablet ── eduroam-lab ── Router A (WAN 192.168.137.50) ── laptop 192
 
 | Instance | Port | Server certificate | Accepts |
 |---|---|---|---|
-| legit | 1812 | `GECKO-Lab-CA` → `radius.homeuni.test`, `gecko-onboard.sp.test` | `alice@homeuni.test` (normal access); `gecko@gecko.sp.test` / `gecko` → VLAN 99, Session-Timeout 60, only if outer = inner |
-| attacker-b1 | 1814 | `Rogue-CA` → same names | `gecko` (but no client validates the cert) |
-| attacker-b2 | 1816 | `GECKO-Lab-CA` → `gecko-onboard.sp.test` only | `gecko` (valid onboarding cert: the threat model) |
+| legit | 1812 | `Uni Wipkingen CA` → `radius-service.uni-wipkingen.ch`, `onboard.gecko.ch` | `pablo@uni-wipkingen.ch` (normal access); `fetch@gecko.ch` / `gecko` → VLAN 99, Session-Timeout 60, only if outer = inner |
+| attacker-b1 | 1814 | `Rogue CA` → same names | `gecko` (but no client validates the cert) |
+| attacker-b2 | 1816 | `Uni Wipkingen CA` → `onboard.gecko.ch` only | `gecko` (valid onboarding cert: the threat model) |
 
 Shared secrets: `RADIUS_SECRET_A` (Router A → legit), `RADIUS_SECRET_B` (Router B →
-attackers), in `lab-secrets/radius/secrets.env`, together with `ALICE_PASSWORD`.
+attackers), in `lab-secrets/radius/secrets.env`, together with `TEST_PASSWORD`.
 
 ### App
 
 | Class | Role |
 |---|---|
-| `OnboardingTransport` / `SpecifierOnboardingSession` | Phase 1 session (`WifiNetworkSpecifier`, PEAP-MSCHAPv2 as `gecko@gecko.sp.test`, onboarding CA from `res/raw`, `gecko-onboard.sp.test`); always released |
+| `OnboardingTransport` / `SpecifierOnboardingSession` | Phase 1 session (`WifiNetworkSpecifier`, PEAP-MSCHAPv2 as `fetch@gecko.ch`, onboarding CA from `res/raw`, `onboard.gecko.ch`); always released |
 | `VerificationEngine.checkAdvertisedSite` | Site query over the onboarding network, no fallback route |
 | `RealmRecordClient` | `GET /v1/realm/<realm>` over the onboarding network |
 | `AuthenticatedEapPins` | The only source of pins: verifies a `SignedRealmRecord` (ECDSA P-256, pinned key) or reads a site GeoCert's `aaa` entry; private constructor |
@@ -100,7 +100,7 @@ After a reboot, in this order:
    cd lab\realm; go run . serve -addr 192.168.137.1:1235 -dir ..\..\lab-secrets\realm\signed
    ```
    Re-sign after changing a record or before it expires (365 days):
-   `go run . sign -key ..\..\lab-secrets\realm\realm-signing.key -in records\homeuni.test.json -out ..\..\lab-secrets\realm\signed`
+   `go run . sign -key ..\..\lab-secrets\realm\realm-signing.key -in records\uni-wipkingen.ch.json -out ..\..\lab-secrets\realm\signed`
 6. **Firewall** (once, as administrator): `lab\eduroam\firewall-rules.ps1`
    (UDP 1812/1814/1816, TCP 1235, from `192.168.137.0/24` only).
 
@@ -180,20 +180,20 @@ then commit `lab-configs/` and add a line to `lab-configs/CHANGELOG.md`.
 ## Demo scenes
 
 Before scene 1, remove any manually saved `eduroam-lab` network on the Tab
-(Android prefers a user-saved network over a suggestion), and enter alice's
+(Android prefers a user-saved network over a suggestion), and enter pablo's
 password once in the app (Settings → lab mode → "Set up eduroam-lab", or tap
 `eduroam-lab` in the list).
 
 | Scene | Running | Expected in the app | Evidence |
 |---|---|---|---|
-| 1 Happy path | Router A (`eduroam-lab`), legit RADIUS, map + realm server | All steps ✓, "Connected with pinned profile", pins from "signed realm record" | legit log: `alice@homeuni.test` accepted (`count-inner.sh` on the legit log) |
+| 1 Happy path | Router A (`eduroam-lab`), legit RADIUS, map + realm server | All steps ✓, "Connected with pinned profile", pins from "signed realm record" | legit log: `pablo@uni-wipkingen.ch` accepted (`count-inner.sh` on the legit log) |
 | 2 Rogue cert (B1) | Router B in B1 only, attacker-b1 | Step 1 fails ("server's certificate isn't valid"), "password not sent". If the profile from scene 1 is still installed, Android also tries it against B1 and aborts in TLS | `count-inner.sh <attacker-b1 log>`: no inner credentials |
-| 3 Withholding (B2) | Router B in B2 only, attacker-b2, B blocks 1234/1235 | Onboarding ✓, site "Map server not reachable", realm record missing, "password not sent" | attacker-b2 log: only `gecko@gecko.sp.test` |
-| 4 Baseline | Router B in B1, a **manually** configured `eduroam-lab` profile without CA/domain | Android sends the inner exchange to B1 | `count-inner.sh`: `alice@homeuni.test` + MSCHAPv2 exchange |
+| 3 Withholding (B2) | Router B in B2 only, attacker-b2, B blocks 1234/1235 | Onboarding ✓, site "Map server not reachable", realm record missing, "password not sent" | attacker-b2 log: only `fetch@gecko.ch` |
+| 4 Baseline | Router B in B1, a **manually** configured `eduroam-lab` profile without CA/domain | Android sends the inner exchange to B1 | `count-inner.sh`: `pablo@uni-wipkingen.ch` + MSCHAPv2 exchange |
 
 Scenes 2 and 4 against the attacker's RADIUS, without radios:
 `bash lab/eduroam/radius/b1-evidence.sh` (pinned → no inner credentials;
-unpinned → alice's MSCHAPv2 exchange captured). Verified 2026-10-20.
+unpinned → pablo's MSCHAPv2 exchange captured). Verified 2026-10-20.
 
 Logs: `adb logcat -s OnboardingSession EduroamOnboarding EduroamInstaller GeckoClient`.
 
@@ -204,10 +204,10 @@ genuine `GeckoTest` portal; Router B = `GeckoTest` attacker portal, attacker edu
 sections disabled. Both on vanilla OpenWrt 25.12.6.
 
 **2026-10-21, Router A as the legit SP:** scene 1 again, all steps, connected.
-RADIUS: `gecko@gecko.sp.test` → VLAN 99 / Session-Timeout 60, then
-`anonymous@homeuni.test` (alice) without VLAN. A: `RADIUS: VLAN ID 99`,
+RADIUS: `fetch@gecko.ch` → VLAN 99 / Session-Timeout 60, then
+`anonymous@uni-wipkingen.ch` (pablo) without VLAN. A: `RADIUS: VLAN ID 99`,
 `AP-STA-CONNECTED ... vlanid=99`, walled garden 2 connections to map/realm
-allowed, 2 packets rejected, alice in `edu` (10.98.0.14) 6 s after onboarding.
+allowed, 2 packets rejected, pablo in `edu` (10.98.0.14) 6 s after onboarding.
 Before the test the tablet had already joined A on its own with the profile
 installed on B the day before: one pinned profile works on every AP of the
 network. Evidence: `lab-secrets/evidence/scene1-routerA-legit-20261021.log`.
@@ -222,13 +222,13 @@ demo tolerates it, SSH sometimes needs a retry.
 
 **2026-10-20, Router B as the legit SP** (`lab/eduroam/openwrt/sp-legit.sh`, legit RADIUS :1812):
 
-Scene 1, GECKO app, alice@homeuni.test: all six steps, "connected". App outcome:
+Scene 1, GECKO app, pablo@uni-wipkingen.ch: all six steps, "connected". App outcome:
 site `REGISTERED` (`eduroam-lab-sp`, queried over the onboarding session), no site
-servers for `homeuni.test` (visitor), realm record signature verified (pins
-PEAP/MSCHAPV2, `radius.homeuni.test`), decision Proceed, suggestion installed,
+servers for `uni-wipkingen.ch` (visitor), realm record signature verified (pins
+PEAP/MSCHAPV2, `radius-service.uni-wipkingen.ch`), decision Proceed, suggestion installed,
 `connected=true`. Onboarding join 3.7 s, map query + realm record 0.2 s, about 10 s
-to connected. RADIUS: `gecko@gecko.sp.test` accepted with VLAN 99 /
-Session-Timeout 60, then `anonymous@homeuni.test` (alice) accepted without VLAN;
+to connected. RADIUS: `fetch@gecko.ch` accepted with VLAN 99 /
+Session-Timeout 60, then `anonymous@uni-wipkingen.ch` (pablo) accepted without VLAN;
 the tablet ended up in `br-edu` (10.98.0.14).
 
 Walled garden, negative test (tablet joined by hand with the GECKO identity,
@@ -254,8 +254,8 @@ Open UI point: reopening the setup screen loses the last result (the
 
 | Scene | Tablet | Attacker log (`count-inner.sh`) |
 |---|---|---|
-| 2: GECKO app | Step 1 fails, "Not set up: password not sent" | only `gecko@gecko.sp.test`; **0 inner-tunnel requests**; client sent TLS alert `unknown_ca` (4 attempts) |
-| 4: manual profile, CA "Trust on first use", user taps "Trust" | Connection fails silently | `alice@homeuni.test` in the **inner tunnel** (outer only `anonymous@homeuni.test`), **2 MSCHAPv2 exchanges** captured |
+| 2: GECKO app | Step 1 fails, "Not set up: password not sent" | only `fetch@gecko.ch`; **0 inner-tunnel requests**; client sent TLS alert `unknown_ca` (4 attempts) |
+| 4: manual profile, CA "Trust on first use", user taps "Trust" | Connection fails silently | `pablo@uni-wipkingen.ch` in the **inner tunnel** (outer only `anonymous@uni-wipkingen.ch`), **2 MSCHAPv2 exchanges** captured |
 
 Evidence: `lab-secrets/evidence/scene2+4-attacker-b1-20261020.{log,summary.txt}`.
 
@@ -279,7 +279,7 @@ Things that got in the way, for next time:
 
 - RealmRecord from a signed static endpoint instead of a realm keyspace in the map (D6).
 - One RADIUS certificate with both names, one CA for onboarding and the realm (D7).
-- Both realms handled locally by one FreeRADIUS; in production `homeuni.test` is proxied to the federation.
+- Both realms handled locally by one FreeRADIUS; in production `uni-wipkingen.ch` is proxied to the federation.
 - Onboarding identity, password, server name and CA are app constants (D8).
 - No walled-garden enforcement on the Mangos (no dynamic VLAN); the attributes are still sent.
 - Plain HTTP to map and realm server; integrity from proofs and signatures (D9).

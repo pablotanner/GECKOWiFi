@@ -174,7 +174,7 @@ ssh mango-a "ndsctl json"             # find the client's MAC
 ssh mango-a "ndsctl deauth <mac>"
 ```
 
-The portal certificates are signed by a lab CA (`portal/keys/gecko-lab-ca.crt`).
+The portal certificates are signed by a lab CA (`portal/keys/uni-wipkingen-ca.crt`).
 For it to work on the tablet, you have to manually install it as a CA certificate, otherwise Android's sign-in screen refuses the portal.
 The app itself doesn't need it.
 

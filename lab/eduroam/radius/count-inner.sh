@@ -20,7 +20,7 @@ echo "  $(grep -cE "$START" "$log" || true)"
 
 echo "== inner-tunnel identities other than the public GECKO one =="
 leaked=$(awk -v s="$START" -v e="$END" '$0 ~ s {inner=1} $0 ~ e {inner=0} inner && /User-Name = "/' "$log" \
-    | grep -oE 'User-Name = "[^"]*"' | grep -v 'gecko@gecko.sp.test' | sort | uniq -c || true)
+    | grep -oE 'User-Name = "[^"]*"' | grep -v 'fetch@gecko.ch' | sort | uniq -c || true)
 if [ -z "$leaked" ]; then echo "  none: no inner credentials"; else echo "$leaked"; fi
 
 echo "== inner MSCHAPv2 exchanges of identities other than the public GECKO one (crackable) =="
@@ -28,5 +28,5 @@ awk -v s="$START" -v e="$END" '
     $0 ~ s { inner = 1; user = "" }
     $0 ~ e { inner = 0 }
     inner && match($0, /User-Name = "[^"]*"/) { user = substr($0, RSTART + 13, RLENGTH - 14) }
-    inner && /mschap: Creating challenge hash/ && user != "gecko@gecko.sp.test" { n[user]++ }
+    inner && /mschap: Creating challenge hash/ && user != "fetch@gecko.ch" { n[user]++ }
     END { for (u in n) printf "  %d  %s\n", n[u], u; if (length(n) == 0) print "  none" }' "$log"

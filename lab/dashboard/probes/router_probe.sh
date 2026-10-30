@@ -15,7 +15,7 @@ nslookup connectivitycheck.gstatic.com >/dev/null 2>&1 && echo "dns=1" || echo "
 
 # wget: 0 = 2xx, 8 = HTTP error status (the server answered), anything else = no answer
 wget -q -O /dev/null -T 4 "http://$LAPTOP:1234/" >/dev/null 2>&1; echo "map_rc=$?"
-wget -q -O /dev/null -T 4 "http://$LAPTOP:1235/v1/realm/eduroam-lab/homeuni.test" >/dev/null 2>&1; echo "realm_rc=$?"
+wget -q -O /dev/null -T 4 "http://$LAPTOP:1235/v1/realm/eduroam-lab/uni-wipkingen.ch" >/dev/null 2>&1; echo "realm_rc=$?"
 
 uci show wireless 2>/dev/null | grep -E "^wireless\.[^.]+\.(ssid|disabled|auth_server|auth_port|encryption|network|mode)=" | sed 's/^/uci:/'
 iw dev 2>/dev/null | awk '/Interface/{i=$2} /ssid/{print "iface=" i "," $2}'

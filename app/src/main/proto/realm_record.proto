@@ -9,10 +9,10 @@ package gecko.realm;
 // DEMO SHORTCUT: served signed from a static endpoint (lab/realm), a stand-in
 // for a future realm keyspace in the GECKO map with inclusion proofs.
 message RealmRecord {
-  string realm = 1;                 // "homeuni.test"
+  string realm = 1;                 // "uni-wipkingen.ch"
   string eap_method = 2;            // "PEAP" | "TTLS" | "TLS"
   string phase2 = 3;                // "MSCHAPV2" | "PAP" | ...
-  string outer_identity = 4;        // "anonymous@homeuni.test"
+  string outer_identity = 4;        // "anonymous@uni-wipkingen.ch"
   repeated bytes ca_der = 5;        // raw DER CA certificates
   repeated string server_names = 6; // for setDomainSuffixMatch
   string rcoi = 7;                  // optional, eduroam uses 5A03BA0000 (not used yet)

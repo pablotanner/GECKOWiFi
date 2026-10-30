@@ -28,7 +28,7 @@ When a flow changes in the code, change its diagram in the same commit.
 | Access point | Broadcasts the SSID. Open networks: captive portal (openNDS). Enterprise: 802.1X authenticator in front of RADIUS | Router A genuine, Router B evil twin | |
 | Portal server | Login page of the captive portal (openNDS external FAS) | `192.168.137.10` genuine, `.20` attacker | `portal/` |
 | SP RADIUS | The visited network's RADIUS server. Handles the GECKO identity itself (walled garden) and proxies everyone else by realm | FreeRADIUS `legit` in WSL, through `udp-relay.py` | `lab/eduroam/radius/` |
-| Home RADIUS | The user's home institution's server (realm `homeuni.test`). Checks the password | Same FreeRADIUS as the SP (D7). In eduroam it sits behind federation proxies | |
+| Home RADIUS | The user's home institution's server (realm `uni-wipkingen.ch`). Checks the password | Same FreeRADIUS as the SP (D7). In eduroam it sits behind federation proxies | |
 | Map server | GECKO map: answers "what is registered here" with inclusion proofs and a signed map head | geopki + Trillian, `192.168.137.1:1234` | `GeckoClient`, key in `PinnedServerKey` |
 | Realm-record server | Serves signed realm records: the login-server pins for a realm within a federation | `lab/realm`, `192.168.137.1:1235`, signed offline | `RealmRecordClient`, key in `PinnedRealmKey` |
 
@@ -144,7 +144,7 @@ sequenceDiagram
     participant OS as Android Wi-Fi
     participant AP as Access point
     participant SPR as SP RADIUS
-    participant Home as Home RADIUS<br/>(homeuni.test)
+    participant Home as Home RADIUS<br/>(uni-wipkingen.ch)
     participant Map as Map server
     participant Realm as Realm-record server
 
@@ -155,12 +155,12 @@ sequenceDiagram
 
     rect rgba(70, 130, 220, 0.12)
     Note over App,Realm: Phase 1: onboarding session with the public GECKO identity. Nothing secret is sent
-    App->>OS: requestNetwork: SSID + BSSID, PEAP-MSCHAPv2,<br/>gecko@gecko.sp.test / gecko, onboarding CA,<br/>server name gecko-onboard.sp.test, no INTERNET capability
+    App->>OS: requestNetwork: SSID + BSSID, PEAP-MSCHAPv2,<br/>fetch@gecko.ch / gecko, onboarding CA,<br/>server name onboard.gecko.ch, no INTERNET capability
     OS->>U: Approval dialog (non-root prototype, D1)
     U->>OS: Allow
     OS->>AP: Associate, EAPOL start
-    AP->>SPR: RADIUS Access-Request, outer identity gecko@gecko.sp.test
-    SPR-->>OS: PEAP TLS: certificate for gecko-onboard.sp.test
+    AP->>SPR: RADIUS Access-Request, outer identity fetch@gecko.ch
+    SPR-->>OS: PEAP TLS: certificate for onboard.gecko.ch
     Note over OS: Validates it against the onboarding CA. Required by Android's API,<br/>not a security property: an attacker may hold such a certificate (D8)
     OS->>SPR: Inner MSCHAPv2 with the public password "gecko"
     SPR-->>AP: Access-Accept, VLAN 99, Session-Timeout 60
@@ -171,11 +171,11 @@ sequenceDiagram
     Map-->>App: Certificates + proofs + signed map head
     Note over App: Verify the proofs. Certificates for this SSID, valid and covering the device.<br/>Compare advertised security: REGISTERED / CONFLICT / UNVERIFIED.<br/>Read the site: federation eduroam-lab, local realms (aaa)
     App->>Store: Saved accounts (identity and realm only)
-    Store-->>App: alice@homeuni.test
+    Store-->>App: pablo@uni-wipkingen.ch
     Note over App: Match accounts: realm listed in aaa = local (pins from the GeoCert),<br/>otherwise a visitor of the site's federation (pins from a realm record)
 
     par For each visitor account
-        App->>Realm: GET /v1/realm/eduroam-lab/homeuni.test
+        App->>Realm: GET /v1/realm/eduroam-lab/uni-wipkingen.ch
         Realm-->>App: SignedRealmRecord
         Note over App: Verify: ECDSA P-256 against the pinned realm key, federation = site's,<br/>realm = account's, not expired. Gives the pins: EAP method, CA certificate,<br/>server names, outer identity
     end
@@ -187,14 +187,14 @@ sequenceDiagram
 
     rect rgba(60, 170, 100, 0.14)
     Note over App,Home: Phase 2: real account. The password is released only with authenticated pins (D2)
-    App->>Store: Load alice's password (Keystore)
-    App->>OS: addNetworkSuggestions: PEAP-MSCHAPv2, identity alice@homeuni.test,<br/>outer anonymous@homeuni.test, pinned CA, server name radius.homeuni.test
+    App->>Store: Load pablo's password (Keystore)
+    App->>OS: addNetworkSuggestions: PEAP-MSCHAPv2, identity pablo@uni-wipkingen.ch,<br/>outer anonymous@uni-wipkingen.ch, pinned CA, server name radius-service.uni-wipkingen.ch
     OS->>AP: Associate (Android's own network selection)
-    AP->>SPR: RADIUS Access-Request, outer identity anonymous@homeuni.test
-    SPR->>Home: Proxy by realm homeuni.test
-    Home-->>OS: PEAP TLS: certificate for radius.homeuni.test
+    AP->>SPR: RADIUS Access-Request, outer identity anonymous@uni-wipkingen.ch
+    SPR->>Home: Proxy by realm uni-wipkingen.ch
+    Home-->>OS: PEAP TLS: certificate for radius-service.uni-wipkingen.ch
     Note over OS: Pinned CA and server name must match. Otherwise the handshake<br/>stops here and the inner exchange is never sent
-    OS->>Home: Inner MSCHAPv2 as alice@homeuni.test, inside the TLS tunnel
+    OS->>Home: Inner MSCHAPv2 as pablo@uni-wipkingen.ch, inside the TLS tunnel
     Home-->>SPR: Access-Accept
     SPR-->>AP: Access-Accept (normal VLAN)
     OS-->>App: Connected to eduroam-lab (waits up to 60 s)

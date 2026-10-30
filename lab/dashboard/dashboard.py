@@ -359,7 +359,7 @@ def collect():
         "internet": lambda: tcp_open("1.1.1.1", 443, 3),
         "dns": lambda: bool(socket.getaddrinfo("example.com", 443)),
         "http_map": lambda: http_status(f"http://{LAPTOP_IP}:1234/"),
-        "http_realm": lambda: http_status(f"http://{LAPTOP_IP}:1235/v1/realm/eduroam-lab/homeuni.test"),
+        "http_realm": lambda: http_status(f"http://{LAPTOP_IP}:1235/v1/realm/eduroam-lab/uni-wipkingen.ch"),
         "portal_tcp": lambda: {f"{ip}:{p}": tcp_open(ip, p, 1.5) for ip in (GENUINE_IP, ATTACKER_IP) for p in (80, 443)},
     }
     raw = {}
@@ -664,12 +664,12 @@ def evaluate(raw, state):
         r.check("realm", "Laptop", "Realm server (:1235)", "fail", "Not running: visitors' realm records can't be fetched.",
                 actions=[act("realm.start", "Start realm server", "primary")], needs=["lab_ip"])
     elif hr == 200:
-        r.check("realm", "Laptop", "Realm server (:1235)", "ok", "Serves eduroam-lab/homeuni.test.",
+        r.check("realm", "Laptop", "Realm server (:1235)", "ok", "Serves eduroam-lab/uni-wipkingen.ch.",
                 actions=[act("realm.stop", "Stop", "destructive")])
     else:
         r.check("realm", "Laptop", "Realm server (:1235)", "fail" if hr is None else "warn",
                 "Running, but " + ("doesn't answer on 192.168.137.1:1235 (still compiling, or started before .1 existed)" if hr is None
-                                   else f"eduroam-lab/homeuni.test returns {hr}") + ".",
+                                   else f"eduroam-lab/uni-wipkingen.ch returns {hr}") + ".",
                 actions=[act("realm.restart", "Restart", "primary")], needs=["lab_ip"])
     r.services.append({"id": "realm", "name": "Realm server", "where": "Windows", "check": "realm", "log": "realm"})
     for rec in raw.get("realm_records") or []:

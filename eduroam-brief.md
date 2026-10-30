@@ -32,9 +32,9 @@ Two sessions on the **same SSID**:
 
 ```
 Phase 1 — onboarding session (no secrets involved)
-  App ─WifiNetworkSpecifier(SSID+BSSID, identity gecko@gecko.sp.test, public dummy password,
-                            onboarding CA + domain gecko-onboard.sp.test)──▶ AP (Router A)
-  AP ─RADIUS─▶ FreeRADIUS: identity gecko@gecko.sp.test is handled LOCALLY (never proxied)
+  App ─WifiNetworkSpecifier(SSID+BSSID, identity fetch@gecko.ch, public dummy password,
+                            onboarding CA + domain onboard.gecko.ch)──▶ AP (Router A)
+  AP ─RADIUS─▶ FreeRADIUS: identity fetch@gecko.ch is handled LOCALLY (never proxied)
   FreeRADIUS ─Access-Accept + EAP-Success + VLAN 99 + Session-Timeout 60─▶ AP
   4-way handshake → DHCP on VLAN 99 (walled garden: only the map server is reachable)
   App ─HTTP(S) over that Network object─▶ map server: spatial query + realm-record fetch
@@ -42,7 +42,7 @@ Phase 1 — onboarding session (no secrets involved)
 
 Phase 2 — real session
   App builds WifiEnterpriseConfig from the VERIFIED RealmRecord (CA, server name, outer id, phase 2)
-  App ─WifiNetworkSuggestion(real creds + pins)─▶ AP ─RADIUS─▶ (home IdP realm homeuni.test)
+  App ─WifiNetworkSuggestion(real creds + pins)─▶ AP ─RADIUS─▶ (home IdP realm uni-wipkingen.ch)
   Android enforces the pins → if the server cert is wrong, the password is never sent
 ```
 
@@ -56,7 +56,7 @@ Phase 2 — real session
 
 | Scene | Setup | Expected result |
 |---|---|---|
-| 1. Happy path | Router A only | App: onboarding → `VERIFIED` → connected with pinned profile. FreeRADIUS log: `alice@homeuni.test` accepted. |
+| 1. Happy path | Router A only | App: onboarding → `VERIFIED` → connected with pinned profile. FreeRADIUS log: `pablo@uni-wipkingen.ch` accepted. |
 | 2. Evil twin (rogue cert) | Router B in mode B1 only | Onboarding gives `UNVERIFIED`/`UNRECOGNIZED`; real session never attempted, or aborted at cert check. **Attacker RADIUS log shows zero inner (phase-2) credentials.** This is the key result. |
 | 3. Evil twin withholding | Router B in mode B2 only | Onboarding succeeds at L2 but map server unreachable → `UNVERIFIED`, no credentials sent. |
 | 4. Baseline (optional) | Router B1 + a manually configured, *unpinned* profile in Android Settings | Attacker log *does* capture the inner identity/MSCHAPv2 attempt — the thing the app prevents. |
@@ -69,7 +69,7 @@ Phase 2 — real session
 - **Never broadcast the SSID `eduroam`.** The lab is on ETH campus; real devices would auto-connect and an attacker AP would harvest real credentials. Use **`eduroam-lab`**.
 - Set low TX power on both routers (`option txpower` in `/etc/config/wireless`, e.g. a few dBm).
 - Router B (attacker) radio is **disabled when not actively testing**. Never leave it running unattended.
-- Attacker logs must only ever contain test identities (`alice@homeuni.test`, `gecko@gecko.sp.test`). If anything else ever shows up, stop, disable B, delete those log entries, and tell Pablo.
+- Attacker logs must only ever contain test identities (`pablo@uni-wipkingen.ch`, `fetch@gecko.ch`). If anything else ever shows up, stop, disable B, delete those log entries, and tell Pablo.
 
 ### 4.2 Backups (do this first, every time a phase starts)
 Pablo's biggest worry is breaking router configs by stacking prototypes. Therefore:
@@ -121,29 +121,29 @@ Create a task list and tick it off. Snapshot router configs (§4.2) at the start
 
 ### Phase 1 — Test PKI
 Using `openssl` (script it: `lab-secrets/make-pki.sh`):
-- `GECKO-Lab-CA` (test root).
-- One RADIUS server cert signed by it with SANs **`radius.homeuni.test`** and **`gecko-onboard.sp.test`** (one FreeRADIUS EAP module serves both identities).
-- A **separate** self-signed `Rogue-CA` + rogue RADIUS cert for attacker mode B1.
-- For B2 (withholding attacker), give the attacker a cert that *does* validate for `gecko-onboard.sp.test` (signed by `GECKO-Lab-CA` or a separate "onboarding CA") — this models "the attacker can obtain an onboarding cert", which is the threat model.
+- `Uni Wipkingen CA` (test root).
+- One RADIUS server cert signed by it with SANs **`radius-service.uni-wipkingen.ch`** and **`onboard.gecko.ch`** (one FreeRADIUS EAP module serves both identities).
+- A **separate** self-signed `Rogue CA` + rogue RADIUS cert for attacker mode B1.
+- For B2 (withholding attacker), give the attacker a cert that *does* validate for `onboard.gecko.ch` (signed by `Uni Wipkingen CA` or a separate "onboarding CA") — this models "the attacker can obtain an onboarding cert", which is the threat model.
 - Ed25519 keypair for signing RealmRecords (public key will be pinned in the app).
 - **Done:** script reproducibly generates everything; private keys only in `lab-secrets/`.
 
 ### Phase 2 — FreeRADIUS (legit) on the laptop
 - Install FreeRADIUS 3 in WSL; configure EAP (PEAP-MSCHAPv2 and/or TTLS-PAP; pick one primary — PEAP-MSCHAPv2 is what most eduroam IdPs use and best shows the leak in scene 4).
 - `users`/authorize:
-  - `alice@homeuni.test` (test password) → normal access.
-  - `gecko@gecko.sp.test` with a **public dummy password** (e.g. `gecko`) → reply `Tunnel-Type = VLAN`, `Tunnel-Medium-Type = IEEE-802`, `Tunnel-Private-Group-Id = 99`, `Session-Timeout = 60`. Check that the **inner** identity inside the PEAP/TTLS tunnel is also the gecko identity (don't let a gecko outer identity carry a real inner identity).
-- Both realms handled locally (no proxying). Add a short comment that in production `homeuni.test` would be proxied to the federation and only `gecko.<sp-domain>` is local.
+  - `pablo@uni-wipkingen.ch` (test password) → normal access.
+  - `fetch@gecko.ch` with a **public dummy password** (e.g. `gecko`) → reply `Tunnel-Type = VLAN`, `Tunnel-Medium-Type = IEEE-802`, `Tunnel-Private-Group-Id = 99`, `Session-Timeout = 60`. Check that the **inner** identity inside the PEAP/TTLS tunnel is also the gecko identity (don't let a gecko outer identity carry a real inner identity).
+- Both realms handled locally (no proxying). Add a short comment that in production `uni-wipkingen.ch` would be proxied to the federation and only `gecko.<sp-domain>` is local.
 - Solve UDP reachability from Router A (§5). RADIUS client = Router A's WAN IP, with a shared secret stored in `lab-secrets/`.
 - Second FreeRADIUS instance/virtual server on a **different port** (e.g. 1814/1815) as the **attacker RADIUS** for Router B, using the rogue cert, with verbose logging of everything (`-X` style), so scene 2 can show "zero inner credentials".
 - **Done:** `radtest`/`eapol_test` from WSL succeeds for both identities; attacker instance logs attempts.
 
 ### Phase 3 — Router A as legit SP (ask before each change)
 - New `wifi-iface`: SSID `eduroam-lab`, WPA2-Enterprise (`encryption 'wpa2'`), `server`/`port`/`key` → laptop RADIUS, low txpower.
-- **Done (3a):** the Tab connects with a manually entered, properly pinned `alice@homeuni.test` profile (CA = `GECKO-Lab-CA`, domain `radius.homeuni.test`).
+- **Done (3a):** the Tab connects with a manually entered, properly pinned `pablo@uni-wipkingen.ch` profile (CA = `Uni Wipkingen CA`, domain `radius-service.uni-wipkingen.ch`).
 - **3b — walled-garden VLAN (only if feasible without risky package changes):** dynamic VLAN (`dynamic_vlan`), VLAN 99 bridge/network with its own subnet + DHCP, firewall zone that forwards **only** to the laptop's map-server IP:port (and the realm-record port, if separate), client isolation. Check whether the installed wpad/hostapd build supports dynamic VLAN before proposing any package swap.
 - **Demo fallback if 3b is infeasible:** skip enforcement; the gecko identity gets normal access. The client flow is identical; enforcement is operator-side and orthogonal. Document this clearly as a demo shortcut.
-- **Done (3b):** with `wpa_supplicant`/`wpa_cli` on a Linux client *or* via the app, the gecko identity lands in VLAN 99 and reaches only the map server; alice gets normal access.
+- **Done (3b):** with `wpa_supplicant`/`wpa_cli` on a Linux client *or* via the app, the gecko identity lands in VLAN 99 and reaches only the map server; pablo gets normal access.
 
 ### Phase 4 — Map server side
 - Make the GeoPKI server reachable from the router network (`netsh portproxy` TCP 1234 → WSL; firewall rule).
@@ -151,10 +151,10 @@ Using `openssl` (script it: `lab-secrets/make-pki.sh`):
 - **RealmRecord — demo shortcut, no upstream server changes:** define `RealmRecord` in a shared `.proto`:
   ```proto
   message RealmRecord {
-    string realm = 1;               // "homeuni.test"
+    string realm = 1;               // "uni-wipkingen.ch"
     string eap_method = 2;          // "PEAP" | "TTLS" | "TLS"
     string phase2 = 3;              // "MSCHAPV2" | "PAP" | ...
-    string outer_identity = 4;      // "anonymous@homeuni.test"
+    string outer_identity = 4;      // "anonymous@uni-wipkingen.ch"
     repeated bytes ca_der = 5;      // raw DER CA certs
     repeated string server_names = 6; // for setDomainSuffixMatch
     string rcoi = 7;                // optional, eduroam uses 5A03BA0000
@@ -164,7 +164,7 @@ Using `openssl` (script it: `lab-secrets/make-pki.sh`):
   }
   message SignedRealmRecord { bytes record = 1; bytes signature = 2; } // Ed25519 over `record`
   ```
-  Serve it from a tiny separate endpoint on the laptop (e.g. `GET /v1/realm/homeuni.test`), not inside upstream geopki. Mark it in code/README as a **stand-in for a future realm keyspace in the map** (with inclusion proofs) — an open design question Pablo will settle with his supervisor.
+  Serve it from a tiny separate endpoint on the laptop (e.g. `GET /v1/realm/uni-wipkingen.ch`), not inside upstream geopki. Mark it in code/README as a **stand-in for a future realm keyspace in the map** (with inclusion proofs) — an open design question Pablo will settle with his supervisor.
 - If the map server is plain HTTP, that's acceptable for the demo (integrity comes from proofs/signatures); add an Android `network_security_config` cleartext exception scoped to the lab IP, and note it.
 - **Done:** from the laptop, a spatial query for the lab location returns the site GeoCert with a valid proof; the realm endpoint returns a correctly signed record.
 
@@ -173,7 +173,7 @@ New/changed components (keep the existing root/non-root interface split; this wh
 
 | Component | Responsibility |
 |---|---|
-| `OnboardingSession` (new) | Build `WifiNetworkSpecifier` (SSID + scanned BSSID, `WifiEnterpriseConfig`: gecko identity, dummy password, onboarding CA bundled in `res/raw`, `setDomainSuffixMatch("gecko-onboard.sp.test")`). `NetworkRequest` with `TRANSPORT_WIFI`, **remove** `NET_CAPABILITY_INTERNET`. `requestNetwork` with timeout; on `onAvailable(network)` run the fetches; always release (`unregisterNetworkCallback`) afterwards, including on errors/timeouts. |
+| `OnboardingSession` (new) | Build `WifiNetworkSpecifier` (SSID + scanned BSSID, `WifiEnterpriseConfig`: gecko identity, dummy password, onboarding CA bundled in `res/raw`, `setDomainSuffixMatch("onboard.gecko.ch")`). `NetworkRequest` with `TRANSPORT_WIFI`, **remove** `NET_CAPABILITY_INTERNET`. `requestNetwork` with timeout; on `onAvailable(network)` run the fetches; always release (`unregisterNetworkCallback`) afterwards, including on errors/timeouts. |
 | `GeckoClient` (change) | Accept an injected `SocketFactory` (`network.socketFactory`) so all traffic is bound to the onboarding network. No protocol changes. |
 | `RealmRecordClient` + verifier (new) | Fetch `SignedRealmRecord`, verify Ed25519 signature with pinned public key, check `expires_at`, parse. |
 | `EnterpriseProfileBuilder` (new) | The **only** place where credentials meet an enterprise config. Input: verified RealmRecord + credentials. Output: `WifiNetworkSuggestion` with CA(s), domain suffix match, anonymous identity, phase 2, identity/password. Must refuse (throw) without a verified record. Unit-test the invariant. |
@@ -189,7 +189,7 @@ Android notes:
 
 ### Phase 6 — Router B attacker modes (ask before each change; radio off when idle)
 - **B1:** SSID `eduroam-lab`, WPA2-Enterprise, RADIUS → **attacker** FreeRADIUS instance (rogue cert). No router package changes needed.
-- **B2:** same SSID; RADIUS → an attacker instance that accepts the gecko identity with a cert valid for `gecko-onboard.sp.test`, gives internet, but B's firewall **blocks** the map-server IP/port (and realm endpoint).
+- **B2:** same SSID; RADIUS → an attacker instance that accepts the gecko identity with a cert valid for `onboard.gecko.ch`, gives internet, but B's firewall **blocks** the map-server IP/port (and realm endpoint).
 - Keep B1 and B2 as separate `wifi-iface` sections toggled via `option disabled`.
 - **Done:** scenes 2 and 3 reproduce reliably; scene 4 (optional) shows the leak with an unpinned manual profile.
 

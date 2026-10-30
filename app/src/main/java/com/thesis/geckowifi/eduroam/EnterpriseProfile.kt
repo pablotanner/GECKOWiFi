@@ -17,7 +17,7 @@ class EnterpriseAccount(
     val id: String,
     identity: String,
     password: String,
-    /** Display name of the home provider ("Home University"), if known. */
+    /** Display name of the home provider ("Uni Wipkingen"), if known. */
     val label: String? = null
 ) {
     val identity: String = identity.trim()

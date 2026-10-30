@@ -102,12 +102,12 @@ data class EnterpriseEvidence(
     val account: String? = null,
     val federation: String? = null,
     val operatorName: String? = null,
-    /** "Signed record of Home University in eduroam" / "This network's registration (site-cert)". */
+    /** "Signed record of Uni Wipkingen in eduroam" / "This network's registration (site-cert)". */
     val pinsFrom: String? = null,
     val serverNames: List<String> = emptyList(),
     val caSubjects: List<String> = emptyList(),
     val onboardingFailure: String? = null,
-    /** One line per fitting account: "alice@homeuni.test: server confirmed (eduroam record)". */
+    /** One line per fitting account: "pablo@uni-wipkingen.ch: server confirmed (eduroam record)". */
     val accounts: List<String> = emptyList(),
     /** Step name to milliseconds since the start. */
     val timings: List<Pair<String, Long>> = emptyList()

@@ -29,7 +29,7 @@ private const val TAG = "OnboardingSession"
  * onboarding CA, since a device can't look anything up before joining.
  */
 object OnboardingIdentity {
-    const val IDENTITY = "gecko@gecko.sp.test"
+    const val IDENTITY = "fetch@gecko.ch"
     const val PASSWORD = "gecko" // public on purpose
     /**
      * Android (API 30+) refuses enterprise configs without server validation,
@@ -37,7 +37,7 @@ object OnboardingIdentity {
      * the bundled CA. Its validation exists only for that reason, not for
      * security: an attacker may hold such a certificate too (scene 3).
      */
-    const val SERVER_NAME = "gecko-onboard.sp.test"
+    const val SERVER_NAME = "onboard.gecko.ch"
 
     /**
      * Lab guard: SSIDs the prototype may onboard on. Real eduroam is all around
