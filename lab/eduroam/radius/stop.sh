@@ -3,7 +3,7 @@
 #   lab/eduroam/radius/stop.sh attacker-b1
 #   lab/eduroam/radius/stop.sh all
 set -euo pipefail
-name=${1:?usage: stop.sh legit|attacker-b1|attacker-b2|all}
+name=${1:?usage: stop.sh legit|attacker-b1|attacker-b2|attacker-b3|all}
 # Only real freeradius processes (pgrep -x), matched on their -d directory;
 # "pkill -f" would also hit any shell whose command line mentions the name.
 for pid in $(pgrep -x freeradius || true); do

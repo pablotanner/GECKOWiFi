@@ -8,7 +8,7 @@ dropped: FreeRADIUS sees every packet as coming from the WSL gateway, so this
 relay is where the source check happens.
 
     python lab/eduroam/udp-relay.py                  # defaults below
-    python lab/eduroam/udp-relay.py --ports 1812 1814 1816 --allow 192.168.137.50
+    python lab/eduroam/udp-relay.py --ports 1812 1814 1816 1818 --allow 192.168.137.50
 
 The WSL address is looked up at start (`wsl hostname -I`); restart the relay
 after WSL restarts.
@@ -23,7 +23,7 @@ LISTEN = "192.168.137.1"
 # Router A's WAN. Router B sits behind A, so B's RADIUS traffic arrives NATed
 # from A's WAN address too.
 ALLOW = ["192.168.137.50", "127.0.0.1"]
-PORTS = [1812, 1814, 1816]  # legit, attacker B1, attacker B2 (auth only)
+PORTS = [1812, 1814, 1816, 1818]  # legit, attacker B1, B2, B3 (auth only)
 IDLE_SECONDS = 120
 
 

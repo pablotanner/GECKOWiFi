@@ -46,8 +46,8 @@ ROUTER_A = {"ssh": "mango-a", "wan": "192.168.137.50", "gateway": LAPTOP_IP, "la
 ROUTER_B = {"ssh": "mango-b", "wan": "192.168.8.115", "gateway": "192.168.8.1", "lan": "192.168.247.1", "fas": ATTACKER_IP}
 GEOPKI_DIR = "~/Thesis/geopki-typed"  # map version 2 (typed entries) since 2026-10-27
 GEOPKI_DB = "geopki_ext"
-RELAY_PORTS = (1812, 1814, 1816)
-RADIUS_PORT = {"legit": 1812, "attacker-b1": 1814, "attacker-b2": 1816}
+RELAY_PORTS = (1812, 1814, 1816, 1818)
+RADIUS_PORT = {"legit": 1812, "attacker-b1": 1814, "attacker-b2": 1816, "attacker-b3": 1818}
 FIREWALL_RULES = ["GeoPKI 1234", "GECKO portal 80/443", "GECKO eduroam RADIUS relay", "GECKO eduroam realm server"]
 APP_ID = "com.thesis.geckowifi"
 # Last three octets of the BSSIDs (README: 94:.. GeckoTest, 96:.. eduroam-lab)
@@ -606,11 +606,12 @@ def evaluate(raw, state):
     # B's mode decides which attacker instances are needed
     b_uci = B.get("uci") or {}
     b_mode = "b1" if b_uci.get("eduroam_b1", {}).get("disabled") == "0" else \
+             "b3" if b_uci.get("eduroam_b3", {}).get("disabled") == "0" else \
              "legit" if b_uci.get("eduroam_legit", {}).get("disabled") == "0" else "off"
     for inst, port in RADIUS_PORT.items():
         d = rad.get(inst) or {}
         name = f"FreeRADIUS {inst} (:{port})"
-        needed = inst == "legit" or (inst == "attacker-b1" and b_mode == "b1")
+        needed = inst == "legit" or (inst == "attacker-" + b_mode if b_mode in ("b1", "b3") else False)
         start = act("radius.start", "Start", "primary" if needed else "secondary", arg=inst, sudo=True)
         if not wsl_ok:
             st, summ, acts = "unknown", "WSL didn't answer.", []
@@ -623,7 +624,7 @@ def evaluate(raw, state):
             acts = [act("radius.stop", "Stop", "destructive", arg=inst, sudo=True)]
         else:
             st = "fail" if needed else "off"
-            summ = "Not running." + (" Router B has the B1 access point on: never without its RADIUS instance." if inst == "attacker-b1" and needed else "")
+            summ = "Not running." + (" Router B has this attacker access point on: never without its RADIUS instance." if inst in ("attacker-b1", "attacker-b3") and needed else "")
             acts = [start]
         r.check(f"radius_{inst}", "WSL", name, st, summ, actions=acts, needs=["wsl"])
         r.services.append({"id": f"radius_{inst}", "name": name, "where": "WSL", "check": f"radius_{inst}", "log": f"radius:{inst}"})
@@ -794,10 +795,10 @@ def evaluate(raw, state):
     elif B:
         r.check("router_b_reach", "Router B", "Router B reachable (SSH through A)", "ok", f"Router up {ago(B.get('uptime'))}.")
         router_checks("b", B, ROUTER_B, "Router B")
-        if b_mode == "b1" and not r.ok("relay"):
+        if b_mode in ("b1", "b3") and not r.ok("relay"):
             r.check("router_b_guard", "Router B", "Attacker AP has its backend", "fail",
-                    "B1 is broadcasting eduroam-lab while the relay is down.",
-                    actions=[act("routerb.mode", "Turn B1 off", "destructive", arg="off")])
+                    f"{b_mode.upper()} is broadcasting eduroam-lab while the relay is down.",
+                    actions=[act("routerb.mode", f"Turn {b_mode.upper()} off", "destructive", arg="off")])
 
     # ---------------- tablet
     if "_error" in T:
@@ -1199,11 +1200,24 @@ def routerb_mode(mode):
     rad = ((STATE.raw or {}).get("wsl") or {}).get("radius") or {}
     status = STATE.status or {}
     relay_ok = any(c["id"] == "relay" and c["status"] == "ok" for c in status.get("checks", []))
-    if mode == "b1" and not ((rad.get("attacker-b1") or {}).get("pids") and relay_ok):
-        raise RuntimeError("Refused: start FreeRADIUS attacker-b1 and the relay first (README: never enable an attacker section without them).")
-    vals = {"off": ("1", "1"), "legit": ("0", "1"), "b1": ("1", "0")}[mode]
-    return ssh(ROUTER_B["ssh"], f"uci set wireless.eduroam_legit.disabled={vals[0]}; uci set wireless.eduroam_b1.disabled={vals[1]}; "
-                                "uci commit wireless; wifi reload; sleep 3; iw dev | grep -E 'Interface|ssid'")
+    if mode in ("b1", "b3"):
+        inst = "attacker-" + mode
+        if not ((rad.get(inst) or {}).get("pids") and relay_ok):
+            raise RuntimeError(f"Refused: start FreeRADIUS {inst} and the relay first (README: never enable an attacker section without them).")
+    # disabled flags for (eduroam_legit, eduroam_b1, eduroam_b3)
+    vals = {"off": ("1", "1", "1"), "legit": ("0", "1", "1"), "b1": ("1", "0", "1"), "b3": ("1", "1", "0")}[mode]
+    # eduroam_b3 (EAP-GTC attacker, RADIUS :1818) is cloned from eduroam_b1 the
+    # first time it is needed - same SSID/secret/server, only the auth_port differs.
+    ensure_b3 = ("if ! uci -q get wireless.eduroam_b3 >/dev/null; then "
+                 "uci set wireless.eduroam_b3=wifi-iface; "
+                 "for o in device mode network ssid encryption auth_server auth_secret; do "
+                 "uci set wireless.eduroam_b3.$o=\"$(uci -q get wireless.eduroam_b1.$o)\"; done; "
+                 "uci set wireless.eduroam_b3.auth_port=1818; fi; ")
+    return ssh(ROUTER_B["ssh"], ensure_b3 +
+               f"uci set wireless.eduroam_legit.disabled={vals[0]}; "
+               f"uci set wireless.eduroam_b1.disabled={vals[1]}; "
+               f"uci set wireless.eduroam_b3.disabled={vals[2]}; "
+               "uci commit wireless; wifi reload; sleep 3; iw dev | grep -E 'Interface|ssid'")
 
 
 def scenario_script(name, *args):
@@ -1330,7 +1344,7 @@ ACTIONS = {
                        False, ["a", "b"], "Restart openNDS"),
     "router.deauth": (lambda a: ssh(ROUTER_A["ssh"], f"ndsctl deauth {a}"), False, "mac", "Log the client out (openNDS)"),
     "router.auth": (lambda a: ssh(ROUTER_A["ssh"], f"ndsctl auth {a}"), False, "mac", "Let the client through (openNDS)"),
-    "routerb.mode": (lambda a: routerb_mode(a), False, ["off", "legit", "b1"], "Router B eduroam-lab mode"),
+    "routerb.mode": (lambda a: routerb_mode(a), False, ["off", "legit", "b1", "b3"], "Router B eduroam-lab mode"),
     "scenario.setup": (lambda a: setup_scenario(a), False, SCENARIOS, "Set up scenario"),
     "scenario.reset": (lambda a: reset_scenario(), False, None, "Back to the baseline"),
     "routers.snapshot": (lambda a: run([r"C:\Program Files\Git\bin\bash.exe", "lab/eduroam/pull-router-configs.sh"], timeout=300, cwd=str(REPO))[1],

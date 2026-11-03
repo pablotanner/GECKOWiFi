@@ -12,7 +12,7 @@ export PATH="$PATH:/usr/local/go/bin"
 REPO=$(cd "$(dirname "$0")/../../.." && pwd)
 GEOPKI=${GEOPKI_DIR:-$HOME/Thesis/geopki-typed}
 RADIUS="$HOME/gecko-radius"
-INSTANCES="legit attacker-b1 attacker-b2"
+INSTANCES="legit attacker-b1 attacker-b2 attacker-b3"
 
 cmd=${1:?usage: actions.sh <command> [instance]}
 arg=${2:-}

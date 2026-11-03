@@ -96,11 +96,12 @@
       <div id="router-panels" class="panels"></div>
       <div class="panel">
         <h3>Router B: eduroam-lab</h3>
-        <p class="muted">B1 needs FreeRADIUS attacker-b1 and the relay running; the dashboard refuses otherwise. Keep the radio on only while testing.</p>
+        <p class="muted">B1/B3 need their FreeRADIUS instance and the relay running; the dashboard refuses otherwise. Keep the radio on only while testing. B1 = MSCHAPv2 hash capture; B3 = EAP-GTC plaintext-downgrade test.</p>
         <div class="seg" role="group" aria-label="Router B eduroam-lab mode" id="bmode">
           <button class="seg-btn" data-action="routerb.mode" data-arg="off" aria-pressed="false">Off</button>
           <button class="seg-btn" data-action="routerb.mode" data-arg="legit" aria-pressed="false">Legit SP</button>
           <button class="seg-btn" data-action="routerb.mode" data-arg="b1" aria-pressed="false">Attacker B1</button>
+          <button class="seg-btn" data-action="routerb.mode" data-arg="b3" aria-pressed="false">Attacker B3</button>
         </div>
         <div class="button-row">
           <button class="btn" data-action="routers.snapshot">Snapshot router configs</button>
