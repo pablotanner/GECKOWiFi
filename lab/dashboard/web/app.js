@@ -6,6 +6,7 @@ const POLL_MS = 3000;
 let current = null;
 let jobs = [];
 let pending = null; // action waiting for the sudo password
+const openEditors = new Set(); // router keys whose Wi-Fi editor is expanded, so a re-render keeps it open
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -179,11 +180,58 @@ function renderAddresses(s) {
         <td class="mono">${esc(a.actual)}</td><td>${status(a.status)}</td></tr>`).join("");
 }
 
+const PMF = { "0": "off", "1": "optional", "2": "required" };
+
+// One labelled field for the Wi-Fi editor. data-orig lets the submit handler send only what changed.
+function wifiText(label, opt, value, extra = "") {
+  const cur = value == null ? "" : String(value);
+  return `<label class="wifi-field">${esc(label)}<input type="text" data-opt="${opt}" data-orig="${esc(cur)}" value="${esc(cur)}" ${extra}></label>`;
+}
+function wifiSelect(label, opt, value, options, withDefault) {
+  const cur = value == null ? "" : String(value);
+  const opts = (withDefault ? [["", "(default)"]] : []).concat(options)
+    .map(([v, t]) => `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(t)}</option>`).join("");
+  return `<label class="wifi-field">${esc(label)}<select data-opt="${opt}" data-orig="${esc(cur)}">${opts}</select></label>`;
+}
+
+function wifiEditor(r) {
+  const htModes = ["HT20", "HT40", "HT40+", "HT40-"];
+  const radios = (r.radios || []).map((d) => `
+    <form class="wifi-edit" data-router="${esc(r.key)}" data-section="${esc(d.section)}">
+      <div class="wifi-head"><strong>Radio ${esc(d.section)}</strong> <span class="muted">${esc([d.band, d.enabled ? "" : "disabled"].filter(Boolean).join(" "))}</span></div>
+      <div class="wifi-row">
+        ${wifiText("TX power (dBm)", "txpower", d.txpower, 'inputmode="numeric" size="4"')}
+        ${wifiText("Channel", "channel", d.channel, 'size="4"')}
+        ${wifiSelect("HT mode", "htmode", d.htmode, htModes.map((m) => [m, m]), !htModes.includes(String(d.htmode ?? "")))}
+        ${wifiText("Country", "country", d.country, 'maxlength="2" size="2" style="text-transform:uppercase"')}
+      </div>
+      ${actionSubmit(`Apply to ${d.section}`)}
+    </form>`).join("");
+  const ifaces = r.aps.filter((a) => a.editable).map((a) => `
+    <form class="wifi-edit" data-router="${esc(r.key)}" data-section="${esc(a.section)}">
+      <div class="wifi-head"><strong>${esc(a.section)}</strong> <span class="muted">${esc([a.radius_port ? `RADIUS :${a.radius_port}` : "", a.enabled ? "" : "off"].filter(Boolean).join(" "))}</span></div>
+      <div class="wifi-row">
+        ${wifiText("SSID", "ssid", a.ssid, 'size="14" maxlength="32"')}
+        ${wifiSelect("Encryption", "encryption", a.security, [["wpa2", "WPA2-Ent (802.1X)"], ["wpa3-mixed", "WPA2/WPA3 (both AKMs)"], ["wpa3", "WPA3-Ent (SHA-256)"]], false)}
+        ${wifiSelect("PMF (802.11w)", "ieee80211w", a.pmf, [["0", "0 disabled"], ["1", "1 optional"], ["2", "2 required"]], a.pmf == null)}
+      </div>
+      ${actionSubmit(`Apply to ${a.ssid}`)}
+    </form>`).join("");
+  if (!radios && !ifaces) return "";
+  return `<details class="wifi-editor" data-router="${esc(r.key)}" ${openEditors.has(r.key) ? "open" : ""}><summary>Edit Wi-Fi (radio &amp; eduroam APs)</summary>
+    <p class="muted">Applied with <code>wifi reload</code>. SSH runs over the cable, so this never drops your access. Turn APs on/off with the mode buttons below, not here. Only changed fields are sent.</p>
+    ${radios}${ifaces}</details>`;
+}
+
+function actionSubmit(label) {
+  return `<button class="btn btn-primary" type="submit"><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg><span>${esc(label)}</span></button>`;
+}
+
 function renderRouters(s) {
   $("#router-panels").innerHTML = s.routers.map((r) => {
     if (r.error) return `<div class="panel"><h3>${esc(r.name)}</h3>${status("fail", "Not reachable")}<p class="detail">${esc(r.error)}</p></div>`;
     const aps = r.aps.map((a) => `<li>${status(a.enabled ? "ok" : "off", a.enabled ? "On" : "Off")}
-      <span><strong>${esc(a.ssid)}</strong> <span class="muted">${esc(a.section)}, ${esc(a.security || "?")}${a.radius_port ? `, RADIUS :${esc(a.radius_port)}` : ""}</span></span></li>`).join("");
+      <span><strong>${esc(a.ssid)}</strong> <span class="muted">${esc(a.section)}, ${esc(a.security || "?")}${a.pmf != null ? `, PMF ${esc(PMF[a.pmf] || a.pmf)}` : ""}${a.radius_port ? `, RADIUS :${esc(a.radius_port)}` : ""}</span></span></li>`).join("");
     const clients = (r.nds_clients || []).map((c) => `<li><code>${esc(c.ip)}</code> <span class="muted">${esc(c.mac)}</span> ${esc(c.state)}
       ${r.key === "a" ? actionButton({ action: c.state === "Authenticated" ? "router.deauth" : "router.auth", arg: c.mac,
         label: c.state === "Authenticated" ? "Log out" : "Let through", kind: "secondary" }) : ""}</li>`).join("") || "<li class=\"muted\">No clients</li>";
@@ -191,6 +239,7 @@ function renderRouters(s) {
     return `<div class="panel">
       <h3>${esc(r.name)} <span class="muted">up ${esc(r.uptime)}</span></h3>
       <ul class="list">${aps}</ul>
+      ${wifiEditor(r)}
       <h3>openNDS clients</h3><ul class="list">${clients}</ul>
       <dl class="facts">
         <dt>Portal (FAS)</dt><dd>${esc(r.fas)}</dd>
@@ -294,7 +343,8 @@ async function poll() {
       // Re-render only when something changed, so focus and open details survive.
       const sig = JSON.stringify([data.status.time, data.collecting, jobs.map((j) => [j.id, j.status, j.output.length])]);
       current = data;
-      if (sig !== lastSig) {
+      // Don't redraw mid-edit: it would wipe half-typed Wi-Fi fields. Next poll redraws once focus leaves.
+      if (sig !== lastSig && !document.activeElement?.closest("form.wifi-edit")) {
         const focused = document.activeElement?.closest("[data-action],[data-log]");
         const key = focused ? `${focused.dataset.action || ""}|${focused.dataset.arg || ""}|${focused.dataset.log || ""}` : null;
         render();
@@ -357,6 +407,26 @@ async function showLog(name) {
   $("#log-text").textContent = data.text || "(empty)";
   $("#log-text").scrollTop = $("#log-text").scrollHeight;
 }
+
+document.addEventListener("toggle", (ev) => {
+  const d = ev.target.closest("details.wifi-editor");
+  if (!d || !d.dataset.router) return;
+  if (d.open) openEditors.add(d.dataset.router); else openEditors.delete(d.dataset.router);
+}, true);
+
+document.addEventListener("submit", (ev) => {
+  const form = ev.target.closest("form.wifi-edit");
+  if (!form) return;
+  ev.preventDefault();
+  const changes = {};
+  form.querySelectorAll("[data-opt]").forEach((el) => {
+    let val = el.value.trim();
+    if (el.dataset.opt === "country") val = val.toUpperCase();
+    if (val !== "" && val !== (el.dataset.orig ?? "")) changes[el.dataset.opt] = val;
+  });
+  if (!Object.keys(changes).length) { toast("No changes to apply."); return; }
+  runAction("router.wifi", { router: form.dataset.router, section: form.dataset.section, changes });
+});
 
 document.addEventListener("click", async (ev) => {
   const logBtn = ev.target.closest("[data-log]");

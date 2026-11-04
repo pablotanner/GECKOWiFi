@@ -416,3 +416,18 @@ main section:last-child { padding-block-end: var(--space-12); }
   .problems { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .problems > .problem:first-child { grid-column: 1 / -1; }
 }
+
+/* Wi-Fi editor (router panels) */
+.wifi-editor { margin-block: var(--space-3); border: var(--line) solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-2) var(--space-3); background: var(--color-surface-sunken); }
+.wifi-editor > summary { cursor: pointer; font-weight: var(--weight-medium); font-size: var(--text-sm); }
+.wifi-editor > p.muted { font-size: var(--text-xs); margin-block: var(--space-2); }
+.wifi-edit { margin-block-start: var(--space-3); padding-block-start: var(--space-3); border-block-start: var(--line) solid var(--color-border); }
+.wifi-edit:first-of-type { border-block-start: 0; }
+.wifi-head { font-size: var(--text-sm); margin-block-end: var(--space-2); }
+.wifi-row { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-block-end: var(--space-2); }
+.wifi-field { display: flex; flex-direction: column; gap: var(--space-1); font-size: var(--text-xs); color: var(--color-text-muted); }
+.wifi-field input, .wifi-field select {
+  min-height: var(--target); padding: var(--space-1) var(--space-2); font-size: var(--text-sm); color: var(--color-text);
+  border: var(--line) solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface);
+}
+.wifi-field input:focus-visible, .wifi-field select:focus-visible { outline: var(--focus-ring) solid var(--color-focus); outline-offset: var(--focus-offset); }

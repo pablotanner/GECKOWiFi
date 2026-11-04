@@ -17,7 +17,9 @@ nslookup connectivitycheck.gstatic.com >/dev/null 2>&1 && echo "dns=1" || echo "
 wget -q -O /dev/null -T 4 "http://$LAPTOP:1234/" >/dev/null 2>&1; echo "map_rc=$?"
 wget -q -O /dev/null -T 4 "http://$LAPTOP:1235/v1/realm/eduroam-lab/uni-wipkingen.ch" >/dev/null 2>&1; echo "realm_rc=$?"
 
-uci show wireless 2>/dev/null | grep -E "^wireless\.[^.]+\.(ssid|disabled|auth_server|auth_port|encryption|network|mode)=" | sed 's/^/uci:/'
+uci show wireless 2>/dev/null | grep -E "^wireless\.[^.]+\.(ssid|disabled|auth_server|auth_port|encryption|network|mode|ieee80211w|device|channel|txpower|htmode|country|band|hwmode)=" | sed 's/^/uci:/'
+# Section types, so the dashboard can tell a radio (wifi-device: channel/txpower) from an AP (wifi-iface: ssid/encryption).
+uci show wireless 2>/dev/null | awk -F= '/=(wifi-device|wifi-iface)$/{print "uci:" $1 "._type=" $2}'
 iw dev 2>/dev/null | awk '/Interface/{i=$2} /ssid/{print "iface=" i "," $2}'
 for i in $(iw dev 2>/dev/null | awk '/Interface/{print $2}'); do
     echo "stations=$i,$(iw dev "$i" station dump 2>/dev/null | grep -c '^Station')"

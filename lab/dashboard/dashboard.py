@@ -933,13 +933,21 @@ def build_status(raw, state):
         if not R or "_error" in R:
             routers.append({"key": key, "name": label, "error": (R or {}).get("_error") or "not checked"})
             continue
-        aps = []
+        aps, radios = [], []
         for sec, u in (R.get("uci") or {}).items():
-            if u.get("ssid"):
+            is_radio = u.get("_type") == "wifi-device" or (u.get("channel") and not u.get("ssid"))
+            if is_radio:
+                radios.append({"section": sec, "channel": u.get("channel"), "txpower": u.get("txpower"),
+                               "htmode": u.get("htmode"), "country": u.get("country"),
+                               "band": u.get("band") or u.get("hwmode"), "enabled": u.get("disabled", "0") != "1"})
+            elif u.get("ssid"):
                 aps.append({"section": sec, "ssid": u["ssid"], "enabled": u.get("disabled", "0") != "1",
-                            "security": u.get("encryption"), "radius_port": u.get("auth_port"), "network": u.get("network")})
+                            "security": u.get("encryption"), "pmf": u.get("ieee80211w"), "device": u.get("device"),
+                            "radius_port": u.get("auth_port"), "network": u.get("network"),
+                            # Only the enterprise (eduroam) APs get the SSID/encryption/PMF editor.
+                            "editable": u.get("encryption") in ("wpa2", "wpa3", "wpa3-mixed")})
         routers.append({
-            "key": key, "name": label, "uptime": ago(R.get("uptime")), "aps": aps,
+            "key": key, "name": label, "uptime": ago(R.get("uptime")), "aps": aps, "radios": radios,
             "nds_clients": R.get("nds_clients"), "dns_overrides": R.get("dns_overrides"), "leases": R.get("leases"),
             "s7_block": R.get("s7_block") == "1", "garden": [R.get("garden_allowed"), R.get("garden_rejected")],
             "fas": f"{R.get('fas_fqdn')} at {R.get('fas_ip')}", "eap_last": R.get("eap_last"),
@@ -1220,6 +1228,56 @@ def routerb_mode(mode):
                "uci commit wireless; wifi reload; sleep 3; iw dev | grep -E 'Interface|ssid'")
 
 
+# Wi-Fi editor (router.wifi): change the radio and eduroam AP settings over SSH.
+# SSH to the routers runs over the cable/LAN, not Wi-Fi, so `wifi reload` never
+# cuts the management path. Enabling/disabling an AP stays with routerb.mode
+# (it guards the attacker backend); this only edits the fields of a section.
+WIFI_IFACE_OPTS = {
+    "ssid": lambda v: bool(re.fullmatch(r"[A-Za-z0-9 ._-]{1,32}", v)),
+    "encryption": lambda v: v in ("wpa2", "wpa3", "wpa3-mixed"),
+    "ieee80211w": lambda v: v in ("0", "1", "2"),
+}
+WIFI_RADIO_OPTS = {
+    "channel": lambda v: v == "auto" or (v.isdigit() and 1 <= int(v) <= 14),
+    "txpower": lambda v: v.isdigit() and 0 <= int(v) <= 30,
+    "htmode": lambda v: v in ("HT20", "HT40", "HT40+", "HT40-"),
+    "country": lambda v: bool(re.fullmatch(r"[A-Z]{2}", v)),
+}
+WIFI_OPTS = {**WIFI_IFACE_OPTS, **WIFI_RADIO_OPTS}
+
+
+def valid_wifi(arg):
+    if not isinstance(arg, dict) or arg.get("router") not in ("a", "b"):
+        return False
+    if not re.fullmatch(r"[A-Za-z0-9_]{1,32}", str(arg.get("section") or "")):
+        return False
+    changes = arg.get("changes")
+    if not isinstance(changes, dict) or not changes:
+        return False
+    return all(k in WIFI_OPTS and isinstance(v, (str, int)) and WIFI_OPTS[k](str(v)) for k, v in changes.items())
+
+
+def router_wifi(arg):
+    router, section, changes = arg["router"], arg["section"], arg["changes"]
+    R = (STATE.raw or {}).get({"a": "routerA", "b": "routerB"}[router]) or {}
+    u = (R.get("uci") or {}).get(section)
+    if u is None:
+        raise RuntimeError(f"no wireless section '{section}' on Router {router.upper()} (re-check the routers first)")
+    stype = u.get("_type")
+    allowed = WIFI_IFACE_OPTS if stype == "wifi-iface" else WIFI_RADIO_OPTS if stype == "wifi-device" else {}
+    cmds = []
+    for opt, val in changes.items():
+        val = str(val)
+        if opt not in allowed or not allowed[opt](val):  # values already checked in valid_wifi; this enforces the section type
+            raise RuntimeError(f"{opt}={val!r} is not allowed on {section} ({stype or 'unknown type'})")
+        cmds.append(f"uci set wireless.{section}.{opt}='{val}'")
+    host = {"a": ROUTER_A, "b": ROUTER_B}[router]["ssh"]
+    script = ("set -e; " + "; ".join(cmds) + "; uci commit wireless; wifi reload; sleep 3; "
+              "echo '--- hostapd now ---'; grep -hE 'ssid=|wpa_key_mgmt|ieee80211w|wpa_pairwise' /var/run/hostapd-*.conf 2>/dev/null; "
+              "echo '--- iw dev ---'; iw dev 2>/dev/null | grep -E 'Interface|ssid|channel'")
+    return ssh(host, script, timeout=45)
+
+
 def scenario_script(name, *args):
     rc, out = run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(REPO / "lab" / "scenarios" / name), *args],
                   timeout=120, cwd=str(REPO / "lab" / "scenarios"))
@@ -1345,6 +1403,7 @@ ACTIONS = {
     "router.deauth": (lambda a: ssh(ROUTER_A["ssh"], f"ndsctl deauth {a}"), False, "mac", "Log the client out (openNDS)"),
     "router.auth": (lambda a: ssh(ROUTER_A["ssh"], f"ndsctl auth {a}"), False, "mac", "Let the client through (openNDS)"),
     "routerb.mode": (lambda a: routerb_mode(a), False, ["off", "legit", "b1", "b3"], "Router B eduroam-lab mode"),
+    "router.wifi": (lambda a: router_wifi(a), False, "wifi", "Set Wi-Fi options"),
     "scenario.setup": (lambda a: setup_scenario(a), False, SCENARIOS, "Set up scenario"),
     "scenario.reset": (lambda a: reset_scenario(), False, None, "Back to the baseline"),
     "routers.snapshot": (lambda a: run([r"C:\Program Files\Git\bin\bash.exe", "lab/eduroam/pull-router-configs.sh"], timeout=300, cwd=str(REPO))[1],
@@ -1371,6 +1430,8 @@ def valid_arg(spec, arg):
         return bool(re.fullmatch(r"[0-9a-f]{2}(:[0-9a-f]{2}){5}", arg or ""))
     if spec == "digits":
         return bool(re.fullmatch(r"\d+", arg or ""))
+    if spec == "wifi":
+        return valid_wifi(arg)
     return arg in spec
 
 
@@ -1380,7 +1441,9 @@ def start_job(name, arg):
         needs_sudo = needs_sudo_for_start_lab()
     if needs_sudo and not STATE.sudo:
         raise NeedSudo()
-    job = {"id": secrets.token_hex(4), "action": name, "arg": arg, "label": label + (f" ({arg})" if arg else ""),
+    arg_label = arg if isinstance(arg, str) else \
+        (f"{(arg.get('router') or '').upper()} {arg.get('section') or ''}".strip() if isinstance(arg, dict) else "")
+    job = {"id": secrets.token_hex(4), "action": name, "arg": arg, "label": label + (f" ({arg_label})" if arg_label else ""),
            "status": "running", "output": "", "started": time.time(), "ended": None}
     STATE.jobs.appendleft(job)
 
