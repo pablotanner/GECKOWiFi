@@ -1,5 +1,6 @@
 [
   {
+    "version": 1,
     "certificate_id": "mango-a",
     "domain": "gecko-a.lab",
     "areas": [

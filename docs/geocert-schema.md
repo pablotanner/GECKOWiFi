@@ -47,6 +47,7 @@ bytes, so both sides must read the same bytes the same way.
 
 ```json
 {
+  "version": 1,
   "certificate_id": "ethz-zentrum-eduroam-2026a",
   "domain": "ethz.ch",
   "areas": [{ "type": "MultiPolygon", "coordinates": [[[[8.515,47.360], ...]], []] }],
@@ -86,14 +87,15 @@ hashes for the demo entries), [`lab/certs/ethz-eduroam.json`](../lab/certs/ethz-
 
 ### Core (geopki)
 
-| Field | Required | Meaning |
-|---|---|---|
-| `certificate_id` | yes | Unique per issuance |
-| `domain` | yes | Registrant the authority bound this claim to (a verified domain). Certificates with the same domain belong to one operator |
-| `areas`, `areas_altitude` | yes | Unchanged from upstream geopki, see *Areas* |
-| `not_valid_before` | no | RFC 3339, UTC with `Z`. Absent = valid from issuance |
-| `not_valid_after` | yes | RFC 3339, UTC with `Z` |
-| `critical` | no | See rule 2. WiFi certificates: `["wifi"]` |
+| Field | Required | Meaning                                                                                                                     |
+|---|---|-----------------------------------------------------------------------------------------------------------------------------|
+| `version` | yes | Core certificate format version. Server rejects unknown versions.                                                           |
+| `certificate_id` | yes | Unique per issuance                                                                                                         |
+| `domain` | yes | Registrant the authority bound this claim to (a verified domain). Certificates with the same domain belong to one operator  |
+| `areas`, `areas_altitude` | yes | Unchanged from upstream geopki, see *Areas*                                                                                 |
+| `not_valid_before` | no | RFC 3339, UTC with `Z`. Absent = valid from issuance                                                                        |
+| `not_valid_after` | yes | RFC 3339, UTC with `Z`                                                                                                      |
+| `critical` | no | See rule 2. WiFi certificates: `["wifi"]`                                                                                   |
 | `extensions` | no | Name to content. The network is `extensions.wifi`; a certificate without it isn't a WiFi certificate and the app ignores it |
 
 ### `extensions.wifi`
@@ -181,7 +183,8 @@ the switch and letting the old one expire.
 Not enforced by the client, assumed by it:
 
 - Reject on insert (implemented, `pkg/extension/wifi` and the core's
-  `CheckStructure`): unknown/duplicate/miscased keys in the extension;
+  `CheckStructure`): a core `version` that isn't the supported one (missing =
+  `0`, also rejected); unknown/duplicate/miscased keys in the extension;
   enterprise modes without an `enterprise` block and the reverse; a server
   entry without pins; `ca_spki_sha256` without `names`; a federation `aaa`
   entry without `realms`; a portal domain without pins; missing areas or
@@ -200,7 +203,7 @@ app's `GeoCertificate` still has this shape (saved data uses it);
 
 | Flat v3 | Extension format |
 |---|---|
-| `schema_version: 3` | `extensions.wifi.version: 1` |
+| `schema_version: 3` | core `version: 1` + `extensions.wifi.version: 1` |
 | `subject.id` | `domain` |
 | `subject.name` | `extensions.wifi.operator` |
 | `wifi.*` | `extensions.wifi.*` |

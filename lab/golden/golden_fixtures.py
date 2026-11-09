@@ -31,7 +31,7 @@ def wifi(ssid):
 
 
 def cert(cid, domain, areas, alts, extensions, valid_until="2030-01-01T00:00:00Z"):
-    c = {"certificate_id": f"synth-golden-{cid}", "domain": domain,
+    c = {"version": 1, "certificate_id": f"synth-golden-{cid}", "domain": domain,
          "areas": areas, "areas_altitude": alts, "not_valid_after": valid_until,
          "extensions": extensions}
     if "wifi" in extensions:

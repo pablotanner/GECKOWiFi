@@ -110,6 +110,7 @@ def other_extension(kind: str, n: int, size: int, rng) -> dict:
 
 def certificate(cert_id: str, n: int, area: dict, low: float, high: float, extensions: dict) -> dict:
     cert = {
+        "version": 1,
         "certificate_id": cert_id,
         "domain": f"synth-{n}.example",
         "areas": [area],

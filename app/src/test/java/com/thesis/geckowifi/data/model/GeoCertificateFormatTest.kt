@@ -22,7 +22,7 @@ class GeoCertificateFormatTest {
     private val area = """"areas":[{"type":"MultiPolygon","coordinates":[[[[8.5,47.3],[8.6,47.3],[8.6,47.4],[8.5,47.4],[8.5,47.3]]],[]]}],"areas_altitude":[[0,500]],"not_valid_after":"2030-01-01T00:00:00Z""""
 
     private fun wifiCert(wifi: String, critical: String = """["wifi"]""") =
-        """{"certificate_id":"c","domain":"cafe.example",$area,"critical":$critical,"extensions":{"wifi":$wifi}}"""
+        """{"version":1,"certificate_id":"c","domain":"cafe.example",$area,"critical":$critical,"extensions":{"wifi":$wifi}}"""
 
     /** Every certificate of a lab/certs file, as the server stores them (the file is an insertion request). */
     private fun labCertificates(file: String): List<String> =
@@ -77,7 +77,7 @@ class GeoCertificateFormatTest {
     @Test
     fun otherCriticalExtension_makesTheCertificateUnevaluable() {
         val cert = GeoCertificateFormat.decode(json,
-            """{"certificate_id":"c","domain":"cafe.example",$area,"critical":["wifi","future"],
+            """{"version":1,"certificate_id":"c","domain":"cafe.example",$area,"critical":["wifi","future"],
                "extensions":{"wifi":{"version":1,"ssid":"Cafe","auth_modes":["open"]},"future":{}}}""")!!
 
         assertEquals(listOf("future"), cert.critical)
@@ -97,11 +97,31 @@ class GeoCertificateFormatTest {
         }
     }
 
+    /** A WiFi certificate of an unknown core version is unreadable (like an unknown wifi version). */
+    @Test
+    fun otherCertificateVersion_isRejected() {
+        assertThrows(IllegalArgumentException::class.java) {
+            GeoCertificateFormat.decode(json,
+                """{"version":2,"certificate_id":"c","domain":"cafe.example",$area,"critical":["wifi"],
+                   "extensions":{"wifi":{"version":1,"ssid":"Cafe","auth_modes":["open"]}}}""")
+        }
+    }
+
+    /** A core without the required version field reads as version 0, so it is rejected too. */
+    @Test
+    fun missingCertificateVersion_isRejected() {
+        assertThrows(IllegalArgumentException::class.java) {
+            GeoCertificateFormat.decode(json,
+                """{"certificate_id":"c","domain":"cafe.example",$area,"critical":["wifi"],
+                   "extensions":{"wifi":{"version":1,"ssid":"Cafe","auth_modes":["open"]}}}""")
+        }
+    }
+
     /** The client is lenient: fields it doesn't know (a newer server or issuer) are ignored. */
     @Test
     fun unknownFields_areIgnored() {
         val cert = GeoCertificateFormat.decode(json,
-            """{"certificate_id":"c","domain":"cafe.example",$area,"new_core_field":1,"critical":["wifi"],
+            """{"version":1,"certificate_id":"c","domain":"cafe.example",$area,"new_core_field":1,"critical":["wifi"],
                "extensions":{"wifi":{"version":1,"ssid":"Cafe","auth_modes":["open","wpa4"],"new_wifi_field":true}}}""")!!
 
         assertEquals("Cafe", cert.wifi.ssid)

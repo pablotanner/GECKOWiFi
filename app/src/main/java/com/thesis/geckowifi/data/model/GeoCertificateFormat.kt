@@ -22,8 +22,17 @@ object GeoCertificateFormat {
     /** The version of the wifi extension this client reads. */
     const val WIFI_VERSION = 1
 
+    /**
+     * The version of the core certificate format this client reads (geopki's
+     * `crypto.CertificateVersion`). It versions the core fields, independently
+     * of the wifi extension's own [WIFI_VERSION]; a WiFi certificate of any
+     * other core version is treated as unreadable.
+     */
+    const val CERTIFICATE_VERSION = 1
+
     @Serializable
     private data class Wire(
+        val version: Int = 0,
         @SerialName("certificate_id") val certificateId: String,
         val domain: String = "",
         val areas: List<GeoCertArea> = emptyList(),
@@ -59,6 +68,11 @@ object GeoCertificateFormat {
     fun decode(json: Json, text: String): GeoCertificate? {
         val wire = json.decodeFromString(Wire.serializer(), text)
         val raw = wire.extensions[WIFI] ?: return null
+        // Only enforced for certificates this client uses (WiFi ones): a
+        // certificate of another kind is ignored whatever its core version.
+        require(wire.version == CERTIFICATE_VERSION) {
+            "certificate version ${wire.version}, this client reads $CERTIFICATE_VERSION"
+        }
         val wifi = json.decodeFromJsonElement(WifiExtension.serializer(), raw)
         require(wifi.version == WIFI_VERSION) {
             "wifi extension version ${wifi.version}, this client reads $WIFI_VERSION"

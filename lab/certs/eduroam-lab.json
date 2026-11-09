@@ -1,5 +1,6 @@
 [
   {
+    "version": 1,
     "certificate_id": "eduroam-lab-sp",
     "domain": "sp.test",
     "areas": [

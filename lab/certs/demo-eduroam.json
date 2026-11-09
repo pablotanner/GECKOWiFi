@@ -1,5 +1,6 @@
 [
   {
+    "version": 1,
     "certificate_id": "demo-eduroam-ethz",
     "domain": "ethz.ch",
     "areas": [
