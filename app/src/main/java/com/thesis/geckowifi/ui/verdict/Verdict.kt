@@ -100,14 +100,25 @@ fun CheckDetail.verdict(): Verdict {
             },
             Icons.Outlined.GppBad
         )
-        VerificationState.REGISTERED -> if (enterprise != null) Verdict(
-            Tone.NEUTRAL, "Set up", "$name is set up",
-            if (failure == CheckFailure.ANDROID_STAYED)
+        VerificationState.REGISTERED -> if (enterprise != null) when (failure) {
+            CheckFailure.AUTH_NOT_COMPLETED -> Verdict(
+                Tone.NEUTRAL, "Caution", "Couldn't sign in to $name",
+                "The verified profile is installed, but sign-in didn't complete. GECKO cannot read the server's certificates (without Root) and cannot determine if this is an imitation or the genuine $name that just failed." +
+                    "Treat $name with caution. Your password was not sent.",
+                Icons.Outlined.GppMaybe
+            )
+            CheckFailure.ANDROID_STAYED -> Verdict(
+                Tone.NEUTRAL, "Set up", "$name is set up",
                 "The profile is installed, but Android stayed on the network you were on: it doesn't leave a working network by itself. " +
-                    "Tap $name in Wi-Fi settings to switch. Your password only goes to the verified login server."
-            else "The profile is installed. Android joins it on its own; your password only goes to the verified login server.",
-            Icons.Outlined.GppMaybe
-        ) else Verdict(
+                    "Tap $name in Wi-Fi settings to switch. Your credentials are protected from being leaked.",
+                Icons.Outlined.GppMaybe
+            )
+            else -> Verdict(
+                Tone.NEUTRAL, "Set up", "$name is set up",
+                "The profile is installed and Android joins it on its own. Your credentials are protected from being leaked.",
+                Icons.Outlined.GppMaybe
+            )
+        } else Verdict(
             Tone.NEUTRAL, "Registered", "$name is registered here",
             when {
                 result.reason?.contains("visitor") == true ->
@@ -150,6 +161,7 @@ fun CheckDetail.verdict(): Verdict {
             )
             // Only recorded with REGISTERED (above); here for exhaustiveness.
             CheckFailure.ANDROID_STAYED,
+            CheckFailure.AUTH_NOT_COMPLETED,
             CheckFailure.ONBOARDING_FAILED -> Verdict(
                 Tone.NEUTRAL, "Not connected", "GECKO couldn't check $name",
                 "The check connection was declined, the network was out of range, or it doesn't support GECKO. Try again, or join it in Android's settings.",

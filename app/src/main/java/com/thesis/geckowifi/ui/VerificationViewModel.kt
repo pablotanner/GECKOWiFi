@@ -90,7 +90,17 @@ enum class CheckFailure {
      * Enterprise: the pinned profile is installed, but the device stayed on another Wi-Fi network; Android
      * doesn't switch from a working network to a suggested one by itself (docs/eduroam-decisions.md, D27).
      */
-    ANDROID_STAYED
+    ANDROID_STAYED,
+    /**
+     * Enterprise: the pinned profile is installed and an access point for the SSID is in range, yet sign-in
+     * did not complete within the connect timeout. A genuine network lets the pinned profile authenticate
+     * against the registered login server; an impostor that cannot present that server fails the same way,
+     * before any password is sent. Without root GECKO cannot read the server certificate to tell the two
+     * apart (docs/eduroam-decisions.md, D1), so this is a caution surfaced as a NEUTRAL verdict, never a
+     * CONFLICT (which stays reserved for proof). Distinguished from the plain "not joined yet" case only by
+     * the SSID still being in range.
+     */
+    AUTH_NOT_COMPLETED
 }
 
 /**
@@ -1154,6 +1164,14 @@ class VerificationViewModel(
      * D20) like any other check: status card, History, warning on attack signs.
      * The connection is the device's own (a suggestion), so `joined = false`.
      */
+    /**
+     * Whether an access point for [ssid] is in the latest scan - a non-root "the network is here right now"
+     * signal, used to tell a refused sign-in apart from a network simply out of range (see
+     * [CheckFailure.AUTH_NOT_COMPLETED]).
+     */
+    private fun ssidInRange(ssid: String): Boolean =
+        scannedNetworks.filterIsInstance<ScannedNetwork.Real>().any { it.ssid.equals(ssid, ignoreCase = true) }
+
     private fun recordEnterprise(run: EnterpriseRun) {
         val decision = run.decision
         val pins = (decision as? Decision.Proceed)?.pins
@@ -1171,9 +1189,16 @@ class VerificationViewModel(
             else -> {
                 // Android doesn't leave a working network for a suggestion by itself (D27).
                 val stayedOn = deviceSsid?.takeUnless { it.equals(run.target.ssid, ignoreCase = true) }
-                if (stayedOn != null) Triple(VerificationState.REGISTERED, CheckFailure.ANDROID_STAYED,
-                    "pinned profile installed; Android stayed on $stayedOn")
-                else Triple(VerificationState.REGISTERED, null, "pinned profile installed; Android hasn't joined it yet")
+                when {
+                    stayedOn != null -> Triple(VerificationState.REGISTERED, CheckFailure.ANDROID_STAYED,
+                        "pinned profile installed; Android stayed on $stayedOn")
+                    // In range but never authenticated: the AP answering for this SSID did not let the pinned
+                    // profile in. Consistent with an impostor that can't present the registered login server,
+                    // but not proof of one (see CheckFailure.AUTH_NOT_COMPLETED) - the password was never sent.
+                    ssidInRange(run.target.ssid) -> Triple(VerificationState.REGISTERED, CheckFailure.AUTH_NOT_COMPLETED,
+                        "pinned profile installed; ${run.target.ssid} is in range but sign-in did not complete")
+                    else -> Triple(VerificationState.REGISTERED, null, "pinned profile installed; Android hasn't joined it yet")
+                }
             }
         }
         val result = VerificationResult(
