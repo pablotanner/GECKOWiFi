@@ -102,6 +102,12 @@ fun HomeScreen(
         }
         .toMap()
     val rows = buildRows(viewModel.scannedNetworks)
+    // Real SSIDs that resolve to more than one row (same name, different security types, e.g.
+    // WPA2- vs WPA3-Enterprise eduroam-lab): their rows need the security type to be told apart.
+    val duplicatedSsids = rows
+        .filter { it.primary is ScannedNetwork.Real }
+        .groupingBy { it.primary.ssid.lowercase() }.eachCount()
+        .filterValues { it > 1 }.keys
     val busy = viewModel.activeCheck != null
 
     // The registered network whose registration sheet is open, if any.
@@ -117,6 +123,7 @@ fun HomeScreen(
         busy = busy,
         registrantOf = { ssid -> registrants[ssid.lowercase()] },
         federationOf = { ssid -> federations[ssid.lowercase()] },
+        isDuplicateSsid = { ssid -> ssid.lowercase() in duplicatedSsids },
         onShowRegistration = { sheetFor = it },
         onOpenCheck = onOpenCheck,
         onAndroidSettings = { network ->
@@ -261,6 +268,8 @@ private class ListContext(
     val busy: Boolean,
     val registrantOf: (ssid: String) -> String?,
     val federationOf: (ssid: String) -> String?,
+    /** Whether this SSID appears in more than one row, so its rows need the security type to disambiguate. */
+    val isDuplicateSsid: (ssid: String) -> Boolean,
     val onShowRegistration: (ScannedNetwork.Real) -> Unit,
     val onOpenCheck: (String) -> Unit,
     val onAndroidSettings: (ScannedNetwork.Real) -> Unit,
@@ -451,11 +460,20 @@ private fun supportingText(row: NetworkRow, ctx: ListContext, registered: Boolea
             ctx.viewModel.labMode && n.isOpen && row.accessPoints.size == 1 ->
                 listOfNotNull(n.bssid, n.channel?.let { "ch $it" }, n.rssi.takeIf { it != Int.MIN_VALUE }?.let { "$it dBm" })
                     .joinToString("  ")
-            else -> listOfNotNull(
-                n.kind(ctx.federationOf(n.ssid)),
-                if (registered) ctx.registrantOf(n.ssid) else null,
-                row.accessPoints.size.takeIf { ctx.viewModel.labMode && it > 1 }?.let { "$it access points" }
-            ).joinToString(" · ")
+            else -> {
+                // When the same SSID has several rows (e.g. WPA2- vs WPA3-Enterprise eduroam-lab),
+                // the kind alone ("eduroam" / "Enterprise") is identical on each, so lead with the
+                // exact security type - from the scan, so it works even before any registration is
+                // fetched. Not a duplicate: unchanged, to keep the common row uncluttered.
+                val dup = ctx.isDuplicateSsid(n.ssid)
+                val federation = ctx.federationOf(n.ssid)
+                listOfNotNull(
+                    if (dup) n.authModes.securityNames() else n.kind(federation),
+                    federation.takeIf { dup && n.isEnterprise },
+                    if (registered) ctx.registrantOf(n.ssid) else null,
+                    row.accessPoints.size.takeIf { ctx.viewModel.labMode && it > 1 }?.let { "$it access points" }
+                ).joinToString(" · ")
+            }
         }
         if (connected) "Connected · $base" else base
     }
