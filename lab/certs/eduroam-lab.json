@@ -33,7 +33,8 @@
         "operator": "GECKO Lab SP",
         "ssid": "eduroam-lab",
         "auth_modes": [
-          "wpa2-enterprise"
+          "wpa2-enterprise",
+          "wpa3-enterprise"
         ],
         "enterprise": {
           "federation": "eduroam-lab",
