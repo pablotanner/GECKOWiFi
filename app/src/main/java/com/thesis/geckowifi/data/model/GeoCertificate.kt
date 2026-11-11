@@ -22,12 +22,33 @@ enum class WiFiAuthMode(val wire: String) {
     WPA3_ENTERPRISE("wpa3-enterprise"),
     WPA3_ENTERPRISE_192("wpa3-enterprise-192");
 
+    /** What a client joins with. Modes compare by strength (enum order) only within one family. */
+    enum class Family { NONE, SHARED_KEY, ENTERPRISE }
+
+    val family: Family
+        get() = when (this) {
+            OPEN, OWE -> Family.NONE
+            WEP, WPA2_PERSONAL, WPA3_PERSONAL -> Family.SHARED_KEY
+            WPA2_ENTERPRISE, WPA3_ENTERPRISE, WPA3_ENTERPRISE_192 -> Family.ENTERPRISE
+        }
+
     val isEnterprise: Boolean
-        get() = this == WPA2_ENTERPRISE || this == WPA3_ENTERPRISE || this == WPA3_ENTERPRISE_192
+        get() = family == Family.ENTERPRISE
 
     companion object {
         fun fromWire(value: String): WiFiAuthMode? = entries.firstOrNull { it.wire == value }
     }
+}
+
+/**
+ * What an access point claims before anyone connects (unauthenticated): the
+ * modes a client could end up in, and whether it requires PMF (null = unknown,
+ * e.g. a demo network). Compared with a GeoCert by [WiFiIdentity.permits].
+ */
+data class AdvertisedSecurity(val modes: Set<WiFiAuthMode>, val pmfRequired: Boolean? = null) {
+    /** For reasons and logs: `wpa2-personal, wpa3-personal`, plus `PMF optional` when it is. */
+    val wire: String
+        get() = modes.sorted().joinToString { it.wire } + if (pmfRequired == false) " (PMF optional)" else ""
 }
 
 /** Who the registration authority bound this certificate to (design decision 2). */
@@ -50,7 +71,7 @@ data class WiFiIdentity(
     @SerialName("ssid_shared") val ssidShared: Boolean = false,
     /** Wire names as registered; see [authModes]. Empty for v2 certificates, which had a single `auth_mode`. */
     @SerialName("auth_modes") val authModeNames: List<String> = emptyList(),
-    /** "optional" / "required"; null = unspecified. Parsed, not yet compared (scan results don't reliably report PMF). */
+    /** "optional" / "required"; null = unspecified. "required" is compared with the access point's MFPR bit. */
     val pmf: String? = null,
     val enterprise: EnterpriseIdentity? = null
 ) {
@@ -58,19 +79,36 @@ data class WiFiIdentity(
     val authModes: Set<WiFiAuthMode>
         get() = authModeNames.mapNotNull(WiFiAuthMode::fromWire).toSet()
 
+    /** Registered modes and PMF requirement, for reasons and logs. */
+    val wire: String
+        get() = authModeNames.joinToString() + if (pmf == "required") " (PMF required)" else ""
+
     /**
-     * Every mode the network advertises must be registered, and a registered
-     * WPA3-Personal must be offered: a transition network offers WPA3 on every
-     * access point, so one offering only WPA2 is the downgrade an attacker uses
-     * to capture a crackable handshake. WPA3 alone stays fine (6 GHz access
-     * points can't offer WPA2). Enterprise isn't held to this: the pinned server
-     * protects the password whatever the mode, and federations mix older access
-     * points. Unknown registered names never match.
+     * Whether what an access point advertises fits this registration (scenario A1):
+     *
+     * 1. Same kind of network: an open or personal network on an enterprise
+     *    SSID is not the registered one.
+     * 2. Its floor (weakest mode a client can be held to) is no weaker than the
+     *    weakest registered mode of that kind. Stronger is fine: an upgrade
+     *    takes nothing from the client.
+     * 3. It offers the strongest registered mode. A transition network offers
+     *    WPA3 (or OWE) on every access point, so one offering only WPA2 (or open)
+     *    is the downgrade an attacker uses, e.g. to capture a crackable handshake.
+     *    Enterprise is deliberately exempt: the pinned login server protects the
+     *    password whatever the mode, and federations mix older access points, so
+     *    a WPA2-only AP on a WPA2+WPA3 registration passes. Rule 2 still holds:
+     *    a WPA2-capable AP on a WPA3-only registration does not.
+     * 4. A registered `pmf: required` must be required by the access point.
+     *
+     * Unknown registered names never match. Nothing recognised advertised
+     * ([AdvertisedSecurity.modes] empty) contradicts nothing.
      */
-    fun permits(observed: Set<WiFiAuthMode>): Boolean {
-        val downgraded = WiFiAuthMode.WPA3_PERSONAL in authModes &&
-            WiFiAuthMode.WPA2_PERSONAL in observed && WiFiAuthMode.WPA3_PERSONAL !in observed
-        return observed.all { it in authModes } && !downgraded
+    fun permits(observed: AdvertisedSecurity): Boolean {
+        val floor = observed.modes.minOrNull() ?: return true
+        val sameKind = authModes.filter { it.family == floor.family }
+        if (sameKind.isEmpty() || floor < sameKind.min()) return false
+        if (floor.family != WiFiAuthMode.Family.ENTERPRISE && observed.modes.max() < sameKind.max()) return false
+        return !(pmf == "required" && observed.pmfRequired == false)
     }
 }
 

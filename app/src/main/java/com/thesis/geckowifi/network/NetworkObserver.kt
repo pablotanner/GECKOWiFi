@@ -11,6 +11,7 @@ import android.net.MacAddress
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.net.wifi.ScanResult
 import android.net.wifi.WifiManager
 import android.net.wifi.WifiNetworkSpecifier
 import android.os.Build
@@ -57,12 +58,22 @@ class NetworkObserver(private val context: Context) {
             ScannedNetwork.Real(
                 ssid = it.SSID?.takeIf { s -> s.isNotBlank() } ?: "(hidden)",
                 bssid = it.BSSID,
-                capabilities = it.capabilities ?: "",
+                profile = securityProfile(it),
                 frequencyMhz = it.frequency,
                 rssi = it.level,
                 securityTypes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) it.securityTypes.toList() else emptyList()
             )
         }
+
+    /** From the raw elements (API 30+); the capability string only when there are none. */
+    private fun securityProfile(scan: ScanResult): RsnProfile {
+        val capabilities = scan.capabilities.orEmpty()
+        val ies = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) scan.informationElements.map { ie ->
+            ie.id to ByteArray(ie.bytes.remaining()).also { ie.bytes.duplicate().get(it) }
+        } else emptyList()
+        return if (ies.isEmpty()) RsnProfile.fromCapabilities(capabilities)
+        else RsnProfile.fromIes(ies, wep = "[WEP]" in capabilities)
+    }
 
     /**
      * Asks for a fresh scan and calls [onResults] (main thread) once it

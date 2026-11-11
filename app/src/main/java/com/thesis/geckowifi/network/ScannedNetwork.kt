@@ -24,7 +24,8 @@ sealed class ScannedNetwork {
     data class Real(
         override val ssid: String,
         override val bssid: String?,
-        val capabilities: String,
+        /** What the access point claims in its beacon (unauthenticated); see [RsnProfile]. */
+        val profile: RsnProfile,
         val frequencyMhz: Int = 0,
         /** Signal strength in dBm (higher = stronger). */
         val rssi: Int = Int.MIN_VALUE,
@@ -36,13 +37,12 @@ sealed class ScannedNetwork {
          */
         val securityTypes: List<Int> = emptyList()
     ) : ScannedNetwork() {
-        /** No WPA/WPA2/WPA3/WEP/802.1X in the scan's capability string - nothing to authenticate with. */
-        val isOpen: Boolean
-            get() = listOf("WPA", "RSN", "SAE", "WEP", "EAP", "OWE").none { capabilities.contains(it) }
+        /** Every mode a client could end up in with this AP ([admissibleModes]), compared with the registered `auth_modes`. */
+        val authModes: Set<WiFiAuthMode> = profile.admissibleModes()
 
-        /** What the access point advertises, compared with the registered `auth_modes`. */
-        val authModes: Set<WiFiAuthMode>
-            get() = parseAuthModes(capabilities)
+        /** Nothing to authenticate with (an OWE transition AP's open side included). */
+        val isOpen: Boolean
+            get() = WiFiAuthMode.OPEN in authModes
 
         /** 802.1X (WPA2/WPA3-Enterprise): joined with an account, e.g. eduroam. */
         val isEnterprise: Boolean
@@ -58,16 +58,6 @@ sealed class ScannedNetwork {
         val requiresWpa3EnterpriseSpecifier: Boolean
             get() = WifiInfo.SECURITY_TYPE_EAP_WPA3_ENTERPRISE in securityTypes &&
                 WifiInfo.SECURITY_TYPE_EAP !in securityTypes
-
-        /** Short security label for list rows, instead of the raw capability string. */
-        val securityLabel: String
-            get() = when {
-                isOpen -> "Open"
-                "EAP" in capabilities -> "Enterprise"
-                "SAE" in capabilities -> "WPA3"
-                "WEP" in capabilities -> "WEP"
-                else -> "WPA2"
-            }
 
         /** IEEE channel number derived from [frequencyMhz], or null if unknown. */
         val channel: Int?
