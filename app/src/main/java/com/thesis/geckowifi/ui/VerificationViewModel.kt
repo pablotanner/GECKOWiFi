@@ -100,13 +100,7 @@ enum class CheckFailure {
      * CONFLICT (which stays reserved for proof). Distinguished from the plain "not joined yet" case only by
      * the SSID still being in range.
      */
-    AUTH_NOT_COMPLETED,
-    /**
-     * Enterprise: recorded on the access point the user tapped when Android joined another access point
-     * of the same SSID (the pinned profile is a suggestion for the whole SSID, so Android picks the AP).
-     * The result belongs to the AP that was joined and is recorded there; this one wasn't checked.
-     */
-    OTHER_AP_JOINED
+    AUTH_NOT_COMPLETED
 }
 
 /**
@@ -1248,14 +1242,9 @@ class VerificationViewModel(
             DataSource.Onboarding -> "Fetched live over GECKO's check connection to ${run.target.ssid}"
             is DataSource.Saved -> "Saved registration from ${timeText(src.fetchedAt)}, fetched over ${src.via}"
         }
-        // The result belongs to the access point Android actually joined, which need not be the tapped one.
-        val resultBssid = joined?.bssid ?: run.target.bssid
-        if (resultBssid != null && run.target.bssid != null && !resultBssid.equals(run.target.bssid, ignoreCase = true)) {
-            publish(run.target.ssid, run.target.bssid, run.target.bssid,
-                VerificationResult(VerificationState.REGISTERED, run.target.ssid,
-                    reason = "Android joined $resultBssid of ${run.target.ssid} instead; this access point wasn't checked"),
-                run.fix, failure = CheckFailure.OTHER_AP_JOINED, isEnterprise = true, enterprise = evidence)
-        }
+        // The pinned profile is a suggestion for the whole SSID, so Android picks the access point: the result
+        // belongs to the one actually joined, not necessarily the tapped one. Joined but unknown which: no row.
+        val resultBssid = joined?.bssid ?: run.target.bssid.takeUnless { run.connected }
         publish(run.target.ssid, resultBssid, resultBssid ?: run.target.ssid, result, run.fix,
             modeDescription = when (run.report.source) {
                 DataSource.Onboarding -> "Enterprise network: GECKO onboarding, then a profile pinned to the verified login server"
