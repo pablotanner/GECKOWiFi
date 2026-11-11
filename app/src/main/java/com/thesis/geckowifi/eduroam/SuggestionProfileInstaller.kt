@@ -56,7 +56,7 @@ class SuggestionProfileInstaller(context: Context) : EnterpriseProfileInstaller 
         val suggestion = try {
             WifiNetworkSuggestion.Builder()
                 .setSsid(plan.ssid)
-                .apply { if (plan.wpa3) setWpa3EnterpriseConfig(config) else setWpa2EnterpriseConfig(config) }
+                .apply { setEnterpriseConfig(plan.wpa3, config) }
                 .build()
         } catch (e: IllegalArgumentException) {
             // Android rejects enterprise configs without CA + domain (API 30+), among others.

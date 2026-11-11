@@ -8,6 +8,7 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.wifi.WifiEnterpriseConfig
 import android.net.wifi.WifiNetworkSpecifier
+import android.os.Build
 import android.util.Log
 import com.thesis.geckowifi.R
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -101,7 +102,7 @@ class SpecifierOnboardingSession(private val context: Context) : OnboardingTrans
         val specifier = WifiNetworkSpecifier.Builder()
             .setSsid(target.ssid)
             .apply { target.bssid?.let { setBssid(MacAddress.fromString(it)) } }
-            .apply { if (target.wpa3) setWpa3EnterpriseConfig(enterprise) else setWpa2EnterpriseConfig(enterprise) }
+            .apply { setEnterpriseConfig(target.wpa3, enterprise) }
             .build()
         val request = NetworkRequest.Builder()
             .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)

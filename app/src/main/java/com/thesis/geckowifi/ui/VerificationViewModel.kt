@@ -820,7 +820,8 @@ class VerificationViewModel(
         }
         // Android serves one app-requested network at a time; a portal check may still hold one.
         networkObserver.leave()
-        controller.start(EnterpriseTarget(network.ssid, network.bssid, network.authModes), fix,
+        controller.start(EnterpriseTarget(network.ssid, network.bssid, network.authModes,
+            wpa3 = network.requiresWpa3EnterpriseSpecifier), fix,
             QueryArea(fix.latitude, fix.longitude, effectiveRadius(fix)))
     }
 

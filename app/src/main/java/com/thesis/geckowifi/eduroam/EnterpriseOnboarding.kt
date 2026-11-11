@@ -23,11 +23,19 @@ enum class EnterpriseStep {
 /** Device location for the site query. */
 data class QueryArea(val lat: Double, val lng: Double, val radiusMeters: Int)
 
-/** An access point of the target SSID, from the scan. */
-data class EnterpriseTarget(val ssid: String, val bssid: String?, val authModes: Set<WiFiAuthMode>) {
-    val wpa3: Boolean get() = WiFiAuthMode.WPA2_ENTERPRISE !in authModes &&
-        (WiFiAuthMode.WPA3_ENTERPRISE in authModes || WiFiAuthMode.WPA3_ENTERPRISE_192 in authModes)
-}
+/**
+ * An access point of the target SSID, from the scan. [wpa3] drives the Wi-Fi security type of the
+ * onboarding specifier and the pinned suggestion, and is true only for a WPA3-Enterprise-*only* AP
+ * (see [com.thesis.geckowifi.network.isWpa3EnterpriseOnly]); a WPA2/WPA3 transition AP is false, so
+ * it is matched by the WPA2-Enterprise specifier Android expects for it. [authModes] (from
+ * [com.thesis.geckowifi.network.parseAuthModes]) still drives the site/verdict comparison.
+ */
+data class EnterpriseTarget(
+    val ssid: String,
+    val bssid: String?,
+    val authModes: Set<WiFiAuthMode>,
+    val wpa3: Boolean = false
+)
 
 /** What the onboarding session found out (phase 1); no secret was involved. */
 data class OnboardingReport(

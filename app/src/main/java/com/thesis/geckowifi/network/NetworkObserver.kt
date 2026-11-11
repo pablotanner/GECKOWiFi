@@ -13,6 +13,7 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.wifi.WifiManager
 import android.net.wifi.WifiNetworkSpecifier
+import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresPermission
 import androidx.core.content.ContextCompat
@@ -58,7 +59,8 @@ class NetworkObserver(private val context: Context) {
                 bssid = it.BSSID,
                 capabilities = it.capabilities ?: "",
                 frequencyMhz = it.frequency,
-                rssi = it.level
+                rssi = it.level,
+                securityTypes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) it.securityTypes.toList() else emptyList()
             )
         }
 
