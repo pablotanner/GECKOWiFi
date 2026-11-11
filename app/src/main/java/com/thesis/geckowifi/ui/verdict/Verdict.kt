@@ -44,7 +44,7 @@ val CheckDetail.scopeNote: String get() = if (enterprise != null) ENTERPRISE_SCO
 
 fun CheckDetail.conflictCause(): ConflictCause? {
     if (result.state != VerificationState.CONFLICT) return null
-    if (result.reason?.contains("network advertises") == true) return ConflictCause.AUTH_MODE
+    if (result.reason?.contains("network advertises") == true || result.reason?.startsWith("negotiated ") == true) return ConflictCause.AUTH_MODE
     if (isEnterprise) return ConflictCause.ENTERPRISE
     // A successful map-server answer always attaches its metadata; a CONFLICT without it is a failed proof.
     if (result.certificateCount == null) return ConflictCause.PROOF_FAILED
@@ -101,6 +101,12 @@ fun CheckDetail.verdict(): Verdict {
             Icons.Outlined.GppBad
         )
         VerificationState.REGISTERED -> if (enterprise != null) when (failure) {
+            CheckFailure.OTHER_AP_JOINED -> Verdict(
+                Tone.NEUTRAL, "Not checked", "Android joined another $name",
+                "Android picks which access point of $name to join, and it chose a different one than this. " +
+                    "The result belongs to that access point; this one wasn't checked.",
+                Icons.Outlined.GppMaybe
+            )
             CheckFailure.AUTH_NOT_COMPLETED -> Verdict(
                 Tone.NEUTRAL, "Caution", "Couldn't sign in to $name",
                 "The verified profile is installed, but sign-in didn't complete. GECKO cannot read the server's certificates (without Root) and cannot determine if this is an imitation or the genuine $name that just failed." +
@@ -162,6 +168,7 @@ fun CheckDetail.verdict(): Verdict {
             // Only recorded with REGISTERED (above); here for exhaustiveness.
             CheckFailure.ANDROID_STAYED,
             CheckFailure.AUTH_NOT_COMPLETED,
+            CheckFailure.OTHER_AP_JOINED,
             CheckFailure.ONBOARDING_FAILED -> Verdict(
                 Tone.NEUTRAL, "Not connected", "GECKO couldn't check $name",
                 "The check connection was declined, the network was out of range, or it doesn't support GECKO. Try again, or join it in Android's settings.",

@@ -4,8 +4,11 @@ import android.net.Network
 import android.os.Build
 import com.thesis.geckowifi.data.model.VerificationResult
 import com.thesis.geckowifi.data.model.AdvertisedSecurity
+import com.thesis.geckowifi.network.Association
+import com.thesis.geckowifi.network.AssociationSource
 import com.thesis.geckowifi.network.RsnProfile
 import com.thesis.geckowifi.network.admissibleModes
+import com.thesis.geckowifi.network.negotiatedFits
 import com.thesis.geckowifi.verification.VerificationEngine
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -52,7 +55,18 @@ data class OnboardingReport(
     val fetchedRecords: Map<Pair<String, String>, ByteArray> = emptyMap()
 )
 
-data class ConnectOutcome(val install: InstallOutcome, val connected: Boolean?)
+data class ConnectOutcome(
+    val install: InstallOutcome,
+    val connected: Boolean?,
+    /**
+     * The access point and mode actually negotiated, read after connecting. The pinned
+     * profile is a suggestion for the whole SSID, so Android picks the access point itself:
+     * it need not be the target. Null if not connected or unknown.
+     */
+    val joined: Association? = null,
+    /** Set when the negotiated mode was weaker than registered; the profile was removed again. */
+    val downgrade: String? = null
+)
 
 /**
  * Design A for any enterprise network (eduroam-brief.md, section 2;
@@ -74,6 +88,8 @@ class EnterpriseOnboarding(
     private val engineFor: (Network) -> VerificationEngine,
     private val realmClientFor: (Network) -> RealmRecordClient,
     private val installer: EnterpriseProfileInstaller,
+    /** Reads what was negotiated after connecting (root or not, like [transport] and [installer]). */
+    private val association: AssociationSource,
     private val realmKey: () -> PublicKey = { PinnedRealmKey.publicKey },
     private val clock: () -> Instant = Instant::now,
     private val onboardingTimeoutMs: Int = 60_000,
@@ -171,6 +187,16 @@ class EnterpriseOnboarding(
         }
         val install = EnterpriseProfileBuilder.install(pins, account, TargetNetwork(target.ssid, security, site.federation), installer)
         if (install !is InstallOutcome.Installed) return ConnectOutcome(install, null)
-        return ConnectOutcome(install, installer.awaitConnected(target.ssid, connectTimeoutMs))
+        if (!installer.awaitConnected(target.ssid, connectTimeoutMs)) return ConnectOutcome(install, false)
+        // The beacon was a claim; what was negotiated is the authenticated answer.
+        val joined = association.current()
+        val mode = joined?.mode
+        if (mode != null && !negotiatedFits(site.authModes, mode)) {
+            installer.remove(target.ssid)
+            val registered = site.authModes.sorted().joinToString { it.wire }
+            return ConnectOutcome(install, false, joined,
+                downgrade = "negotiated ${mode.wire} with ${joined.bssid ?: "the access point"}, but $registered is registered; GECKO removed the profile")
+        }
+        return ConnectOutcome(install, true, joined)
     }
 }

@@ -100,7 +100,13 @@ enum class CheckFailure {
      * CONFLICT (which stays reserved for proof). Distinguished from the plain "not joined yet" case only by
      * the SSID still being in range.
      */
-    AUTH_NOT_COMPLETED
+    AUTH_NOT_COMPLETED,
+    /**
+     * Enterprise: recorded on the access point the user tapped when Android joined another access point
+     * of the same SSID (the pinned profile is a suggestion for the whole SSID, so Android picks the AP).
+     * The result belongs to the AP that was joined and is recorded there; this one wasn't checked.
+     */
+    OTHER_AP_JOINED
 }
 
 /**
@@ -1176,14 +1182,19 @@ class VerificationViewModel(
         val decision = run.decision
         val pins = (decision as? Decision.Proceed)?.pins
         val site = run.report.siteResult
+        val joined = run.connect?.joined
+        val downgrade = run.connect?.downgrade
         val (state, failure, reason) = when {
             decision is Decision.Block && decision.hostile -> Triple(VerificationState.CONFLICT, null, decision.reason)
             decision is Decision.Block -> Triple(VerificationState.UNREACHABLE,
                 if (run.report.onboardingFailure != null) CheckFailure.ONBOARDING_FAILED else CheckFailure.SERVER_NOT_CONFIRMED,
                 decision.reason)
             run.refused != null -> Triple(VerificationState.UNREACHABLE, CheckFailure.SERVER_NOT_CONFIRMED, run.refused)
+            downgrade != null -> Triple(VerificationState.CONFLICT, null, downgrade)
             run.connected -> Triple(VerificationState.VERIFIED, null,
-                "connected as ${run.account?.identity}; the login server proved it is ${pins?.serverNames?.joinToString()} " +
+                "connected as ${run.account?.identity} to ${joined?.bssid ?: "an access point of ${run.target.ssid}"}" +
+                    (joined?.mode?.let { " (${it.wire})" } ?: "") +
+                    "; the login server proved it is ${pins?.serverNames?.joinToString()} " +
                     "before the password was sent (${(decision as Decision.Proceed).why})")
             run.installFailure != null -> Triple(VerificationState.REGISTERED, null, run.installFailure)
             else -> {
@@ -1208,7 +1219,9 @@ class VerificationViewModel(
             reason = reason,
             certificateCount = site?.certificateCount,
             unparsedCount = site?.unparsedCount,
-            usedPreferredNetwork = site?.usedPreferredNetwork
+            usedPreferredNetwork = site?.usedPreferredNetwork,
+            registeredIdentifier = if (downgrade != null) run.report.site?.authModes?.sorted()?.joinToString { it.wire } else null,
+            presentedIdentifier = if (downgrade != null) joined?.mode?.wire else null
         )
         val evidence = EnterpriseEvidence(
             account = run.account?.identity,
@@ -1235,7 +1248,15 @@ class VerificationViewModel(
             DataSource.Onboarding -> "Fetched live over GECKO's check connection to ${run.target.ssid}"
             is DataSource.Saved -> "Saved registration from ${timeText(src.fetchedAt)}, fetched over ${src.via}"
         }
-        publish(run.target.ssid, run.target.bssid, run.target.bssid ?: run.target.ssid, result, run.fix,
+        // The result belongs to the access point Android actually joined, which need not be the tapped one.
+        val resultBssid = joined?.bssid ?: run.target.bssid
+        if (resultBssid != null && run.target.bssid != null && !resultBssid.equals(run.target.bssid, ignoreCase = true)) {
+            publish(run.target.ssid, run.target.bssid, run.target.bssid,
+                VerificationResult(VerificationState.REGISTERED, run.target.ssid,
+                    reason = "Android joined $resultBssid of ${run.target.ssid} instead; this access point wasn't checked"),
+                run.fix, failure = CheckFailure.OTHER_AP_JOINED, isEnterprise = true, enterprise = evidence)
+        }
+        publish(run.target.ssid, resultBssid, resultBssid ?: run.target.ssid, result, run.fix,
             modeDescription = when (run.report.source) {
                 DataSource.Onboarding -> "Enterprise network: GECKO onboarding, then a profile pinned to the verified login server"
                 is DataSource.Saved -> "Enterprise network: saved registration (no onboarding), then a profile pinned to the verified login server"

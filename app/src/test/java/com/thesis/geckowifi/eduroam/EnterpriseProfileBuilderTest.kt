@@ -14,8 +14,9 @@ import java.lang.reflect.Modifier
 class RecordingInstaller(private val outcome: InstallOutcome = InstallOutcome.Installed("ok"), private val connects: Boolean = true) :
     EnterpriseProfileInstaller {
     val installed = mutableListOf<Pair<ProfilePlan, String>>()
+    val removed = mutableListOf<String>()
     override suspend fun install(plan: ProfilePlan, password: String): InstallOutcome = outcome.also { installed += plan to password }
-    override suspend fun remove(ssid: String) = Unit
+    override suspend fun remove(ssid: String) { removed += ssid }
     override fun installedSsids(): Set<String> = installed.map { it.first.ssid }.toSet()
     override suspend fun awaitConnected(ssid: String, timeoutMs: Long) = connects
 }

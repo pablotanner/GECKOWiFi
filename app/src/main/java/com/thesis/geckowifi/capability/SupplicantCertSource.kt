@@ -6,6 +6,16 @@ import kotlinx.coroutines.withContext
 
 private const val TAG = "SupplicantCertSource"
 
+private val socketDirs = listOf(
+    "/data/vendor/wifi/wpa/sockets",   // Android 9+
+    "/data/misc/wifi/sockets"          // older
+)
+
+/** `wpa_cli` bound to [iface]'s control socket, or null if there is none (needs root). */
+internal fun wpaCli(iface: String): String? =
+    socketDirs.firstOrNull { dir -> RootShell.exec("ls $dir/$iface 2>/dev/null").isNotBlank() }
+        ?.let { "wpa_cli -p $it -i $iface" }
+
 /**
  * Reads the server's certificate chain from wpa_supplicant's control
  * interface (root). Read-only: it watches the device's own handshakes and
@@ -22,18 +32,8 @@ private const val TAG = "SupplicantCertSource"
  */
 class SupplicantCertSource(private val iface: String = "wlan0") : CertificateSource {
 
-    private val socketDirs = listOf(
-        "/data/vendor/wifi/wpa/sockets",   // Android 9+
-        "/data/misc/wifi/sockets"          // older
-    )
-
-    private fun controlSocketDir(): String? = socketDirs.firstOrNull { dir ->
-        RootShell.exec("ls $dir/$iface 2>/dev/null").isNotBlank()
-    }
-
     override suspend fun captureHandshake(timeoutSeconds: Int): PeerChain? = withContext(Dispatchers.IO) {
-        val dir = controlSocketDir() ?: return@withContext null.also { Log.w(TAG, "no wpa_supplicant control socket") }
-        val cli = "wpa_cli -p $dir -i $iface"
+        val cli = wpaCli(iface) ?: return@withContext null.also { Log.w(TAG, "no wpa_supplicant control socket") }
         RootShell.exec("$cli set cert_in_cb 1")
         // Interactive wpa_cli attaches as a monitor and prints events; feeding it
         // a sleeping stdin keeps it attached for the capture window.
@@ -49,8 +49,7 @@ class SupplicantCertSource(private val iface: String = "wlan0") : CertificateSou
      * Only the realm leaves this function.
      */
     override suspend fun accountRealm(): String? = withContext(Dispatchers.IO) {
-        val dir = controlSocketDir() ?: return@withContext null
-        val cli = "wpa_cli -p $dir -i $iface"
+        val cli = wpaCli(iface) ?: return@withContext null
         val id = parseCurrentNetworkId(RootShell.exec("$cli status")) ?: return@withContext null
         realmOfIdentity(RootShell.exec("$cli get_network $id anonymous_identity").lineSequence().lastOrNull { it.isNotBlank() })
             ?: realmOfIdentity(RootShell.exec("$cli get_network $id identity").lineSequence().lastOrNull { it.isNotBlank() })

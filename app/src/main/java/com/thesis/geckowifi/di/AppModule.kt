@@ -3,6 +3,7 @@ package com.thesis.geckowifi.di
 import android.content.Context
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.thesis.geckowifi.capability.Capabilities
 import com.thesis.geckowifi.data.local.HistoryStore
 import com.thesis.geckowifi.data.local.InMemoryHistoryStore
 import com.thesis.geckowifi.data.local.SharedPrefsTrustPreferenceStore
@@ -82,7 +83,8 @@ object AppModule {
                 VerificationEngine(GeckoClient(network = network, fallbackClient = null), CertProbe(), DecisionCache(), geoQueryEncoder)
             },
             realmClientFor = { network -> RealmRecordClient(network = network) },
-            installer = profileInstaller
+            installer = profileInstaller,
+            association = Capabilities.associationSource(appContext)
         )
     }
 

@@ -4,6 +4,9 @@ import android.net.Network
 import com.thesis.geckowifi.data.model.GeoCertificate
 import com.thesis.geckowifi.data.model.VerificationResult
 import com.thesis.geckowifi.data.model.VerificationState
+import com.thesis.geckowifi.data.model.WiFiAuthMode
+import com.thesis.geckowifi.network.Association
+import com.thesis.geckowifi.network.AssociationSource
 import com.thesis.geckowifi.network.RsnProfile
 import com.thesis.geckowifi.eduroam.EduroamFixtures.now
 import com.thesis.geckowifi.eduroam.EduroamFixtures.realmKey
@@ -48,12 +51,14 @@ class EnterpriseOnboardingTest {
         transport: OnboardingTransport,
         site: SiteCheck,
         records: Map<Pair<String, String>, RealmFetch> = emptyMap(),
-        installer: EnterpriseProfileInstaller = RecordingInstaller()
+        installer: EnterpriseProfileInstaller = RecordingInstaller(),
+        joined: Association? = null
     ): EnterpriseOnboarding {
         val engine = mockk<VerificationEngine>()
         coEvery { engine.checkAdvertisedSite(any(), any(), any(), any(), any(), any(), any()) } returns site
         coEvery { realmClient.fetch(any(), any()) } answers { records[firstArg<String>() to secondArg<String>()] ?: RealmFetch.NotFound }
-        return EnterpriseOnboarding(transport, { engine }, { realmClient }, installer, realmKey = { realmKey.public }, clock = { now })
+        val association = object : AssociationSource { override suspend fun current() = joined }
+        return EnterpriseOnboarding(transport, { engine }, { realmClient }, installer, association, realmKey = { realmKey.public }, clock = { now })
     }
 
     private fun eduroamSite(vararg extra: GeoCertificate) = SiteCheck(registered, listOf(siteCert("eduroam", emptyList())) + extra)
@@ -151,6 +156,45 @@ class EnterpriseOnboardingTest {
         val report = f.check(target.copy(ssid = "eduroam"), area, store.accounts())
         assertTrue(report.onboardingFailure!!.contains("lab network"))
         assertFalse(transport.ran)
+    }
+
+    /** The site registered WPA3-Enterprise only; the tapped AP is a transition AP, so connecting is allowed. */
+    private fun siteRegistering(vararg modes: String) = EnterpriseSite.from("eduroam-lab",
+        listOf(siteCert("eduroam", emptyList()).let { it.copy(wifi = it.wifi.copy(authModeNames = modes.toList())) }))!!
+    private val transitionAp = target.copy(profile = RsnProfile.fromCapabilities("[RSN-EAP/SHA1+EAP/SHA256-CCMP][MFPC][ESS]"))
+
+    @Test
+    fun connect_reportsTheAccessPointAndModeActuallyNegotiated() = runTest {
+        // Android picked another access point of the SSID than the tapped one: the outcome says which.
+        val joined = Association("96:83:c4:97:c2:47", WiFiAuthMode.WPA3_ENTERPRISE)
+        val installer = RecordingInstaller()
+        val outcome = flow(FakeTransport(true), eduroamSite(), installer = installer, joined = joined)
+            .connect(transitionAp, siteRegistering("wpa3-enterprise"), store.load(alice.id)!!, EduroamFixtures.pins(record()))
+        assertEquals(true, outcome.connected)
+        assertEquals(joined, outcome.joined)
+        assertNull(outcome.downgrade)
+        assertTrue(installer.removed.isEmpty())
+    }
+
+    @Test
+    fun connect_negotiatedBelowRegistered_removesTheProfile() = runTest {
+        val installer = RecordingInstaller()
+        val outcome = flow(FakeTransport(true), eduroamSite(), installer = installer,
+            joined = Association("96:83:c4:97:c2:3a", WiFiAuthMode.WPA2_ENTERPRISE))
+            .connect(transitionAp, siteRegistering("wpa3-enterprise"), store.load(alice.id)!!, EduroamFixtures.pins(record()))
+        assertEquals(false, outcome.connected)
+        assertTrue(outcome.downgrade!!.contains("negotiated wpa2-enterprise"))
+        assertEquals(listOf("eduroam-lab"), installer.removed)
+    }
+
+    @Test
+    fun connect_192BitOnlyAp_isRefusedBeforeInstalling() = runTest {
+        val installer = RecordingInstaller()
+        val suiteB = target.copy(profile = RsnProfile.fromCapabilities("[RSN-EAP_SUITE_B_192-GCMP-256][MFPR][MFPC][ESS]"))
+        val outcome = flow(FakeTransport(true), eduroamSite(), installer = installer)
+            .connect(suiteB, siteRegistering("wpa3-enterprise-192"), store.load(alice.id)!!, EduroamFixtures.pins(record()))
+        assertTrue((outcome.install as InstallOutcome.Failed).reason.contains("192-bit"))
+        assertTrue(installer.installed.isEmpty())
     }
 
     @Test
