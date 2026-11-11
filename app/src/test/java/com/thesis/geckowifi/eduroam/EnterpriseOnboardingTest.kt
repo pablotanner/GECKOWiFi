@@ -150,12 +150,12 @@ class EnterpriseOnboardingTest {
     }
 
     @Test
-    fun realEduroam_isNeverOnboarded() = runTest {
-        val transport = FakeTransport(true)
-        val f = flow(transport, eduroamSite())
-        val report = f.check(target.copy(ssid = "eduroam"), area, store.accounts())
-        assertTrue(report.onboardingFailure!!.contains("lab network"))
-        assertFalse(transport.ran)
+    fun anySsid_isOnboarded_noNameAllowlist() = runTest {
+        // Network without GECKO onboarding (e.g. production eduroam): the session simply fails, nothing secret is sent.
+        val transport = FakeTransport(false)
+        val report = flow(transport, eduroamSite()).check(target.copy(ssid = "eduroam"), area, store.accounts())
+        assertTrue(transport.ran)
+        assertEquals("certificate not valid", report.onboardingFailure)
     }
 
     /** The site registered WPA3-Enterprise only; the tapped AP is a transition AP, so connecting is allowed. */

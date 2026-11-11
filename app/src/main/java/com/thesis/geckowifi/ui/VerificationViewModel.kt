@@ -641,7 +641,7 @@ class VerificationViewModel(
     enum class EnterpriseAccess { SIGN_IN, NEEDS_LOOKUP, NOT_REGISTERED, UNKNOWN }
 
     fun enterpriseAccessFor(network: ScannedNetwork.Real): EnterpriseAccess = when {
-        enterprise?.supports(network.ssid) == true || hasUsableSavedRegistration(network.ssid) -> EnterpriseAccess.SIGN_IN
+        enterprise != null || hasUsableSavedRegistration(network.ssid) -> EnterpriseAccess.SIGN_IN
         registeredHere.any { it.wifi.ssid.equals(network.ssid, ignoreCase = true) && it.wifi.enterprise != null } ->
             EnterpriseAccess.NEEDS_LOOKUP
         certLookup == LookupStatus.OK -> EnterpriseAccess.NOT_REGISTERED

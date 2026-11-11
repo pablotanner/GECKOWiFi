@@ -93,8 +93,6 @@ class EnterpriseController(
 
     private var job: Job? = null
 
-    fun supports(ssid: String): Boolean = onboarding.supports(ssid)
-
     fun start(target: EnterpriseTarget, fix: LocationFix, area: QueryArea) {
         if (job?.isActive == true) return
         job = scope.launch {
@@ -128,18 +126,17 @@ class EnterpriseController(
             onStep(target, EnterpriseStep.CHECK_NETWORK)
             val report = onboarding.checkSaved(target, saved.certificates, accounts, saved.record, saved.source)
             val decision = decideOn(report)
-            // A visitor's record wasn't saved: onboarding can fetch it, where the network supports it.
+            // A visitor's record wasn't saved: onboarding can fetch it.
             val missingRecord = (decision is Decision.NeedAccount || decision is Decision.Block && !decision.hostile) &&
                 report.checks.any { it is PinCheck.Missing && it.cause == com.thesis.geckowifi.eduroam.MissingCause.NOT_SAVED }
-            if (!missingRecord || !onboarding.supports(target.ssid)) return report to decision
-        }
-        if (!onboarding.supports(target.ssid)) {
-            val report = OnboardingReport(null, null, null, emptyList())
-            return report to Decision.Block(
-                "GECKO has no recent registration for ${target.ssid} here, and this network doesn't support GECKO onboarding. " +
-                    "Connect to a network with internet so GECKO can look it up, then try again", hostile = false)
+            if (!missingRecord) return report to decision
         }
         val report = onboarding.check(target, area, accounts) { onStep(target, it) }
+        // No session: declined, out of range, or a network without GECKO onboarding (e.g. production eduroam).
+        report.onboardingFailure?.let {
+            return report to Decision.Block("$it. If GECKO hasn't looked ${target.ssid} up yet, connect to a network " +
+                "with internet so it can, then try again", hostile = false)
+        }
         if (report.fetchedRecords.isNotEmpty()) onRecordsFetched(report.fetchedRecords)
         return report to decideOn(report)
     }

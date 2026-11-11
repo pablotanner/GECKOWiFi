@@ -164,7 +164,8 @@ fun CheckDetail.verdict(): Verdict {
             CheckFailure.AUTH_NOT_COMPLETED,
             CheckFailure.ONBOARDING_FAILED -> Verdict(
                 Tone.NEUTRAL, "Not connected", "GECKO couldn't check $name",
-                "The check connection was declined, the network was out of range, or it doesn't support GECKO. Try again, or join it in Android's settings.",
+                "The check connection was declined, the network was out of range, or it doesn't support GECKO. " +
+                    "If GECKO hasn't looked $name up yet, connect to a network with internet so it can, then try again.",
                 Icons.Outlined.WifiOff
             )
             CheckFailure.LOW_ACCURACY -> Verdict(

@@ -83,3 +83,61 @@ Unregistered SSIDs (a travel router, a home network) are left alone.
 - GECKO can't leave a network the device joined; the warning opens Android's
   Wi-Fi settings instead.
 - Checks only run while the app is open.
+
+## 6. Security type: claim, expectation, proof
+
+**Question.** An access point says in its beacon which security it offers. How
+far can GECKO trust that, and which type should it request when connecting?
+
+**Three trust levels.**
+1. **Beacon (claim).** RSN/WPA elements are unauthenticated: anyone can
+   advertise anything. Used to compare with the registration and to build the
+   connection, never as proof.
+2. **GeoCert (expectation).** The signed `auth_modes` (and `pmf`) say what the
+   operator deploys. The beacon is judged against it.
+3. **Negotiated state (proof).** What the device actually negotiated after
+   association: the only authenticated signal. Read after connecting.
+
+**Decision.**
+- **One classifier** (`network/SecurityProfile.kt`). The raw elements are
+  parsed into an `RsnProfile` (AKMs, ciphers, MFPC/MFPR, WPA1, WEP, OWE
+  transition); the capability string is only a fallback (API 29, demo networks).
+  A BSS maps to the **set** of modes a client could end up in, after the WFA
+  WPA3 definitions: EAP with MFPR is WPA3-Enterprise only, AKM 1 + 5 with MFPC
+  is the WPA2/WPA3 transition, any other EAP is WPA2-Enterprise; the same for
+  PSK/SAE and OWE. Unknown AKMs (FILS, DPP) add nothing. `floor` is the weakest
+  mode of the set.
+- **Verdict** (`WiFiIdentity.permits`): same kind of network; floor no weaker
+  than registered; the strongest registered mode offered (the WPA3 / OWE
+  downgrade); a registered `pmf: required` matched by MFPR. Stronger than
+  registered is accepted and noted. Enterprise is exempt from the
+  "strongest mode offered" rule only: the pinned server protects the password,
+  and federations mix older access points.
+- **Connect type** (`eduroam/EnterpriseSecurity.kt`): registered modes
+  intersected with the observed ones, not the beacon alone. The onboarding
+  specifier, bound to the tapped BSSID, uses the strongest mode; the pinned
+  suggestions, bound to the SSID only, are one per registered type, so access
+  points of the SSID elsewhere match too. 192-bit is refused up front: the
+  PEAP/TTLS profile can't do it.
+- **After connecting**: the BSSID and mode actually negotiated are read
+  (`WifiInfo` without root, `wpa_cli status` with root). Weaker than
+  registered: the profile is removed and the result is `CONFLICT`. The result
+  is recorded for the access point actually joined, and the status card shows
+  that connection.
+
+**Why the platform matters (AOSP, API 31+, see evidence/wifi-security-model).**
+- A specifier or suggestion must name a security type matching Android's own
+  label for the access point, or Android never matches it. Android's labels
+  differ from the WFA definitions: AKM 1 + MFPR is plain EAP to Android, so it
+  gets the WPA2 builder (PMF is still negotiated, the AP requires it).
+- Suggestions are keyed by SSID and security type, so a WPA2 and a WPA3
+  suggestion coexist. Android adds WPA3-Enterprise to every WPA2 suggestion as
+  an auto-upgrade.
+- Android picks which access point of a suggested SSID to join. In the lab an
+  evil twin advertising WPA3-Enterprise next to the genuine WPA2 network drew
+  the device to itself; only the pinned server stopped it. Hence results are
+  recorded for the access point actually joined, not the one tapped.
+
+**What it assumes.** Without root Android doesn't report negotiated PMF; plain
+EAP on an access point with MFPR counts as WPA3-Enterprise. The root reader is
+untested on hardware.

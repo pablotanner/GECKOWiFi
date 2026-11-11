@@ -148,11 +148,16 @@ regardless (**shortcut**: GECKO identity gets normal access; the attributes
 are still sent). Options are in [eduroam-demo.md](eduroam-demo.md#routers);
 no router was changed.
 
-## D15. Lab guard: onboarding only on `eduroam-lab`
-Real `eduroam` and `eth` (enterprise) are visible everywhere in the lab
-building. Tapping them opens the setup screen, but the flow refuses to start
-the onboarding session for any SSID but `eduroam-lab`, so not even the public
-GECKO identity reaches a production RADIUS server.
+## D15. No SSID allowlist for onboarding (was: lab guard on `eduroam-lab`)
+Superseded 2026-11-11. The flow first uses a valid saved registration and skips
+onboarding (D21); otherwise it tries onboarding on any enterprise SSID, as a
+deployed GECKO would. On a network without GECKO onboarding (production
+`eduroam`, `eth`) the session fails and the user is told to let GECKO look the
+network up over a connection with internet. What reaches the production RADIUS
+server is only the public outer identity `fetch@gecko.ch`, rejected as an unknown
+realm; the inner credentials never leave, because that server can't present the
+`onboard.gecko.ch` certificate and the TLS handshake is aborted first. The
+router SSIDs no longer have to be named `eduroam-lab`.
 
 ## D16. Site GeoCert has no local realms
 `eduroam-lab-sp` (lab/certs/eduroam-lab.json) registers the SSID, WPA2-Enterprise

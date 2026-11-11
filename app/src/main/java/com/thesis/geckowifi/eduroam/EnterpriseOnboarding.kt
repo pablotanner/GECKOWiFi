@@ -105,9 +105,6 @@ class EnterpriseOnboarding(
         source: DataSource.Saved
     ): OnboardingReport = checkSaved(target, certificates, accounts, savedRecord, source, realmKey(), clock())
 
-    /** Whether this prototype may onboard on [ssid] at all (lab guard, D15). */
-    fun supports(ssid: String): Boolean = ssid in OnboardingIdentity.LAB_SSIDS || true;
-
     suspend fun check(
         target: EnterpriseTarget,
         area: QueryArea,
@@ -117,9 +114,6 @@ class EnterpriseOnboarding(
         val started = System.currentTimeMillis()
         val timings = mutableListOf<Pair<EnterpriseStep, Long>>()
         val step = { s: EnterpriseStep -> timings += s to (System.currentTimeMillis() - started); onStep(s) }
-
-        if (!supports(target.ssid)) return OnboardingReport(
-            "this prototype only onboards on the lab network (${OnboardingIdentity.LAB_SSIDS.joinToString()})", null, null, emptyList())
 
         // Registration not known yet: the onboarding session sends nothing secret, so the beacon decides.
         val security = when (val choice = chooseEnterpriseSecurity(null, target.profile, sdkInt)) {

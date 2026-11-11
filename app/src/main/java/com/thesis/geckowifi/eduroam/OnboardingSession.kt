@@ -38,13 +38,6 @@ object OnboardingIdentity {
      * security: an attacker may hold such a certificate too (scene 3).
      */
     const val SERVER_NAME = "onboard.gecko.ch"
-
-    /**
-     * Lab guard: SSIDs the prototype may onboard on. Real eduroam is all around
-     * the lab (ETH campus); the demo must never send even the public GECKO
-     * identity to production RADIUS servers (eduroam-brief.md, 4.1).
-     */
-    val LAB_SSIDS: Set<String> = setOf("eduroam-lab")
 }
 
 /** The access point to onboard through: the SSID, and the BSSID from the scan so the test hits the intended AP. */

@@ -68,8 +68,8 @@ Root seam (D1): a root build would provide another `OnboardingTransport`
 (wpa_supplicant directly, no approval dialog) and another
 `EnterpriseProfileInstaller` (wpa_supplicant network block); nothing else changes.
 
-Lab guard: onboarding only runs for `eduroam-lab`; real `eduroam` and `eth`
-are on every floor of the lab building.
+No SSID allowlist (D15): onboarding is tried on any enterprise SSID without a
+saved registration; on real `eduroam` and `eth` it fails before anything secret is sent.
 
 ## Bring-up (laptop)
 
@@ -284,7 +284,6 @@ Things that got in the way, for next time:
 - No walled-garden enforcement on the Mangos (no dynamic VLAN); the attributes are still sent.
 - Plain HTTP to map and realm server; integrity from proofs and signatures (D9).
 - One hard-coded test account; FreeRADIUS runs as root from user-owned copies.
-- Lab guard: onboarding only on `eduroam-lab`.
 
 ## Open points
 
