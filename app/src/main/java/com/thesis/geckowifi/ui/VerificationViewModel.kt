@@ -435,7 +435,7 @@ class VerificationViewModel(
                 val result = engine.verifyEnterpriseChain(
                     networkKey, chain.certificates, source.accountRealm(),
                     fix.latitude, fix.longitude, null, effectiveRadius(fix),
-                    ssid = network.ssid, observedAuthModes = network.authModes
+                    ssid = network.ssid, advertised = network.advertised
                 )
                 publish(network.ssid, network.bssid, networkKey, result, fix,
                     modeDescription = "Your connection: login server compared", isEnterprise = true)
@@ -820,7 +820,7 @@ class VerificationViewModel(
         }
         // Android serves one app-requested network at a time; a portal check may still hold one.
         networkObserver.leave()
-        controller.start(EnterpriseTarget(network.ssid, network.bssid, network.authModes,
+        controller.start(EnterpriseTarget(network.ssid, network.bssid, network.profile,
             wpa3 = network.requiresWpa3EnterpriseSpecifier), fix,
             QueryArea(fix.latitude, fix.longitude, effectiveRadius(fix)))
     }
@@ -932,7 +932,7 @@ class VerificationViewModel(
                         userRealm = fake.userRealm,
                         lat = fix.latitude, lng = fix.longitude, altitude = null,
                         radiusMeters = effectiveRadius(fix), ssid = fake.ssid,
-                        observedAuthModes = fake.authModes
+                        advertised = fake.advertised
                     )
                     is ScannedNetwork.Real -> return@launch
                 }
@@ -955,7 +955,7 @@ class VerificationViewModel(
      * Null when the SSID isn't registered here or the lookup isn't known.
      */
     fun advertisedMatch(network: ScannedNetwork.Real): AdvertisedMatch? =
-        if (certLookup == LookupStatus.OK) matchAdvertised(network.ssid, network.authModes, registeredHere) else null
+        if (certLookup == LookupStatus.OK) matchAdvertised(network.ssid, network.advertised, registeredHere) else null
 
     /** First primary portal domain registered for [ssid] at the last queried location, if any. */
     fun registeredDomainFor(ssid: String): String? =
@@ -1074,7 +1074,7 @@ class VerificationViewModel(
                 val check = engine.verifyPortalHops(
                     networkKey, discovery.hops, judgeFinalPlainHop = true,
                     fix.latitude, fix.longitude, null, effectiveRadius(fix), network.ssid,
-                    observedAuthModes = network.authModes
+                    advertised = network.advertised
                 )
                 finishCheck(network, networkKey, fix, check.overall, "discovery", outcome, check.hops, ownJoin = ownJoin)
             }
@@ -1084,7 +1084,7 @@ class VerificationViewModel(
                 val ssidRegistered = registeredHere.any { it.wifi.ssid.equals(network.ssid, ignoreCase = true) }
                 val result = if (registered == null && ssidRegistered) {
                     // Registered without a login page: only the security type can be compared.
-                    engine.checkAdvertised(networkKey, network.ssid, network.authModes,
+                    engine.checkAdvertised(networkKey, network.ssid, network.advertised,
                         fix.latitude, fix.longitude, null, effectiveRadius(fix))
                 } else if (registered == null) {
                     VerificationResult(VerificationState.UNVERIFIED, "",
@@ -1102,7 +1102,7 @@ class VerificationViewModel(
                 val partial = engine.verifyPortalHops(
                     networkKey, discovery.hops, judgeFinalPlainHop = false,
                     fix.latitude, fix.longitude, null, effectiveRadius(fix), network.ssid,
-                    observedAuthModes = network.authModes
+                    advertised = network.advertised
                 )
                 val conflict = partial.overall.state == VerificationState.CONFLICT
                 val result = if (conflict) partial.overall
@@ -1121,7 +1121,7 @@ class VerificationViewModel(
         host = host,
         lat = fix.latitude, lng = fix.longitude, altitude = null,
         radiusMeters = effectiveRadius(fix), ssid = network.ssid,
-        observedAuthModes = network.authModes
+        advertised = network.advertised
     )
 
     private fun finishCheck(

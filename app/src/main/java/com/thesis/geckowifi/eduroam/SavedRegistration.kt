@@ -75,7 +75,7 @@ fun checkSaved(
     realmKey: PublicKey = PinnedRealmKey.publicKey,
     now: Instant = Instant.now()
 ): OnboardingReport {
-    val match = matchAdvertised(target.ssid, target.authModes, certificates)
+    val match = matchAdvertised(target.ssid, target.advertised, certificates)
     val siteResult = if (match is AdvertisedMatch.Mismatch) VerificationResult(
         VerificationState.CONFLICT, target.ssid,
         reason = "network advertises ${match.advertised.joinToString { it.wire }}, but is registered as ${match.registered.joinToString()} (saved registration)"

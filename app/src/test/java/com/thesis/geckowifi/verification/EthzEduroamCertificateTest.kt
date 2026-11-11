@@ -3,6 +3,7 @@ package com.thesis.geckowifi.verification
 import com.thesis.geckowifi.data.model.GeoCertificate
 import com.thesis.geckowifi.data.model.GeoCertificateFormat
 import com.thesis.geckowifi.data.model.VerificationState
+import com.thesis.geckowifi.data.model.AdvertisedSecurity
 import com.thesis.geckowifi.data.model.WiFiAuthMode
 import com.thesis.geckowifi.data.remote.GeckoClient
 import com.thesis.geckowifi.data.remote.GeckoResponse
@@ -83,7 +84,7 @@ class EthzEduroamCertificateTest {
     ) { Instant.parse("2026-10-14T00:00:00Z") }
 
     private suspend fun advertised(modes: Set<WiFiAuthMode>, ssid: String = "eduroam") =
-        engine().checkAdvertised("net", ssid, modes, 47.37650, 8.54732, null, 20)
+        engine().checkAdvertised("net", ssid, AdvertisedSecurity(modes), 47.37650, 8.54732, null, 20)
 
     @Test
     fun genuineEduroamAdvertisement_isRegistered() = runTest {

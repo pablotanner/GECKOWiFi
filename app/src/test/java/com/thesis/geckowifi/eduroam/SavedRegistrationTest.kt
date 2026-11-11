@@ -4,7 +4,7 @@ import com.thesis.geckowifi.ZURICH_AREA
 import com.thesis.geckowifi.data.local.SavedLookup
 import com.thesis.geckowifi.data.model.GeoCertificate
 import com.thesis.geckowifi.data.model.VerificationState
-import com.thesis.geckowifi.data.model.WiFiAuthMode
+import com.thesis.geckowifi.network.RsnProfile
 import com.thesis.geckowifi.eduroam.EduroamFixtures.now
 import com.thesis.geckowifi.eduroam.EduroamFixtures.otherKey
 import com.thesis.geckowifi.eduroam.EduroamFixtures.realmKey
@@ -28,7 +28,7 @@ class SavedRegistrationTest {
     private val inZurich = 47.3765 to 8.5482
     private val store = InMemoryAccountStore()
     private val alice = store.save("alice@homeuni.test", "s3cret")
-    private val target = EnterpriseTarget("eduroam-lab", null, setOf(WiFiAuthMode.WPA2_ENTERPRISE))
+    private val target = EnterpriseTarget("eduroam-lab", null, RsnProfile.fromCapabilities("[RSN-EAP/SHA1-CCMP][ESS]"))
     private val source = DataSource.Saved(now.toEpochMilli(), "Wi-Fi (GeckoTest)")
 
     private fun cert(federation: String? = "eduroam", realms: List<String> = emptyList()): GeoCertificate =
@@ -130,7 +130,7 @@ class SavedRegistrationTest {
 
     @Test
     fun advertisedSecurityDiffersFromSavedRegistration_conflictAndBlocked() {
-        val openAp = target.copy(authModes = setOf(WiFiAuthMode.OPEN))
+        val openAp = target.copy(profile = RsnProfile.fromCapabilities("[ESS]"))
         val report = checkSaved(openAp, listOf(cert()), store.accounts(), { _, _ -> sign(record()) }, source, realmKey.public, now)
 
         assertEquals(VerificationState.CONFLICT, report.siteResult!!.state)

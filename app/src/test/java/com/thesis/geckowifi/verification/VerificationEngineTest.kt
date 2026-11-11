@@ -9,6 +9,7 @@ import com.thesis.geckowifi.data.model.PortalDomain
 import com.thesis.geckowifi.data.model.PortalDomainRole
 import com.thesis.geckowifi.data.model.PortalTLSIdentity
 import com.thesis.geckowifi.data.model.VerificationState
+import com.thesis.geckowifi.data.model.AdvertisedSecurity
 import com.thesis.geckowifi.data.model.WiFiAuthMode
 import com.thesis.geckowifi.data.model.WiFiIdentity
 import com.thesis.geckowifi.data.remote.GeckoClient
@@ -19,6 +20,7 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
 
@@ -232,7 +234,7 @@ class VerificationEngineTest {
 
         val result = engine(geckoReturning(cert)).verifyEnterprise(
             networkKey, genuineServer, "example.org", lat, lng, null, radius,
-            ssid = "eduroam", observedAuthModes = setOf(WiFiAuthMode.WPA2_ENTERPRISE)
+            ssid = "eduroam", advertised = AdvertisedSecurity(setOf(WiFiAuthMode.WPA2_ENTERPRISE))
         )
 
         assertEquals(VerificationState.VERIFIED, result.state)
@@ -246,7 +248,7 @@ class VerificationEngineTest {
         // mode alone already gives it away.
         val result = engine(geckoReturning(enterpriseCert())).verifyPresentedDomain(
             networkKey, "login.evil.lab", "attackerKey", lat, lng, null, radius,
-            ssid = "eduroam", observedAuthModes = setOf(WiFiAuthMode.OPEN)
+            ssid = "eduroam", advertised = AdvertisedSecurity(setOf(WiFiAuthMode.OPEN))
         )
 
         assertEquals(VerificationState.CONFLICT, result.state)
@@ -261,7 +263,7 @@ class VerificationEngineTest {
 
         val result = engine(geckoReturning(cert)).verifyPresentedDomain(
             networkKey, host, "expected-hash", lat, lng, null, radius,
-            ssid = "Cafe", observedAuthModes = setOf(WiFiAuthMode.OPEN)
+            ssid = "Cafe", advertised = AdvertisedSecurity(setOf(WiFiAuthMode.OPEN))
         )
 
         assertEquals(VerificationState.CONFLICT, result.state)
@@ -274,10 +276,36 @@ class VerificationEngineTest {
 
         val result = engine(geckoReturning(cert)).verifyPresentedDomain(
             networkKey, host, "expected-hash", lat, lng, null, radius,
-            ssid = "Cafe", observedAuthModes = setOf(WiFiAuthMode.WPA2_PERSONAL)
+            ssid = "Cafe", advertised = AdvertisedSecurity(setOf(WiFiAuthMode.WPA2_PERSONAL))
         )
 
         assertEquals(VerificationState.VERIFIED, result.state)
+    }
+
+    @Test
+    fun upgrade_isAcceptedAndNoted() = runTest {
+        // Registered as WPA2-Enterprise, the AP only offers WPA3-Enterprise: nothing taken from the client.
+        val result = engine(geckoReturning(enterpriseCert())).verifyEnterprise(
+            networkKey, genuineServer, "example.org", lat, lng, null, radius,
+            ssid = "eduroam", advertised = AdvertisedSecurity(setOf(WiFiAuthMode.WPA3_ENTERPRISE), pmfRequired = true)
+        )
+
+        assertEquals(VerificationState.VERIFIED, result.state)
+        assertTrue(result.reason!!.contains("stronger than registered"))
+    }
+
+    @Test
+    fun pmfRegisteredRequired_apWithoutMfpr_isConflict() = runTest {
+        val cert = sampleCertificate(host).copy(wifi = WiFiIdentity(ssid = "Cafe", authModeNames = listOf("wpa2-personal"), pmf = "required"))
+
+        val result = engine(geckoReturning(cert)).verifyPresentedDomain(
+            networkKey, host, "expected-hash", lat, lng, null, radius,
+            ssid = "Cafe", advertised = AdvertisedSecurity(setOf(WiFiAuthMode.WPA2_PERSONAL), pmfRequired = false)
+        )
+
+        assertEquals(VerificationState.CONFLICT, result.state)
+        assertEquals("wpa2-personal (PMF required)", result.registeredIdentifier)
+        assertEquals("wpa2-personal (PMF optional)", result.presentedIdentifier)
     }
 
     @Test

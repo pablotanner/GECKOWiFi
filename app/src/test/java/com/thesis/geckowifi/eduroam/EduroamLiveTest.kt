@@ -1,6 +1,7 @@
 package com.thesis.geckowifi.eduroam
 
 import com.thesis.geckowifi.data.model.VerificationState
+import com.thesis.geckowifi.data.model.AdvertisedSecurity
 import com.thesis.geckowifi.data.model.WiFiAuthMode
 import com.thesis.geckowifi.data.remote.GeckoClient
 import com.thesis.geckowifi.verification.CertProbe
@@ -71,7 +72,7 @@ class EduroamLiveTest {
     fun siteQuery_findsTheRegisteredSite() = runTest {
         assumeTrue("map server not reachable", reachable(1234))
         val engine = engine()
-        val site = engine.checkAdvertisedSite("live", "eduroam-lab", setOf(WiFiAuthMode.WPA2_ENTERPRISE), eth.first, eth.second, null, 50)
+        val site = engine.checkAdvertisedSite("live", "eduroam-lab", AdvertisedSecurity(setOf(WiFiAuthMode.WPA2_ENTERPRISE)), eth.first, eth.second, null, 50)
         assertEquals(site.result.reason, VerificationState.REGISTERED, site.result.state)
         assertEquals("eduroam-lab-sp", site.certificates.single().certificateId)
     }
@@ -79,7 +80,7 @@ class EduroamLiveTest {
     @Test
     fun openCloneOfTheSite_isConflict() = runTest {
         assumeTrue("map server not reachable", reachable(1234))
-        val site = engine().checkAdvertisedSite("live", "eduroam-lab", setOf(WiFiAuthMode.OPEN), eth.first, eth.second, null, 50)
+        val site = engine().checkAdvertisedSite("live", "eduroam-lab", AdvertisedSecurity(setOf(WiFiAuthMode.OPEN)), eth.first, eth.second, null, 50)
         assertEquals(VerificationState.CONFLICT, site.result.state)
     }
 

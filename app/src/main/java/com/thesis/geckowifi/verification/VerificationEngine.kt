@@ -89,12 +89,12 @@ class VerificationEngine(
         altitude: Double?,
         radiusMeters: Int,
         ssid: String? = null,
-        observedAuthModes: Set<WiFiAuthMode>? = null
+        advertised: AdvertisedSecurity? = null
     ): VerificationResult {
         cache.get(networkKey, host)?.let { return it }
         // Blocking TLS handshake - must not run on the caller's (UI) dispatcher.
         val spki = withContext(Dispatchers.IO) { probe.spkiHash(probe.fetchCertificate(host)) }
-        return verifyPresentedDomain(networkKey, host, spki, lat, lng, altitude, radiusMeters, ssid, observedAuthModes)
+        return verifyPresentedDomain(networkKey, host, spki, lat, lng, altitude, radiusMeters, ssid, advertised)
     }
 
     /**
@@ -116,7 +116,7 @@ class VerificationEngine(
      * it. Passing `ssid = null` (the default) skips filtering entirely,
      * preserving the original behavior for existing callers.
      *
-     * [observedAuthModes], when given with [ssid], are the modes the access
+     * [advertised], when given with [ssid], are the modes the access
      * point advertises; see [authModeConflict].
      */
     suspend fun verifyPresentedDomain(
@@ -128,7 +128,7 @@ class VerificationEngine(
         altitude: Double?,
         radiusMeters: Int,
         ssid: String? = null,
-        observedAuthModes: Set<WiFiAuthMode>? = null
+        advertised: AdvertisedSecurity? = null
     ): VerificationResult {
         cache.get(networkKey, host)?.let { return it }
 
@@ -142,8 +142,7 @@ class VerificationEngine(
             is GeckoResponse.Success -> when (val c = candidatesFor(response, lat, lng, radiusMeters, ssid, host)) {
                 is Candidates.Done -> return c.result
                 is Candidates.Judge -> c.finish(
-                    sessionFor(networkKey).observe(host, c.certs, presentedSpkiHash),
-                    authModeConflict(c, observedAuthModes, host)
+                    sessionFor(networkKey).observe(host, c.certs, presentedSpkiHash), advertised, host
                 ).withResponseMetadata(response)
             }
         }
@@ -178,7 +177,7 @@ class VerificationEngine(
         altitude: Double?,
         radiusMeters: Int,
         ssid: String? = null,
-        observedAuthModes: Set<WiFiAuthMode>? = null
+        advertised: AdvertisedSecurity? = null
     ): PortalCheckResult {
         val judged = hops.filter { it.isHttps || (judgeFinalPlainHop && it === hops.lastOrNull()) }
         val unjudged = { overall: VerificationResult -> PortalCheckResult(overall, hops.map { HopVerdict(it, null) }) }
@@ -208,7 +207,7 @@ class VerificationEngine(
         val results = verdicts.mapNotNull { v -> v.result?.let { v.hop to it } }
         val (decidingHop, decisive) = results.firstOrNull { it.second.state == VerificationState.CONFLICT } ?: results.last()
         val fromHops = decisive.copy(reason = "hop ${decidingHop.index} ${decidingHop.scheme}://${decidingHop.host}: ${decisive.reason}")
-        val overall = c.finish(fromHops, authModeConflict(c, observedAuthModes, firstHost)).withResponseMetadata(success)
+        val overall = c.finish(fromHops, advertised, firstHost).withResponseMetadata(success)
         return PortalCheckResult(overall, verdicts)
     }
 
@@ -227,10 +226,10 @@ class VerificationEngine(
         altitude: Double?,
         radiusMeters: Int,
         ssid: String? = null,
-        observedAuthModes: Set<WiFiAuthMode>? = null
+        advertised: AdvertisedSecurity? = null
     ): VerificationResult = verifyEnterpriseWith(
         networkKey, "eap:${observed.leafSpkiSha256}:${userRealm.orEmpty()}", observed.displayName,
-        { observed }, userRealm, lat, lng, altitude, radiusMeters, ssid, observedAuthModes
+        { observed }, userRealm, lat, lng, altitude, radiusMeters, ssid, advertised
     )
 
     /**
@@ -248,7 +247,7 @@ class VerificationEngine(
         altitude: Double?,
         radiusMeters: Int,
         ssid: String? = null,
-        observedAuthModes: Set<WiFiAuthMode>? = null
+        advertised: AdvertisedSecurity? = null
     ): VerificationResult {
         val unanchored = ObservedAuthServer.fromChain(chain)
             ?: return VerificationResult(VerificationState.UNVERIFIED, "", reason = "no server certificate was presented")
@@ -258,7 +257,7 @@ class VerificationEngine(
                 val anchors = certs.flatMap { it.wifi.enterprise?.aaa.orEmpty() }.flatMap { it.servers }.flatMap { it.pinnedCaCertificates() }
                 ObservedAuthServer.fromChain(chain, anchors) ?: unanchored
             },
-            userRealm, lat, lng, altitude, radiusMeters, ssid, observedAuthModes
+            userRealm, lat, lng, altitude, radiusMeters, ssid, advertised
         )
     }
 
@@ -273,7 +272,7 @@ class VerificationEngine(
         altitude: Double?,
         radiusMeters: Int,
         ssid: String?,
-        observedAuthModes: Set<WiFiAuthMode>?
+        advertised: AdvertisedSecurity?
     ): VerificationResult {
         cache.get(networkKey, cacheKey)?.let { return it }
 
@@ -287,8 +286,7 @@ class VerificationEngine(
             is GeckoResponse.Success -> when (val c = candidatesFor(response, lat, lng, radiusMeters, ssid, host)) {
                 is Candidates.Done -> return c.result
                 is Candidates.Judge -> c.finish(
-                    evaluateEnterpriseNetwork(observe(c.certs), userRealm, c.certs),
-                    authModeConflict(c, observedAuthModes, host)
+                    evaluateEnterpriseNetwork(observe(c.certs), userRealm, c.certs), advertised, host
                 ).withResponseMetadata(response)
             }
         }
@@ -299,7 +297,7 @@ class VerificationEngine(
     /**
      * Judges a network whose registration lists nothing to verify its
      * identity against (no portal domain, no login server): only its
-     * advertised auth modes ([observedAuthModes]) can be compared. Unregistered
+     * advertised auth modes ([advertised]) can be compared. Unregistered
      * SSID: UNVERIFIED. Advertised modes not registered: CONFLICT (scenario
      * A1). Otherwise REGISTERED: the registration exists and nothing
      * contradicts it, nothing more. Before joining, the list makes the same
@@ -308,12 +306,12 @@ class VerificationEngine(
     suspend fun checkAdvertised(
         networkKey: String,
         ssid: String,
-        observedAuthModes: Set<WiFiAuthMode>,
+        advertised: AdvertisedSecurity,
         lat: Double,
         lng: Double,
         altitude: Double?,
         radiusMeters: Int
-    ): VerificationResult = checkAdvertisedSite(networkKey, ssid, observedAuthModes, lat, lng, altitude, radiusMeters).result
+    ): VerificationResult = checkAdvertisedSite(networkKey, ssid, advertised, lat, lng, altitude, radiusMeters).result
 
     /**
      * [checkAdvertised] plus the certificates it judged ([SiteCheck.certificates]:
@@ -324,7 +322,7 @@ class VerificationEngine(
     suspend fun checkAdvertisedSite(
         networkKey: String,
         ssid: String,
-        observedAuthModes: Set<WiFiAuthMode>,
+        advertised: AdvertisedSecurity,
         lat: Double,
         lng: Double,
         altitude: Double?,
@@ -343,10 +341,10 @@ class VerificationEngine(
                     val registered = VerificationResult(
                         VerificationState.REGISTERED, ssid,
                         matchedCertificateId = cert.certificateId,
-                        reason = "registered here$operator; it advertises ${observedAuthModes.joinToString { it.wire }}, " +
-                            "as registered; the registration lists nothing else to compare"
+                        reason = "registered here$operator; it advertises ${advertised.wire}, " +
+                            "which fits the registration; the registration lists nothing else to compare"
                     )
-                    SiteCheck(c.finish(registered, authModeConflict(c, observedAuthModes, ssid)).withResponseMetadata(response), c.certs)
+                    SiteCheck(c.finish(registered, advertised, ssid).withResponseMetadata(response), c.certs)
                 }
             }
         }.also { if (it.result.state != VerificationState.UNREACHABLE && it.result.savedAt == null) cache.put(networkKey, "advertised:$ssid", it.result) }
@@ -404,14 +402,21 @@ class VerificationEngine(
     }
 
     /**
-     * The rules on top of a single verdict: an auth-mode conflict (if any)
-     * wins over a non-conflicting verdict, SSID exclusivity escalates
+     * The rules on top of a single verdict: an auth-mode conflict with
+     * [advertised] (if any) wins over a non-conflicting verdict, an upgrade is
+     * accepted and noted in the reason, SSID exclusivity escalates
      * UNRECOGNIZED, and a CONFLICT is withheld while some of the SSID's
      * certificates couldn't be evaluated - one of them might register exactly
      * what was seen.
      */
-    private fun Candidates.Judge.finish(verdict: VerificationResult, authConflict: VerificationResult? = null): VerificationResult {
-        val combined = if (authConflict != null && verdict.state != VerificationState.CONFLICT) authConflict else verdict
+    private fun Candidates.Judge.finish(verdict: VerificationResult, advertised: AdvertisedSecurity? = null, host: String = verdict.host): VerificationResult {
+        val authConflict = authModeConflict(this, advertised, host)
+        val combined = when {
+            authConflict != null && verdict.state != VerificationState.CONFLICT -> authConflict
+            authConflict == null && upgraded(advertised) ->
+                verdict.copy(reason = "${verdict.reason}; it advertises ${advertised!!.wire}, stronger than registered, which is accepted")
+            else -> verdict
+        }
         val result = combined.applyExclusivity(ssid, shared = certs.any { it.wifi.ssidShared })
         return if (result.state == VerificationState.CONFLICT && skipped.isNotEmpty())
             result.copy(state = VerificationState.UNVERIFIED,
@@ -420,25 +425,33 @@ class VerificationEngine(
     }
 
     /**
-     * Scenario A1: every mode the access point advertises ([observed], from the
-     * scan) must be registered for the SSID, else this network isn't what was
-     * registered (an open or personal clone of an enterprise SSID, a WPA2
-     * clone of a WPA3-only one). Only certificates that register auth modes
-     * take part (v2 certificates don't), and one permitting certificate is
-     * enough. Returns UNRECOGNIZED, which SSID exclusivity escalates.
+     * Scenario A1: what the access point advertises ([observed], from the scan)
+     * must fit the SSID's registration ([WiFiIdentity.permits]), else this
+     * network isn't what was registered (an open or personal clone of an
+     * enterprise SSID, a WPA2 clone of a WPA3-only one, PMF not required where
+     * it is registered as required). Only certificates that register auth
+     * modes take part (v2 certificates don't), and one permitting certificate
+     * is enough. Returns UNRECOGNIZED, which SSID exclusivity escalates.
      */
-    private fun authModeConflict(c: Candidates.Judge, observed: Set<WiFiAuthMode>?, host: String): VerificationResult? {
-        if (observed.isNullOrEmpty() || c.ssid == null) return null
+    private fun authModeConflict(c: Candidates.Judge, observed: AdvertisedSecurity?, host: String): VerificationResult? {
+        if (observed == null || observed.modes.isEmpty() || c.ssid == null) return null
         if (c.certs.permitAdvertised(observed) != false) return null
         val registering = c.certs.filter { it.wifi.authModeNames.isNotEmpty() }
-        val registered = registering.flatMap { it.wifi.authModeNames }.distinct()
+        val registered = registering.map { it.wifi.wire }.distinct().joinToString(" / ")
         return VerificationResult(
             VerificationState.UNRECOGNIZED, host,
             matchedCertificateId = registering.first().certificateId,
-            reason = "network advertises ${observed.joinToString { it.wire }}, but is registered as ${registered.joinToString()}",
-            registeredIdentifier = registered.joinToString(),
-            presentedIdentifier = observed.joinToString { it.wire }
+            reason = "network advertises ${observed.wire}, but is registered as $registered",
+            registeredIdentifier = registered,
+            presentedIdentifier = observed.wire
         )
+    }
+
+    /** Fits the registration with a floor above every registered mode of its kind: stronger than registered. */
+    private fun Candidates.Judge.upgraded(observed: AdvertisedSecurity?): Boolean {
+        val floor = observed?.modes?.minOrNull() ?: return false
+        val sameKind = certs.flatMap { it.wifi.authModes }.filter { it.family == floor.family }
+        return sameKind.isNotEmpty() && sameKind.all { it < floor }
     }
 
     /**

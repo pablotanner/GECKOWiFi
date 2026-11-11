@@ -63,7 +63,18 @@ class NetworkObserver(private val context: Context) {
                 rssi = it.level,
                 securityTypes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) it.securityTypes.toList() else emptyList()
             )
+        }.also(::logMixedFloors)
+
+    /**
+     * Access points of one SSID that differ in their weakest mode are worth a note (a misconfigured
+     * AP, or an impostor next to the real one); each is still judged on its own BSSID.
+     */
+    private fun logMixedFloors(aps: List<ScannedNetwork.Real>) = aps.groupBy { it.ssid }.forEach { (ssid, group) ->
+        if (group.map { it.authModes.floor }.distinct().size > 1) {
+            Log.i(TAG, "$ssid: access points differ in their weakest mode: " +
+                group.joinToString { "${it.bssid}=${it.authModes.floor?.wire ?: "unrecognised"}" })
         }
+    }
 
     /** From the raw elements (API 30+); the capability string only when there are none. */
     private fun securityProfile(scan: ScanResult): RsnProfile {

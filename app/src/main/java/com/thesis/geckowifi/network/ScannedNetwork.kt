@@ -1,6 +1,7 @@
 package com.thesis.geckowifi.network
 
 import android.net.wifi.WifiInfo
+import com.thesis.geckowifi.data.model.AdvertisedSecurity
 import com.thesis.geckowifi.data.model.WiFiAuthMode
 import com.thesis.geckowifi.verification.ObservedAuthServer
 
@@ -39,6 +40,10 @@ sealed class ScannedNetwork {
     ) : ScannedNetwork() {
         /** Every mode a client could end up in with this AP ([admissibleModes]), compared with the registered `auth_modes`. */
         val authModes: Set<WiFiAuthMode> = profile.admissibleModes()
+
+        /** [authModes] plus the PMF requirement, what the verdict compares with the GeoCert. */
+        val advertised: AdvertisedSecurity
+            get() = AdvertisedSecurity(authModes, profile.mfpr)
 
         /** Nothing to authenticate with (an OWE transition AP's open side included). */
         val isOpen: Boolean
@@ -105,6 +110,6 @@ sealed class ScannedNetwork {
         val observed: ObservedAuthServer,
         /** Realm of the user's eduroam identity (`user@realm`); decides local user vs. visitor. */
         val userRealm: String?,
-        val authModes: Set<WiFiAuthMode> = setOf(WiFiAuthMode.WPA2_ENTERPRISE)
+        val advertised: AdvertisedSecurity = AdvertisedSecurity(setOf(WiFiAuthMode.WPA2_ENTERPRISE))
     ) : ScannedNetwork()
 }

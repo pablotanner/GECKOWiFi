@@ -1,5 +1,6 @@
 package com.thesis.geckowifi.verification
 
+import com.thesis.geckowifi.data.model.AdvertisedSecurity
 import com.thesis.geckowifi.data.model.GeoCertificate
 import com.thesis.geckowifi.data.model.WiFiAuthMode
 
@@ -28,11 +29,11 @@ sealed interface AdvertisedMatch {
 }
 
 /**
- * Whether one of these certificates permits every advertised mode. Null if
+ * Whether one of these certificates permits what is advertised. Null if
  * none registers auth modes (v2 certificates), so there is nothing to compare.
  * Shared by [matchAdvertised] and the engine's check, so both apply one rule.
  */
-fun List<GeoCertificate>.permitAdvertised(advertised: Set<WiFiAuthMode>): Boolean? {
+fun List<GeoCertificate>.permitAdvertised(advertised: AdvertisedSecurity): Boolean? {
     val registering = filter { it.wifi.authModeNames.isNotEmpty() }
     if (registering.isEmpty()) return null
     return registering.any { it.wifi.permits(advertised) }
@@ -45,20 +46,20 @@ fun List<GeoCertificate>.permitAdvertised(advertised: Set<WiFiAuthMode>): Boolea
  * unknown critical feature withhold a mismatch, and so does a shared SSID,
  * where another operator's network may legitimately differ.
  */
-fun matchAdvertised(ssid: String, advertised: Set<WiFiAuthMode>, registeredHere: List<GeoCertificate>): AdvertisedMatch? {
+fun matchAdvertised(ssid: String, advertised: AdvertisedSecurity, registeredHere: List<GeoCertificate>): AdvertisedMatch? {
     val certs = registeredHere.filter { it.wifi.ssid?.equals(ssid, ignoreCase = true) == true }
     if (certs.isEmpty()) return null
     val evaluable = certs.filter { it.isEvaluable() }
     return when {
         evaluable.isEmpty() -> AdvertisedMatch.Undecided(certs, "registered with features this app doesn't support")
-        advertised.isEmpty() -> AdvertisedMatch.Undecided(certs, "its security type isn't recognised")
+        advertised.modes.isEmpty() -> AdvertisedMatch.Undecided(certs, "its security type isn't recognised")
         else -> when (evaluable.permitAdvertised(advertised)) {
             null -> AdvertisedMatch.Undecided(certs, "the registration names no security type")
             true -> AdvertisedMatch.Matches(certs)
             false -> when {
                 evaluable.size < certs.size -> AdvertisedMatch.Undecided(certs, "some registrations use features this app doesn't support")
                 certs.any { it.wifi.ssidShared } -> AdvertisedMatch.Undecided(certs, "several operators share this name here")
-                else -> AdvertisedMatch.Mismatch(certs, evaluable.flatMap { it.wifi.authModeNames }.distinct(), advertised)
+                else -> AdvertisedMatch.Mismatch(certs, evaluable.flatMap { it.wifi.authModeNames }.distinct(), advertised.modes)
             }
         }
     }

@@ -4,7 +4,7 @@ import android.net.Network
 import com.thesis.geckowifi.data.model.GeoCertificate
 import com.thesis.geckowifi.data.model.VerificationResult
 import com.thesis.geckowifi.data.model.VerificationState
-import com.thesis.geckowifi.data.model.WiFiAuthMode
+import com.thesis.geckowifi.network.RsnProfile
 import com.thesis.geckowifi.eduroam.EduroamFixtures.now
 import com.thesis.geckowifi.eduroam.EduroamFixtures.realmKey
 import com.thesis.geckowifi.eduroam.EduroamFixtures.record
@@ -30,7 +30,7 @@ import org.junit.Test
 class EnterpriseOnboardingTest {
     private val store = InMemoryAccountStore()
     private val alice = store.save("alice@homeuni.test", "s3cret")
-    private val target = EnterpriseTarget("eduroam-lab", "96:83:c4:97:c2:3a", setOf(WiFiAuthMode.WPA2_ENTERPRISE))
+    private val target = EnterpriseTarget("eduroam-lab", "96:83:c4:97:c2:3a", RsnProfile.fromCapabilities("[RSN-EAP/SHA1-CCMP][ESS]"))
     private val area = QueryArea(47.3765, 8.5482, 50)
     private val registered = VerificationResult(VerificationState.REGISTERED, "eduroam-lab", matchedCertificateId = "site-cert")
 

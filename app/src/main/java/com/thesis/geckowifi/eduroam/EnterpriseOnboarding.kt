@@ -2,7 +2,9 @@ package com.thesis.geckowifi.eduroam
 
 import android.net.Network
 import com.thesis.geckowifi.data.model.VerificationResult
-import com.thesis.geckowifi.data.model.WiFiAuthMode
+import com.thesis.geckowifi.data.model.AdvertisedSecurity
+import com.thesis.geckowifi.network.RsnProfile
+import com.thesis.geckowifi.network.admissibleModes
 import com.thesis.geckowifi.verification.VerificationEngine
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -25,17 +27,17 @@ data class QueryArea(val lat: Double, val lng: Double, val radiusMeters: Int)
 
 /**
  * An access point of the target SSID, from the scan. [wpa3] drives the Wi-Fi security type of the
- * onboarding specifier and the pinned suggestion, and is true only for a WPA3-Enterprise-*only* AP
- * (see [com.thesis.geckowifi.network.isWpa3EnterpriseOnly]); a WPA2/WPA3 transition AP is false, so
- * it is matched by the WPA2-Enterprise specifier Android expects for it. [authModes] (from
- * [com.thesis.geckowifi.network.parseAuthModes]) still drives the site/verdict comparison.
+ * onboarding specifier and the pinned suggestion.
  */
 data class EnterpriseTarget(
     val ssid: String,
     val bssid: String?,
-    val authModes: Set<WiFiAuthMode>,
+    /** What the access point claims in its beacon; see [RsnProfile]. */
+    val profile: RsnProfile,
     val wpa3: Boolean = false
-)
+) {
+    val advertised: AdvertisedSecurity get() = AdvertisedSecurity(profile.admissibleModes(), profile.mfpr)
+}
 
 /** What the onboarding session found out (phase 1); no secret was involved. */
 data class OnboardingReport(
@@ -108,7 +110,7 @@ class EnterpriseOnboarding(
         step(EnterpriseStep.CHECK_NETWORK)
         val session = transport.withOnboardingNetwork(OnboardingTarget(target.ssid, target.bssid, target.wpa3), onboardingTimeoutMs) { network ->
             val siteCheck = engineFor(network).checkAdvertisedSite(
-                "enterprise:${target.bssid ?: target.ssid}", target.ssid, target.authModes,
+                "enterprise:${target.bssid ?: target.ssid}", target.ssid, target.advertised,
                 area.lat, area.lng, null, area.radiusMeters
             )
             val site = EnterpriseSite.from(target.ssid, siteCheck.certificates)
