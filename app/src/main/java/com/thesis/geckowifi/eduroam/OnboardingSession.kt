@@ -8,7 +8,6 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.wifi.WifiEnterpriseConfig
 import android.net.wifi.WifiNetworkSpecifier
-import android.os.Build
 import android.util.Log
 import com.thesis.geckowifi.R
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -49,7 +48,7 @@ object OnboardingIdentity {
 }
 
 /** The access point to onboard through: the SSID, and the BSSID from the scan so the test hits the intended AP. */
-data class OnboardingTarget(val ssid: String, val bssid: String?, val wpa3: Boolean = false)
+data class OnboardingTarget(val ssid: String, val bssid: String?, val security: EapSecurity = EapSecurity.WPA2)
 
 sealed interface OnboardingOutcome<out T> {
     /** The session came up; [value] is what the block returned. The session is already released. */
@@ -102,7 +101,7 @@ class SpecifierOnboardingSession(private val context: Context) : OnboardingTrans
         val specifier = WifiNetworkSpecifier.Builder()
             .setSsid(target.ssid)
             .apply { target.bssid?.let { setBssid(MacAddress.fromString(it)) } }
-            .apply { setEnterpriseConfig(target.wpa3, enterprise) }
+            .apply { setEnterpriseConfig(target.security, enterprise) }
             .build()
         val request = NetworkRequest.Builder()
             .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)

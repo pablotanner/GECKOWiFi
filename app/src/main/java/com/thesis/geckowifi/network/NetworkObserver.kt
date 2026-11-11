@@ -60,8 +60,7 @@ class NetworkObserver(private val context: Context) {
                 bssid = it.BSSID,
                 profile = securityProfile(it),
                 frequencyMhz = it.frequency,
-                rssi = it.level,
-                securityTypes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) it.securityTypes.toList() else emptyList()
+                rssi = it.level
             )
         }.also(::logMixedFloors)
 

@@ -1,6 +1,5 @@
 package com.thesis.geckowifi.network
 
-import android.net.wifi.WifiInfo
 import com.thesis.geckowifi.data.model.AdvertisedSecurity
 import com.thesis.geckowifi.data.model.WiFiAuthMode
 import com.thesis.geckowifi.verification.ObservedAuthServer
@@ -29,14 +28,7 @@ sealed class ScannedNetwork {
         val profile: RsnProfile,
         val frequencyMhz: Int = 0,
         /** Signal strength in dBm (higher = stronger). */
-        val rssi: Int = Int.MIN_VALUE,
-        /**
-         * Android's own classification of this AP ([android.net.wifi.ScanResult.getSecurityTypes],
-         * `WifiInfo.SECURITY_TYPE_*`). Empty on API < 31, where that call is unavailable. Used only to
-         * pick the Wi-Fi security type for the connect specifier/suggestion ([requiresWpa3EnterpriseSpecifier]);
-         * [authModes] remains the source for the verdict.
-         */
-        val securityTypes: List<Int> = emptyList()
+        val rssi: Int = Int.MIN_VALUE
     ) : ScannedNetwork() {
         /** Every mode a client could end up in with this AP ([admissibleModes]), compared with the registered `auth_modes`. */
         val authModes: Set<WiFiAuthMode> = profile.admissibleModes()
@@ -52,17 +44,6 @@ sealed class ScannedNetwork {
         /** 802.1X (WPA2/WPA3-Enterprise): joined with an account, e.g. eduroam. */
         val isEnterprise: Boolean
             get() = authModes.any { it.isEnterprise }
-
-        /**
-         * Whether the connect specifier/suggestion must request WPA3-Enterprise rather than
-         * WPA2-Enterprise, decided from Android's own [securityTypes] (not the capability string). A
-         * WPA2/WPA3-Enterprise transition AP reports `SECURITY_TYPE_EAP` and is matched only by a
-         * WPA2-Enterprise specifier, so WPA3 is requested solely when Android reports WPA3-Enterprise
-         * without plain EAP. Empty security types (API < 31) fall back to WPA2-Enterprise.
-         */
-        val requiresWpa3EnterpriseSpecifier: Boolean
-            get() = WifiInfo.SECURITY_TYPE_EAP_WPA3_ENTERPRISE in securityTypes &&
-                WifiInfo.SECURITY_TYPE_EAP !in securityTypes
 
         /** IEEE channel number derived from [frequencyMhz], or null if unknown. */
         val channel: Int?

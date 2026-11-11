@@ -1,6 +1,7 @@
 package com.thesis.geckowifi.eduroam
 
 import com.thesis.geckowifi.data.model.GeoCertificate
+import com.thesis.geckowifi.data.model.WiFiAuthMode
 import com.thesis.geckowifi.data.model.VerificationResult
 import com.thesis.geckowifi.data.model.VerificationState
 
@@ -18,6 +19,8 @@ class EnterpriseSite private constructor(
     val localRealms: List<String>,
     /** Display name of the operator (`subject.name`), if all registrations agree on one. */
     val operatorName: String?,
+    /** Registered `auth_modes` of its registrations; empty if none names any (v2 certificates). */
+    val authModes: Set<WiFiAuthMode>,
     private val certificates: List<GeoCertificate>
 ) {
     fun isLocal(realm: String): Boolean =
@@ -41,6 +44,7 @@ class EnterpriseSite private constructor(
                 federation = enterprise.firstNotNullOfOrNull { it.wifi.enterprise?.federation?.takeIf(String::isNotBlank) }?.lowercase(),
                 localRealms = enterprise.flatMap { it.wifi.enterprise!!.aaa.flatMap { a -> a.realms } }.distinct(),
                 operatorName = enterprise.mapNotNull { it.subject?.name }.distinct().singleOrNull(),
+                authModes = enterprise.flatMap { it.wifi.authModes }.toSet(),
                 certificates = enterprise
             )
         }

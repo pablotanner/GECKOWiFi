@@ -1,6 +1,7 @@
 package com.thesis.geckowifi.eduroam
 
 import android.net.Network
+import android.os.Build
 import com.thesis.geckowifi.data.model.VerificationResult
 import com.thesis.geckowifi.data.model.AdvertisedSecurity
 import com.thesis.geckowifi.network.RsnProfile
@@ -25,16 +26,12 @@ enum class EnterpriseStep {
 /** Device location for the site query. */
 data class QueryArea(val lat: Double, val lng: Double, val radiusMeters: Int)
 
-/**
- * An access point of the target SSID, from the scan. [wpa3] drives the Wi-Fi security type of the
- * onboarding specifier and the pinned suggestion.
- */
+/** An access point of the target SSID, from the scan. */
 data class EnterpriseTarget(
     val ssid: String,
     val bssid: String?,
-    /** What the access point claims in its beacon; see [RsnProfile]. */
-    val profile: RsnProfile,
-    val wpa3: Boolean = false
+    /** What the access point claims in its beacon; decides the 802.1X type to request ([chooseEnterpriseSecurity]). */
+    val profile: RsnProfile
 ) {
     val advertised: AdvertisedSecurity get() = AdvertisedSecurity(profile.admissibleModes(), profile.mfpr)
 }
@@ -80,7 +77,8 @@ class EnterpriseOnboarding(
     private val realmKey: () -> PublicKey = { PinnedRealmKey.publicKey },
     private val clock: () -> Instant = Instant::now,
     private val onboardingTimeoutMs: Int = 60_000,
-    private val connectTimeoutMs: Long = 60_000
+    private val connectTimeoutMs: Long = 60_000,
+    private val sdkInt: Int = Build.VERSION.SDK_INT
 ) {
     /** Phase 1 from a saved registration, without onboarding (D21); see [checkSaved]. */
     fun checkSaved(
@@ -107,8 +105,13 @@ class EnterpriseOnboarding(
         if (!supports(target.ssid)) return OnboardingReport(
             "this prototype only onboards on the lab network (${OnboardingIdentity.LAB_SSIDS.joinToString()})", null, null, emptyList())
 
+        // Registration not known yet: the onboarding session sends nothing secret, so the beacon decides.
+        val security = when (val choice = chooseEnterpriseSecurity(null, target.profile, sdkInt)) {
+            is SecurityChoice.Refused -> return OnboardingReport(choice.reason, null, null, emptyList())
+            is SecurityChoice.Use -> choice.specifier
+        }
         step(EnterpriseStep.CHECK_NETWORK)
-        val session = transport.withOnboardingNetwork(OnboardingTarget(target.ssid, target.bssid, target.wpa3), onboardingTimeoutMs) { network ->
+        val session = transport.withOnboardingNetwork(OnboardingTarget(target.ssid, target.bssid, security), onboardingTimeoutMs) { network ->
             val siteCheck = engineFor(network).checkAdvertisedSite(
                 "enterprise:${target.bssid ?: target.ssid}", target.ssid, target.advertised,
                 area.lat, area.lng, null, area.radiusMeters
@@ -162,7 +165,11 @@ class EnterpriseOnboarding(
         onStep: (EnterpriseStep) -> Unit = {}
     ): ConnectOutcome {
         onStep(EnterpriseStep.CONNECT)
-        val install = EnterpriseProfileBuilder.install(pins, account, TargetNetwork(target.ssid, target.wpa3, site.federation), installer)
+        val security = when (val choice = chooseEnterpriseSecurity(site.authModes.ifEmpty { null }, target.profile, sdkInt)) {
+            is SecurityChoice.Refused -> return ConnectOutcome(InstallOutcome.Failed(choice.reason), null)
+            is SecurityChoice.Use -> choice.suggestions
+        }
+        val install = EnterpriseProfileBuilder.install(pins, account, TargetNetwork(target.ssid, security, site.federation), installer)
         if (install !is InstallOutcome.Installed) return ConnectOutcome(install, null)
         return ConnectOutcome(install, installer.awaitConnected(target.ssid, connectTimeoutMs))
     }

@@ -32,7 +32,7 @@ class SuggestionProfileInstaller(context: Context) : EnterpriseProfileInstaller 
     private val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
     /** What this process added, by SSID, for [remove] and [installedSsids] on API 29 (no [WifiManager.getNetworkSuggestions]). */
-    private val added = mutableMapOf<String, WifiNetworkSuggestion>()
+    private val added = mutableMapOf<String, List<WifiNetworkSuggestion>>()
 
     override suspend fun install(plan: ProfilePlan, password: String): InstallOutcome {
         val config = WifiEnterpriseConfig().apply {
@@ -53,22 +53,25 @@ class SuggestionProfileInstaller(context: Context) : EnterpriseProfileInstaller 
             // wpa_supplicant's domain_suffix_match takes a ';'-separated list.
             domainSuffixMatch = plan.serverNames.joinToString(";")
         }
-        val suggestion = try {
-            WifiNetworkSuggestion.Builder()
-                .setSsid(plan.ssid)
-                .apply { setEnterpriseConfig(plan.wpa3, config) }
-                .build()
+        // One per security type, same pins: see chooseEnterpriseSecurity.
+        val suggestions = try {
+            plan.security.map { security ->
+                WifiNetworkSuggestion.Builder()
+                    .setSsid(plan.ssid)
+                    .apply { setEnterpriseConfig(security, config) }
+                    .build()
+            }
         } catch (e: IllegalArgumentException) {
             // Android rejects enterprise configs without CA + domain (API 30+), among others.
             return InstallOutcome.Failed("Android rejected the profile: ${e.message}")
         }
 
         remove(plan.ssid)
-        val status = wifi.addNetworkSuggestions(listOf(suggestion))
-        Log.i(TAG, "addNetworkSuggestions(${plan.ssid}) = $status")
+        val status = wifi.addNetworkSuggestions(suggestions)
+        Log.i(TAG, "addNetworkSuggestions(${plan.ssid}, ${plan.security}) = $status")
         return when (status) {
             WifiManager.STATUS_NETWORK_SUGGESTIONS_SUCCESS -> {
-                added[plan.ssid] = suggestion
+                added[plan.ssid] = suggestions
                 InstallOutcome.Installed("suggested to Android; the first time, allow the app's suggested networks in the notification")
             }
             WifiManager.STATUS_NETWORK_SUGGESTIONS_ERROR_APP_DISALLOWED ->
@@ -79,7 +82,7 @@ class SuggestionProfileInstaller(context: Context) : EnterpriseProfileInstaller 
 
     override suspend fun remove(ssid: String) {
         val ours = buildList {
-            added.keys.filter { it.equals(ssid, ignoreCase = true) }.forEach { added.remove(it)?.let(::add) }
+            added.keys.filter { it.equals(ssid, ignoreCase = true) }.forEach { added.remove(it)?.let(::addAll) }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 addAll(wifi.networkSuggestions.filter { it.ssid?.removeSurrounding("\"").equals(ssid, ignoreCase = true) })
             }

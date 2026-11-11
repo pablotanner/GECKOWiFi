@@ -59,7 +59,7 @@ class EnterpriseAccount(
             }
             return ProfilePlan(
                 ssid = network.ssid,
-                wpa3 = network.wpa3,
+                security = network.security,
                 realm = pins.realm,
                 method = pins.method,
                 phase2 = pins.phase2,
@@ -90,12 +90,17 @@ class CredentialsRefused(reason: String) : IllegalStateException("credentials re
  * registration names (null = closed network). No BSSID: a pinned profile is
  * safe on every access point of the SSID.
  */
-data class TargetNetwork(val ssid: String, val wpa3: Boolean = false, val federation: String? = null)
+data class TargetNetwork(
+    val ssid: String,
+    /** One suggestion per type; see [chooseEnterpriseSecurity]. */
+    val security: Set<EapSecurity> = setOf(EapSecurity.WPA2),
+    val federation: String? = null
+)
 
 /** Everything an installer writes into the supplicant's configuration, except the password. */
 data class ProfilePlan(
     val ssid: String,
-    val wpa3: Boolean,
+    val security: Set<EapSecurity>,
     val realm: String,
     val method: EapMethod,
     val phase2: Phase2,
