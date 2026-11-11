@@ -26,6 +26,7 @@ import androidx.compose.ui.semantics.semantics
 import com.thesis.geckowifi.data.model.PortalDomainRole
 import com.thesis.geckowifi.data.model.WiFiAuthMode
 import com.thesis.geckowifi.network.ScannedNetwork
+import com.thesis.geckowifi.network.floor
 import com.thesis.geckowifi.ui.CheckDetail
 import com.thesis.geckowifi.ui.components.DetailRow
 import com.thesis.geckowifi.ui.components.SectionCard
@@ -63,9 +64,10 @@ fun Set<WiFiAuthMode>.securityNames(): String =
 data class LoginServerCheck(val connected: Boolean, val onCheck: () -> Unit)
 
 /**
- * What GECKO knows about a registered network, from the scan and the map
- * answer, before (or apart from) connecting. Opened two ways:
- * - the info button of any registered row in the list;
+ * What GECKO knows about a network, from the scan and the map answer, before
+ * (or apart from) connecting: its access points ([accessPoints]) and, if it is
+ * registered here ([match] not null), the registration. Opened two ways:
+ * - the info button of any row in the list (lab mode: of any access point);
  * - tapping a row whose advertised security type contradicts its registration
  *   ([AdvertisedMatch.Mismatch], e.g. an open twin of a WPA2 network): the
  *   sheet then replaces connecting, and the safe action leads.
@@ -84,7 +86,8 @@ data class LoginServerCheck(val connected: Boolean, val onCheck: () -> Unit)
 @Composable
 fun RegistrationSheet(
     network: ScannedNetwork.Real,
-    match: AdvertisedMatch,
+    accessPoints: List<ScannedNetwork.Real>,
+    match: AdvertisedMatch?,
     onDismiss: () -> Unit,
     onConnectAnyway: (() -> Unit)?,
     loginServerCheck: LoginServerCheck? = null,
@@ -94,7 +97,7 @@ fun RegistrationSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val mismatch = match as? AdvertisedMatch.Mismatch
-    val certs = match.certificates
+    val certs = match?.certificates.orEmpty()
     val operators = certs.mapNotNull { it.subject?.name }.distinct()
     val operator = operators.singleOrNull()
     val enterprise = certs.firstNotNullOfOrNull { it.wifi.enterprise }
@@ -117,14 +120,15 @@ fun RegistrationSheet(
             verticalArrangement = Arrangement.spacedBy(Space.md)
         ) {
             Text(network.ssid, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
-            if (mismatch != null) {
-                VerdictBadge(Tone.DANGER, "Doesn't match its registration", Icons.Outlined.GppBad)
-            } else {
-                VerdictBadge(Tone.NEUTRAL, "Registered", Icons.Outlined.Shield)
+            when {
+                mismatch != null -> VerdictBadge(Tone.DANGER, "Doesn't match its registration", Icons.Outlined.GppBad)
+                match != null -> VerdictBadge(Tone.NEUTRAL, "Registered", Icons.Outlined.Shield)
             }
 
             Text(
                 when {
+                    match == null ->
+                        "GECKO knows of no registration for ${network.ssid} here, so it can only show what the network advertises."
                     mismatch != null ->
                         "${network.ssid} is registered here as ${mismatch.registered.securityNames()}, but this network is " +
                             "${mismatch.advertised.securityNames()}. The real network doesn't look like this, so someone may be imitating it. Don't connect."
@@ -144,11 +148,32 @@ fun RegistrationSheet(
                 style = MaterialTheme.typography.bodyLarge
             )
 
-            SectionCard("Registration") {
+            // Per access point; transition and mixed setups show up here (each AP is judged on its own).
+            SectionCard(if (accessPoints.size == 1) "Access point" else "Access points") {
+                accessPoints.forEach { ap ->
+                    DetailRow(
+                        ap.bssid ?: "Unknown",
+                        listOfNotNull(
+                            listOfNotNull(ap.channel?.let { "ch $it" }, ap.band, ap.rssi.takeIf { it != Int.MIN_VALUE }?.let { "$it dBm" })
+                                .joinToString(" · ").ifEmpty { null },
+                            ap.authModes.securityNames(),
+                            if (ap.profile.mfpr) "PMF required" else if (ap.profile.mfpc) "PMF optional" else null
+                        ).joinToString("\n")
+                    )
+                }
+                if (accessPoints.map { it.authModes.floor }.distinct().size > 1) {
+                    Text(
+                        "These access points don't all offer the same security. GECKO judges each one on its own.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(top = Space.sm)
+                    )
+                }
+            }
+
+            if (match != null) SectionCard("Registration") {
                 if (operators.isNotEmpty()) DetailRow("Registered by", operators.joinToString("\n"), mono = false)
                 if (certs.size > 1) DetailRow("Registrations", "${certs.size}", mono = false)
                 DetailRow("Registered security", registeredModes.securityNames().ifEmpty { "Not specified" }, mono = false)
-                DetailRow("This network", network.authModes.securityNames(), mono = false)
                 if (loginPages.isNotEmpty()) DetailRow("Login page", loginPages.joinToString("\n"))
                 if (otherPages.isNotEmpty()) DetailRow("Other pages", otherPages.joinToString("\n"))
                 if (servers.isNotEmpty()) DetailRow("Login server", servers.joinToString("\n"))

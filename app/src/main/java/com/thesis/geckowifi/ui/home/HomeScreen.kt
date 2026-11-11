@@ -52,6 +52,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import com.thesis.geckowifi.data.model.VerificationState
+import com.thesis.geckowifi.data.model.WiFiAuthMode
 import com.thesis.geckowifi.network.ScannedNetwork
 import com.thesis.geckowifi.ui.CheckDetail
 import com.thesis.geckowifi.ui.VerificationViewModel
@@ -88,30 +89,11 @@ fun HomeScreen(
 
     val known = viewModel.certLookup == LookupStatus.OK
     val registeredSsids = viewModel.registeredHere.mapNotNull { it.wifi.ssid?.lowercase() }.toSet()
-    // Who registered each SSID here, for the list ("Registered with GECKO by ETH Zürich").
-    val registrants = viewModel.registeredHere
-        .mapNotNull { cert -> cert.wifi.ssid?.lowercase()?.let { it to cert.subject?.name } }
-        .groupBy({ it.first }, { it.second })
-        .mapValues { (_, names) -> names.filterNotNull().distinct().singleOrNull() }
-    // The federation an enterprise SSID is registered in ("eduroam"), for the row's second line.
-    val federations = viewModel.registeredHere
-        .mapNotNull { cert ->
-            val ssid = cert.wifi.ssid?.lowercase()
-            val federation = cert.wifi.enterprise?.federation?.takeIf { it.isNotBlank() }
-            if (ssid != null && federation != null) ssid to federation else null
-        }
-        .toMap()
     val rows = buildRows(viewModel.scannedNetworks)
-    // Real SSIDs that resolve to more than one row (same name, different security types, e.g.
-    // WPA2- vs WPA3-Enterprise eduroam-lab): their rows need the security type to be told apart.
-    val duplicatedSsids = rows
-        .filter { it.primary is ScannedNetwork.Real }
-        .groupingBy { it.primary.ssid.lowercase() }.eachCount()
-        .filterValues { it > 1 }.keys
     val busy = viewModel.activeCheck != null
 
-    // The registered network whose registration sheet is open, if any.
-    var sheetFor by remember { mutableStateOf<ScannedNetwork.Real?>(null) }
+    // The access points whose info sheet is open (the first is the one shown), if any.
+    var sheetFor by remember { mutableStateOf<List<ScannedNetwork.Real>?>(null) }
 
     val connect: (ScannedNetwork) -> Unit = {
         // Wi-Fi off: startCheck explains; the panel has the switch to turn it on.
@@ -121,10 +103,7 @@ fun HomeScreen(
     val list = ListContext(
         viewModel = viewModel,
         busy = busy,
-        registrantOf = { ssid -> registrants[ssid.lowercase()] },
-        federationOf = { ssid -> federations[ssid.lowercase()] },
-        isDuplicateSsid = { ssid -> ssid.lowercase() in duplicatedSsids },
-        onShowRegistration = { sheetFor = it },
+        onShowInfo = { sheetFor = it },
         onOpenCheck = onOpenCheck,
         onAndroidSettings = { network ->
             Toast.makeText(
@@ -163,25 +142,24 @@ fun HomeScreen(
         }
     }
 
-    sheetFor?.let { network ->
-        val match = viewModel.advertisedMatch(network)
-        if (match == null) {
-            sheetFor = null
-        } else {
-            RegistrationSheet(
-                network = network,
-                match = match,
-                onDismiss = { sheetFor = null },
-                onConnectAnyway = if (network.isOpen && !busy) ({ sheetFor = null; connect(network) }) else null,
-                loginServerCheck = if (viewModel.rootAvailable && !network.isOpen && !busy) LoginServerCheck(
-                    connected = viewModel.isConnectedTo(network.ssid),
-                    onCheck = { sheetFor = null; viewModel.checkLoginServer(network) }
-                ) else null,
-                latest = viewModel.latestVerdictFor(network.ssid),
-                onOpenCheck = { id -> sheetFor = null; onOpenCheck(id) },
-                savedAt = viewModel.registrationsSavedAt
-            )
-        }
+    sheetFor?.let { aps ->
+        val network = aps.first()
+        val match = aps.firstNotNullOfOrNull { viewModel.advertisedMatch(it) as? AdvertisedMatch.Mismatch }
+            ?: viewModel.advertisedMatch(network)
+        RegistrationSheet(
+            network = network,
+            accessPoints = aps,
+            match = match,
+            onDismiss = { sheetFor = null },
+            onConnectAnyway = if (network.isOpen && !busy) ({ sheetFor = null; connect(network) }) else null,
+            loginServerCheck = if (match != null && viewModel.rootAvailable && !network.isOpen && !busy) LoginServerCheck(
+                connected = viewModel.isConnectedTo(network.ssid),
+                onCheck = { sheetFor = null; viewModel.checkLoginServer(network) }
+            ) else null,
+            latest = viewModel.latestVerdictFor(network.ssid),
+            onOpenCheck = { id -> sheetFor = null; onOpenCheck(id) },
+            savedAt = viewModel.registrationsSavedAt
+        )
     }
 
     Column(Modifier.fillMaxWidth()) {
@@ -243,19 +221,20 @@ fun HomeScreen(
 }
 
 /**
- * One list row per SSID: Android reports every access point (BSSID) as its
- * own scan result, so a campus network would otherwise appear dozens of
- * times. Groups are ordered by their strongest AP. In the normal view the
- * strongest AP is joined; in lab mode a group expands to its APs so a
- * specific one (Router A vs. B) can be joined.
+ * One list row per network, as in Android's Wi-Fi list: Android reports every
+ * access point (BSSID) as its own scan result, so a campus network would
+ * otherwise appear dozens of times. Groups are ordered by their strongest AP.
+ * In the normal view the strongest AP is joined; in lab mode a group expands
+ * to its APs so a specific one (Router A vs. B) can be joined.
  */
 private class NetworkRow(val primary: ScannedNetwork, val accessPoints: List<ScannedNetwork.Real>)
 
 private fun buildRows(networks: List<ScannedNetwork>): List<NetworkRow> {
-    // Grouped by SSID *and* security type: an open "eduroam" next to the real one is a
-    // different network and gets its own row (and its own verdict), as in Android's settings.
+    // Grouped by SSID and security family, as Android's own list does (WifiTrackerLib
+    // StandardWifiEntry.ScanResultKey: Open+OWE, WPA2+WPA3-Personal, WPA2+WPA3-Enterprise; WEP and
+    // 192-bit apart). An open "eduroam" next to the real one gets its own row and verdict.
     val realRows = networks.filterIsInstance<ScannedNetwork.Real>()
-        .groupBy { it.ssid to it.authModes }.values
+        .groupBy { ap -> ap.ssid to ap.authModes.map { it.listFamily }.toSet() }.values
         .map { aps -> aps.sortedByDescending { it.rssi } }
         .sortedByDescending { it.first().rssi }
         .map { NetworkRow(it.first(), it) }
@@ -263,14 +242,15 @@ private fun buildRows(networks: List<ScannedNetwork>): List<NetworkRow> {
     return realRows + networks.filter { it !is ScannedNetwork.Real }.map { NetworkRow(it, emptyList()) }
 }
 
+/** The security family Android's Wi-Fi list groups by. */
+private val WiFiAuthMode.listFamily: Any
+    get() = if (this == WiFiAuthMode.WEP || this == WiFiAuthMode.WPA3_ENTERPRISE_192) this else family
+
 private class ListContext(
     val viewModel: VerificationViewModel,
     val busy: Boolean,
-    val registrantOf: (ssid: String) -> String?,
-    val federationOf: (ssid: String) -> String?,
-    /** Whether this SSID appears in more than one row, so its rows need the security type to disambiguate. */
-    val isDuplicateSsid: (ssid: String) -> Boolean,
-    val onShowRegistration: (ScannedNetwork.Real) -> Unit,
+    /** Opens the info sheet for these access points. */
+    val onShowInfo: (List<ScannedNetwork.Real>) -> Unit,
     val onOpenCheck: (String) -> Unit,
     val onAndroidSettings: (ScannedNetwork.Real) -> Unit,
     val isExpanded: (ssid: String, registered: Boolean) -> Boolean,
@@ -282,15 +262,20 @@ private class ListContext(
 private fun ListContext.matchOf(network: ScannedNetwork): AdvertisedMatch? =
     (network as? ScannedNetwork.Real)?.let { viewModel.advertisedMatch(it) }
 
+/** A row's judgement: a mismatching access point inside it wins, so an impostor can't hide in the group. */
+private fun ListContext.matchOf(row: NetworkRow): AdvertisedMatch? =
+    row.accessPoints.firstNotNullOfOrNull { matchOf(it) as? AdvertisedMatch.Mismatch } ?: matchOf(row.primary)
+
 /**
  * What tapping a row does (docs/eduroam-decisions.md, D20): connect. A network
  * that contradicts its registration shows the warning first; the network the
  * device is already on through GECKO opens its last result instead of
  * connecting again; what GECKO can't handle goes to Android's Wi-Fi settings.
  */
-private fun ListContext.open(network: ScannedNetwork) {
+private fun ListContext.open(network: ScannedNetwork, row: NetworkRow? = null) {
     val real = network as? ScannedNetwork.Real
-    if (real != null && matchOf(real) is AdvertisedMatch.Mismatch) return onShowRegistration(real)
+    val match = row?.let { matchOf(it) } ?: matchOf(network)
+    if (real != null && match is AdvertisedMatch.Mismatch) return onShowInfo(row?.accessPoints ?: listOf(real))
     val connectedVerdict = real?.takeIf { it.ssid.equals(viewModel.deviceSsid, ignoreCase = true) }
         ?.let { viewModel.latestVerdictFor(it.ssid) }?.takeIf { it.enterprise != null }
     if (connectedVerdict != null) return onOpenCheck(connectedVerdict.id)
@@ -310,30 +295,29 @@ private fun LazyListScope.networkSection(title: String, rows: List<NetworkRow>, 
     item(key = "header:$title") { SectionHeader(title) }
     rows.forEach { row ->
         val ssid = row.primary.ssid
-        val open = (row.primary as? ScannedNetwork.Real)?.isOpen ?: true
-        // Only an open SSID with several APs has a choice worth expanding; a single AP is joined directly.
-        val expandable = ctx.viewModel.labMode && open && row.accessPoints.size > 1 &&
-            ctx.matchOf(row.primary) !is AdvertisedMatch.Mismatch
+        val match = if (registered) ctx.matchOf(row) else null
+        // Lab mode: a group of several APs expands so a specific one can be joined; a single AP is joined directly.
+        val expandable = ctx.viewModel.labMode && row.accessPoints.size > 1 && match !is AdvertisedMatch.Mismatch
         val expanded = expandable && ctx.isExpanded(ssid, registered)
         item(key = "$title:$ssid:${row.primary.bssid}") {
             NetworkListItem(
                 row = row,
                 registered = registered,
-                match = if (registered) ctx.matchOf(row.primary) else null,
-                supporting = supportingText(row, ctx, registered),
-                onInfo = (row.primary as? ScannedNetwork.Real)?.takeIf { registered }?.let { r -> { ctx.onShowRegistration(r) } },
+                match = match,
+                supporting = supportingText(row, ctx, match),
+                onInfo = row.accessPoints.takeIf { it.isNotEmpty() }?.let { aps -> { ctx.onShowInfo(aps) } },
                 // An expanded group shows each AP's own result instead.
                 latest = if (expanded) null else ctx.latestFor(row.accessPoints.ifEmpty { listOf(row.primary) }),
-                labMode = ctx.viewModel.labMode,
                 expandable = expandable,
                 expanded = expanded,
                 enabled = !ctx.busy,
-                onClick = { if (expandable) ctx.onToggle(ssid, registered) else ctx.open(row.primary) }
+                onClick = { if (expandable) ctx.onToggle(ssid, registered) else ctx.open(row.primary, row) }
             )
         }
         if (expanded) {
             items(row.accessPoints, key = { "$title:$ssid:ap:${it.bssid}" }) { ap ->
-                AccessPointItem(ap, ctx.latestFor(listOf(ap)), enabled = !ctx.busy, onClick = { ctx.open(ap) })
+                AccessPointItem(ap, ctx.latestFor(listOf(ap)), enabled = !ctx.busy, onClick = { ctx.open(ap) },
+                    onInfo = { ctx.onShowInfo(listOf(ap)) })
             }
         }
     }
@@ -341,21 +325,21 @@ private fun LazyListScope.networkSection(title: String, rows: List<NetworkRow>, 
 
 /** Lab mode: one access point inside an expanded SSID group. Tapping it joins exactly this BSSID. */
 @Composable
-private fun AccessPointItem(ap: ScannedNetwork.Real, latest: CheckDetail?, enabled: Boolean, onClick: () -> Unit) {
+private fun AccessPointItem(ap: ScannedNetwork.Real, latest: CheckDetail?, enabled: Boolean, onClick: () -> Unit, onInfo: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 52.dp)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .padding(start = 56.dp, end = Space.lg, top = Space.sm, bottom = Space.sm),
+            .padding(start = 56.dp, end = Space.xs, top = Space.sm, bottom = Space.sm),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.md)
     ) {
         Column(Modifier.weight(1f)) {
             Text(ap.bssid ?: "Unknown BSSID", fontFamily = MonoFontFamily, style = MaterialTheme.typography.bodyMedium)
             Text(
-                listOfNotNull(ap.channel?.let { "ch $it" }, ap.band, ap.rssi.takeIf { it != Int.MIN_VALUE }?.let { "$it dBm" })
+                listOfNotNull(ap.authModes.securityNames(), ap.channel?.let { "ch $it" }, ap.rssi.takeIf { it != Int.MIN_VALUE }?.let { "$it dBm" })
                     .joinToString("  "),
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.onSurfaceVariant
@@ -364,6 +348,9 @@ private fun AccessPointItem(ap: ScannedNetwork.Real, latest: CheckDetail?, enabl
         if (latest != null && latest.result.state in BADGED_STATES) {
             val v = latest.verdict()
             VerdictBadge(v.tone, v.label, v.icon)
+        }
+        IconButton(onClick = onInfo, enabled = enabled) {
+            Icon(Icons.Outlined.Info, contentDescription = "Details of ${ap.bssid}", tint = colors.onSurfaceVariant)
         }
     }
     HorizontalDivider(Modifier.padding(start = 56.dp), color = colors.outlineVariant)
@@ -378,7 +365,6 @@ private fun NetworkListItem(
     /** Shows the registration; null for networks nothing is registered for. */
     onInfo: (() -> Unit)?,
     latest: CheckDetail?,
-    labMode: Boolean,
     expandable: Boolean,
     expanded: Boolean,
     enabled: Boolean,
@@ -406,13 +392,7 @@ private fun NetworkListItem(
         Column(Modifier.weight(1f)) {
             Text(network.ssid, style = MaterialTheme.typography.bodyLarge, color = content)
             if (supporting.isNotEmpty()) {
-                val mono = labMode && real != null && real.isOpen && row.accessPoints.size == 1
-                Text(
-                    supporting,
-                    style = if (mono) MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily)
-                    else MaterialTheme.typography.bodyMedium,
-                    color = colors.onSurfaceVariant
-                )
+                Text(supporting, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
             }
         }
         when {
@@ -445,35 +425,21 @@ private fun NetworkListItem(
 private val BADGED_STATES = setOf(VerificationState.VERIFIED, VerificationState.CONFLICT)
 
 /**
- * The row's second line, one job for every row: what kind of network it is,
- * as in Android's Wi-Fi list, and who runs it if it is registered here. The
- * section already says whether it is registered; the line only explains
- * something else when there is something to act on (a mismatch). Lab mode
- * adds the access-point details.
+ * The row's second line: what kind of network it is, as in Android's Wi-Fi
+ * list (lab mode: the exact security types). It explains something else only
+ * when there is something to act on (a mismatch). The rest, such as who
+ * registered it and the access points, is in the info sheet.
  */
-private fun supportingText(row: NetworkRow, ctx: ListContext, registered: Boolean): String = when (val n = row.primary) {
+private fun supportingText(row: NetworkRow, ctx: ListContext, match: AdvertisedMatch?): String = when (val n = row.primary) {
     is ScannedNetwork.Real -> {
-        val match = if (registered) ctx.matchOf(n) else null
         val connected = n.ssid.equals(ctx.viewModel.deviceSsid, ignoreCase = true)
         val base = when {
             match is AdvertisedMatch.Mismatch -> "Registered as ${match.registered.securityNames()}, but this one is ${match.advertised.securityNames()}"
-            ctx.viewModel.labMode && n.isOpen && row.accessPoints.size == 1 ->
-                listOfNotNull(n.bssid, n.channel?.let { "ch $it" }, n.rssi.takeIf { it != Int.MIN_VALUE }?.let { "$it dBm" })
-                    .joinToString("  ")
-            else -> {
-                // When the same SSID has several rows (e.g. WPA2- vs WPA3-Enterprise eduroam-lab),
-                // the kind alone ("eduroam" / "Enterprise") is identical on each, so lead with the
-                // exact security type - from the scan, so it works even before any registration is
-                // fetched. Not a duplicate: unchanged, to keep the common row uncluttered.
-                val dup = ctx.isDuplicateSsid(n.ssid)
-                val federation = ctx.federationOf(n.ssid)
-                listOfNotNull(
-                    if (dup) n.authModes.securityNames() else n.kind(federation),
-                    federation.takeIf { dup && n.isEnterprise },
-                    if (registered) ctx.registrantOf(n.ssid) else null,
-                    row.accessPoints.size.takeIf { ctx.viewModel.labMode && it > 1 }?.let { "$it access points" }
-                ).joinToString(" · ")
-            }
+            ctx.viewModel.labMode -> listOfNotNull(
+                row.accessPoints.flatMap { it.authModes }.toSet().securityNames(),
+                row.accessPoints.size.takeIf { it > 1 }?.let { "$it access points" }
+            ).joinToString(" · ")
+            else -> n.kind
         }
         if (connected) "Connected · $base" else base
     }
@@ -481,9 +447,9 @@ private fun supportingText(row: NetworkRow, ctx: ListContext, registered: Boolea
     is ScannedNetwork.FakeEduroam -> "Simulated ${n.label}" + if (ctx.viewModel.labMode) ", login server ${n.observed.displayName}" + (n.userRealm?.let { ", realm $it" } ?: "") else ""
 }
 
-/** Open, Password or Enterprise; an enterprise network registered in a federation is named after it ("eduroam"). */
-private fun ScannedNetwork.Real.kind(federation: String?): String = when {
-    isEnterprise -> federation ?: "Enterprise"
+/** Open, Password or Enterprise, as in Android's Wi-Fi list. */
+private val ScannedNetwork.Real.kind: String get() = when {
+    isEnterprise -> "Enterprise"
     isOpen -> "Open"
     else -> "Password"
 }

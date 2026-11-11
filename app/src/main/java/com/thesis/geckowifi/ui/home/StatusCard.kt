@@ -104,7 +104,6 @@ fun StatusCard(viewModel: VerificationViewModel, onOpenCheck: (String) -> Unit, 
                     is CardState.Checking -> CheckingContent(s.check, device, onOpenWifi = openWifi, onCancel = viewModel::cancelCheck)
                     is CardState.Result -> ResultContent(
                         check = s.check,
-                        labMode = viewModel.labMode,
                         onDetails = { onOpenCheck(s.check.id) },
                         onDisconnect = viewModel::disconnect,
                         onDismiss = viewModel::dismissCurrent,
@@ -305,7 +304,6 @@ private fun StepRow(label: String, done: Boolean, active: Boolean) {
 @Composable
 private fun ResultContent(
     check: CheckDetail,
-    labMode: Boolean,
     onDetails: () -> Unit,
     onDisconnect: () -> Unit,
     onDismiss: () -> Unit,
@@ -348,9 +346,10 @@ private fun ResultContent(
             modifier = Modifier.padding(top = Space.md)
         )
     }
-    if (labMode && check.bssid != null) {
+    // The access point the result is about: for enterprise, the one Android actually joined.
+    if (check.bssid != null) {
         Text(
-            check.bssid,
+            "Access point ${check.bssid}",
             fontFamily = MonoFontFamily,
             style = MaterialTheme.typography.bodySmall,
             color = toneColors.content,
