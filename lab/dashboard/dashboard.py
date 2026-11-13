@@ -134,6 +134,16 @@ def http_status(url, timeout=3):
         return None
 
 
+def http_status_retry(url, timeout=3, wait=2.0):
+    """http_status, tried once more after `wait` s: the USB link to Router A drops for
+    ~2 s at a time, and while it is down even the laptop can't reach its own .1."""
+    st = http_status(url, timeout)
+    if st is None:
+        time.sleep(wait)
+        st = http_status(url, timeout)
+    return st
+
+
 def ping(host):
     rc, out = run(["ping", "-n", "1", "-w", "1500", host], timeout=5)
     m = re.search(r"(?:time|Zeit)[=<](\d+)", out)
@@ -388,7 +398,7 @@ def collect():
         "internet": lambda: tcp_open("1.1.1.1", 443, 3),
         "dns": lambda: bool(socket.getaddrinfo("example.com", 443)),
         "http_map": lambda: http_status(f"http://{map_probe_host}:1234/"),
-        "http_realm": lambda: http_status(f"http://{LAPTOP_IP}:1235/v1/realm/eduroam-lab/uni-wipkingen.ch"),
+        "http_realm": lambda: http_status_retry(f"http://{LAPTOP_IP}:1235/v1/realm/eduroam-lab/uni-wipkingen.ch"),
         "portal_tcp": lambda: {f"{ip}:{p}": tcp_open(ip, p, 1.5) for ip in (GENUINE_IP, ATTACKER_IP) for p in (80, 443)},
     }
     raw = {}
@@ -738,12 +748,28 @@ def evaluate(raw, state):
 
     realm = procs_where(lambda n, c: (n == "realm.exe" and " serve" in c) or (n == "go.exe" and "run . serve" in c))
     hr = raw.get("http_realm")
+    # One unanswered check (already retried once in collect) is usually a link drop on
+    # the USB adapter, not the server: only report it after two refreshes in a row.
+    realm_misses = state.streak("realm_http", bool(realm) and hr is None)
+    recent_drop = [t for t in drops if A.get("uptime", 0) - t < 120]
     if not realm:
         r.check("realm", "Laptop", "Realm server (:1235)", "fail", "Not running: visitors' realm records can't be fetched.",
                 actions=[act("realm.start", "Start realm server", "primary")], needs=["lab_ip"])
     elif hr == 200:
         r.check("realm", "Laptop", "Realm server (:1235)", "ok", "Serves eduroam-lab/uni-wipkingen.ch.",
                 actions=[act("realm.stop", "Stop", "destructive")])
+    elif hr is None and realm_misses < 2:
+        r.check("realm", "Laptop", "Realm server (:1235)", "ok",
+                "Running; the last check got no answer"
+                + (f" (the cable to Router A dropped {ago(A['uptime'] - recent_drop[-1])} ago)" if recent_drop else "")
+                + ". Retrying on the next refresh.",
+                actions=[act("realm.stop", "Stop", "destructive")])
+    elif hr is None and recent_drop:
+        r.check("realm", "Laptop", "Realm server (:1235)", "warn",
+                f"Running, but no answer on {LAPTOP_IP}:1235 for {realm_misses} checks. The cable to Router A dropped "
+                f"{ago(A['uptime'] - recent_drop[-1])} ago: while it is down, Windows takes .1 out of use. "
+                "It should answer again once the link is back.",
+                actions=[act("realm.restart", "Restart", "secondary")], needs=["lab_link_stable"])
     else:
         r.check("realm", "Laptop", "Realm server (:1235)", "fail" if hr is None else "warn",
                 "Running, but " + ("doesn't answer on 192.168.137.1:1235 (still compiling, or started before .1 existed)" if hr is None
@@ -858,7 +884,16 @@ def evaluate(raw, state):
                 age = None
             legit = rad.get("legit") or {}
             fixed_since = legit.get("age_s") is not None and age is not None and legit["age_s"] < age and r.ok("relay") and r.ok("radius_clients")
-            if age is not None and age < 900 and not fixed_since:
+            # hostapd logs the timeout ~25 s after the request it gave up on; a cable drop
+            # (port 0, laptop side) shortly before means the packets were lost on the wire.
+            after_drop = [t for t in drops if age is not None and 0 <= (A.get("uptime", 0) - t) - age <= 60]
+            if age is not None and age < 900 and not fixed_since and after_drop:
+                r.check("router_a_radius", "Router A", "Router A gets RADIUS answers", "warn",
+                        f"hostapd: 'No response from Authentication server' {ago(age)} ago, right after the cable to the laptop "
+                        "dropped. The requests were lost on the wire; FreeRADIUS is fine. A login during the drop times out, "
+                        "the next one works.",
+                        detail=err, needs=["router_a_reach", "radius_legit"])
+            elif age is not None and age < 900 and not fixed_since:
                 r.check("router_a_radius", "Router A", "Router A gets RADIUS answers", "fail",
                         f"hostapd: 'No response from Authentication server' {ago(age)} ago. Logins on eduroam-lab time out.",
                         detail=err, needs=["router_a_reach", "relay", "radius_legit", "radius_clients"])
@@ -1072,6 +1107,7 @@ class State:
         self.sudo = None
         self.prev = {}
         self.adapter_history = deque(maxlen=200)
+        self.fail_streaks = {}
         self.wake = threading.Event()
         LOGS.mkdir(exist_ok=True)
         self.state_file = LOGS / "state.json"
@@ -1095,6 +1131,13 @@ class State:
         log = tail_file(LOGS / "relay.log", 400) or ""
         targets = re.findall(r"relaying udp .*? -> ([\d.]+)", log)
         return targets[-1] if targets else None
+
+    def streak(self, key, failing):
+        """Consecutive refreshes in which `key` failed (0 once it passes again).
+        evaluate() runs once per refresh, so this counts refreshes."""
+        n = self.fail_streaks.get(key, 0) + 1 if failing else 0
+        self.fail_streaks[key] = n
+        return n
 
     def adapter_down_polls(self, now, window):
         return sum(1 for t, up in self.adapter_history if now - t < window and not up)
