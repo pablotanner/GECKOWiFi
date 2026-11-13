@@ -1194,7 +1194,12 @@ class VerificationViewModel(
             else -> {
                 // Android doesn't leave a working network for a suggestion by itself (D27).
                 val stayedOn = deviceSsid?.takeUnless { it.equals(run.target.ssid, ignoreCase = true) }
+                val refused = run.connect?.refusedSignIn
                 when {
+                    // Android tried the pinned profile and reported the sign-in failed: the network is
+                    // here, so it didn't merely stay elsewhere. Same caution as below, just known sooner.
+                    refused != null -> Triple(VerificationState.REGISTERED, CheckFailure.AUTH_NOT_COMPLETED,
+                        "pinned profile installed; $refused")
                     stayedOn != null -> Triple(VerificationState.REGISTERED, CheckFailure.ANDROID_STAYED,
                         "pinned profile installed; Android stayed on $stayedOn")
                     // In range but never authenticated: the AP answering for this SSID did not let the pinned

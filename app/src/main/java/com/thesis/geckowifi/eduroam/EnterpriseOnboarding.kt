@@ -65,7 +65,9 @@ data class ConnectOutcome(
      */
     val joined: Association? = null,
     /** Set when the negotiated mode was weaker than registered; the profile was removed again. */
-    val downgrade: String? = null
+    val downgrade: String? = null,
+    /** Set when the platform reported that signing in with the pinned profile failed (see [ConnectWait.Refused]). */
+    val refusedSignIn: String? = null
 )
 
 /**
@@ -92,8 +94,13 @@ class EnterpriseOnboarding(
     private val association: AssociationSource,
     private val realmKey: () -> PublicKey = { PinnedRealmKey.publicKey },
     private val clock: () -> Instant = Instant::now,
-    private val onboardingTimeoutMs: Int = 60_000,
-    private val connectTimeoutMs: Long = 60_000,
+    // Lab (2026-11-13, Router A's hostapd log): association to EAP success takes under 1 s;
+    // against an impostor Android gives up after 3-4 attempts within ~5 s and then sends
+    // nothing more. The rest is Android: scan, the approval dialog (onboarding, non-root),
+    // DHCP, and for the suggestion its own join schedule. 30 s leaves room for a user
+    // tapping the dialog; a refused sign-in on the saved path ends early (ConnectWait.Refused).
+    private val onboardingTimeoutMs: Int = 20_000,
+    private val connectTimeoutMs: Long = 20_000,
     private val sdkInt: Int = Build.VERSION.SDK_INT
 ) {
     /** Phase 1 from a saved registration, without onboarding (D21); see [checkSaved]. */
@@ -181,7 +188,11 @@ class EnterpriseOnboarding(
         }
         val install = EnterpriseProfileBuilder.install(pins, account, TargetNetwork(target.ssid, security, site.federation), installer)
         if (install !is InstallOutcome.Installed) return ConnectOutcome(install, null)
-        if (!installer.awaitConnected(target.ssid, connectTimeoutMs)) return ConnectOutcome(install, false)
+        when (val wait = installer.awaitConnected(target.ssid, connectTimeoutMs)) {
+            is ConnectWait.Refused -> return ConnectOutcome(install, false, refusedSignIn = wait.reason)
+            ConnectWait.TimedOut -> return ConnectOutcome(install, false)
+            ConnectWait.Connected -> Unit
+        }
         // The beacon was a claim; what was negotiated is the authenticated answer.
         val joined = association.current()
         val mode = joined?.mode

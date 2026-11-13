@@ -96,31 +96,68 @@ class SuggestionProfileInstaller(context: Context) : EnterpriseProfileInstaller 
         // API 29 can't read them back: only what this process added (lost track of after a restart).
         else added.keys.toSet()
 
+    /**
+     * Waits for the connection, and on API 30+ also listens for Android's report that
+     * signing in with one of our suggestions failed (`SuggestionConnectionStatusListener`).
+     * Against an impostor Android gives up after a few attempts within seconds and then
+     * stays quiet, so without that report the wait always ran into the timeout.
+     */
     @SuppressLint("MissingPermission")
-    override suspend fun awaitConnected(ssid: String, timeoutMs: Long): Boolean {
+    override suspend fun awaitConnected(ssid: String, timeoutMs: Long): ConnectWait {
         val request = NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build()
-        return withTimeoutOrNull(timeoutMs) {
-            suspendCancellableCoroutine { cont ->
-                val onCaps = { callback: ConnectivityManager.NetworkCallback, caps: NetworkCapabilities ->
-                    if (connectedSsid(caps).equals(ssid, ignoreCase = true) && cont.isActive) {
-                        runCatching { connectivity.unregisterNetworkCallback(callback) }
-                        cont.resume(true)
-                    }
+        val started = System.currentTimeMillis()
+        val result: ConnectWait = withTimeoutOrNull(timeoutMs) {
+            suspendCancellableCoroutine<ConnectWait> { cont ->
+                var statusListener: Any? = null
+                lateinit var callback: ConnectivityManager.NetworkCallback
+                fun finish(wait: ConnectWait) {
+                    if (!cont.isActive) return
+                    runCatching { connectivity.unregisterNetworkCallback(callback) }
+                    removeStatusListener(statusListener)
+                    cont.resume(wait)
+                }
+                val onCaps = { caps: NetworkCapabilities ->
+                    if (connectedSsid(caps).equals(ssid, ignoreCase = true)) finish(ConnectWait.Connected)
                 }
                 // FLAG_INCLUDE_LOCATION_INFO: without it, WifiInfo.ssid is redacted on API 31+.
-                val callback = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                callback = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     object : ConnectivityManager.NetworkCallback(FLAG_INCLUDE_LOCATION_INFO) {
-                        override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) = onCaps(this, caps)
+                        override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) = onCaps(caps)
                     }
                 } else {
                     object : ConnectivityManager.NetworkCallback() {
-                        override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) = onCaps(this, caps)
+                        override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) = onCaps(caps)
                     }
                 }
-                cont.invokeOnCancellation { runCatching { connectivity.unregisterNetworkCallback(callback) } }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val listener = WifiManager.SuggestionConnectionStatusListener { suggestion, reason ->
+                        val forUs = suggestion.ssid?.removeSurrounding("\"").equals(ssid, ignoreCase = true)
+                        Log.i(TAG, "suggestion status for ${suggestion.ssid}: reason $reason")
+                        // Only an authentication failure ends the wait: association and IP failures
+                        // are often transient, and Android keeps trying those by itself.
+                        if (forUs && reason == WifiManager.STATUS_SUGGESTION_CONNECTION_FAILURE_AUTHENTICATION) {
+                            finish(ConnectWait.Refused("Android reported that signing in to $ssid failed"))
+                        }
+                    }
+                    runCatching { wifi.addSuggestionConnectionStatusListener(Runnable::run, listener) }
+                        .onSuccess { statusListener = listener }
+                        .onFailure { Log.w(TAG, "can't listen for suggestion connection status", it) }
+                }
+                cont.invokeOnCancellation {
+                    runCatching { connectivity.unregisterNetworkCallback(callback) }
+                    removeStatusListener(statusListener)
+                }
                 connectivity.registerNetworkCallback(request, callback)
             }
-        } ?: false
+        } ?: ConnectWait.TimedOut
+        Log.i(TAG, "awaitConnected($ssid) = $result after ${System.currentTimeMillis() - started} ms")
+        return result
+    }
+
+    private fun removeStatusListener(listener: Any?) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && listener is WifiManager.SuggestionConnectionStatusListener) {
+            runCatching { wifi.removeSuggestionConnectionStatusListener(listener) }
+        }
     }
 
     @Suppress("DEPRECATION")

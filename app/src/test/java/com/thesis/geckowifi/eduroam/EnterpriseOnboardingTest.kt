@@ -188,6 +188,27 @@ class EnterpriseOnboardingTest {
     }
 
     @Test
+    fun connect_refusedSignIn_endsWithTheReasonAndNoAssociation() = runTest {
+        // Android reported an authentication failure for the pinned profile (impostor or genuine failure).
+        val installer = RecordingInstaller(wait = ConnectWait.Refused("Android reported that signing in to eduroam-lab failed"))
+        val outcome = flow(FakeTransport(true), eduroamSite(), installer = installer,
+            joined = Association("96:83:c4:97:c2:3a", WiFiAuthMode.WPA2_ENTERPRISE))
+            .connect(transitionAp, siteRegistering("wpa3-enterprise"), store.load(alice.id)!!, EduroamFixtures.pins(record()))
+        assertEquals(false, outcome.connected)
+        assertEquals("Android reported that signing in to eduroam-lab failed", outcome.refusedSignIn)
+        assertNull(outcome.joined)
+        assertNull(outcome.downgrade)
+    }
+
+    @Test
+    fun connect_timedOut_hasNoRefusal() = runTest {
+        val outcome = flow(FakeTransport(true), eduroamSite(), installer = RecordingInstaller(connects = false))
+            .connect(transitionAp, siteRegistering("wpa3-enterprise"), store.load(alice.id)!!, EduroamFixtures.pins(record()))
+        assertEquals(false, outcome.connected)
+        assertNull(outcome.refusedSignIn)
+    }
+
+    @Test
     fun connect_192BitOnlyAp_isRefusedBeforeInstalling() = runTest {
         val installer = RecordingInstaller()
         val suiteB = target.copy(profile = RsnProfile.fromCapabilities("[RSN-EAP_SUITE_B_192-GCMP-256][MFPR][MFPC][ESS]"))

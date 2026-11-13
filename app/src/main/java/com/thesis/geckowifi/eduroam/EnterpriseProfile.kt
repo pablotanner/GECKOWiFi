@@ -132,6 +132,24 @@ interface EnterpriseProfileInstaller {
     /** SSIDs that have a profile from [install] right now, also from earlier app runs where the platform can tell. */
     fun installedSsids(): Set<String>
 
-    /** Whether the device is connected to [ssid] within [timeoutMs]. */
-    suspend fun awaitConnected(ssid: String, timeoutMs: Long): Boolean
+    /**
+     * Waits until the device is connected to [ssid], at most [timeoutMs]. Ends early with
+     * [ConnectWait.Refused] when the platform reports that signing in with the profile failed.
+     */
+    suspend fun awaitConnected(ssid: String, timeoutMs: Long): ConnectWait
+}
+
+/** How waiting for the pinned profile to connect ended. */
+sealed interface ConnectWait {
+    data object Connected : ConnectWait
+
+    /**
+     * The platform reported an authentication failure for the profile. Without root this
+     * doesn't say why: the server didn't match the pins (an impostor), the password was
+     * wrong, or the genuine login server didn't answer.
+     */
+    data class Refused(val reason: String) : ConnectWait
+
+    /** Neither connected nor refused within the timeout (out of range, or Android didn't try). */
+    data object TimedOut : ConnectWait
 }

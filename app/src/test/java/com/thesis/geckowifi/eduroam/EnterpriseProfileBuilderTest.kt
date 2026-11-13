@@ -11,14 +11,19 @@ import org.junit.Test
 import java.lang.reflect.Modifier
 
 /** Recording installer: what an installer would be given, and with which password. */
-class RecordingInstaller(private val outcome: InstallOutcome = InstallOutcome.Installed("ok"), private val connects: Boolean = true) :
-    EnterpriseProfileInstaller {
+class RecordingInstaller(
+    private val outcome: InstallOutcome = InstallOutcome.Installed("ok"),
+    private val connects: Boolean = true,
+    /** Overrides [connects], e.g. [ConnectWait.Refused]. */
+    private val wait: ConnectWait? = null
+) : EnterpriseProfileInstaller {
     val installed = mutableListOf<Pair<ProfilePlan, String>>()
     val removed = mutableListOf<String>()
     override suspend fun install(plan: ProfilePlan, password: String): InstallOutcome = outcome.also { installed += plan to password }
     override suspend fun remove(ssid: String) { removed += ssid }
     override fun installedSsids(): Set<String> = installed.map { it.first.ssid }.toSet()
-    override suspend fun awaitConnected(ssid: String, timeoutMs: Long) = connects
+    override suspend fun awaitConnected(ssid: String, timeoutMs: Long): ConnectWait =
+        wait ?: if (connects) ConnectWait.Connected else ConnectWait.TimedOut
 }
 
 /** The credential invariant (eduroam-brief.md, section 2) and its one code path. */
