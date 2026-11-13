@@ -74,6 +74,12 @@ The server before the extension format (flat schema v3) is still in
 as the way back; its code is branch `wifi-prototype` of the fork, a database
 dump is in `lab-secrets/geopki/`.
 
+**On Windows 11 with mirrored WSL networking** (`networkingMode=Mirrored` in
+`.wslconfig`) none of this is needed: WSL shares the host's IPs, so the map
+server is reachable on `192.168.137.1:1234` directly. Skip the portproxy; just
+confirm with the `curl.exe` check below. The rest of this section is the
+Windows-10 NAT fallback.
+
 WSL runs behind NAT on Windows 10, so `netsh portproxy` forwards port 1234 from
 the laptop to WSL. WSL gets a new address on every restart. After a reboot,
 start the server first, then run `geopki-proxy.ps1` as administrator:

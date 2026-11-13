@@ -1,5 +1,10 @@
 """UDP relay from the laptop's ICS address to FreeRADIUS in WSL2.
 
+NOT needed with mirrored WSL networking (Windows 11): there WSL shares the host's
+IPs, so the routers reach FreeRADIUS on 192.168.137.1:1812 directly and this relay
+only gets in the way (it would hold the ports FreeRADIUS binds). This script is for
+the Windows-10 NAT setup only. See docs/eduroam-decisions.md, D4.
+
 Windows 10 has no WSL mirrored networking and `netsh portproxy` is TCP only,
 so RADIUS (UDP) from the routers needs this (docs/eduroam-decisions.md, D4).
 Stdlib only. Each client (address, port) gets its own upstream socket, so

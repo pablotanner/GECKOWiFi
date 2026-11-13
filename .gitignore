@@ -42,5 +42,6 @@ lab/density/__pycache__
 lab/dashboard/logs/
 lab/dashboard/__pycache__
 lab/dashboard/probes/__pycache__
+lab/eduroam/__pycache__
 # Evidence for the thesis: raw data, measurements, sources (evidence/README.md)
 evidence/

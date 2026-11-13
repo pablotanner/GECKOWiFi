@@ -89,13 +89,15 @@ radius-log)
     if [ -n "$log" ]; then echo "== $log"; tail -n "${3:-120}" "$log"; else echo "no log for $arg yet"; fi
     ;;
 radius-fix-clients)
-    # The relay's packets come from the WSL gateway, which changes on every
-    # WSL restart: accept the whole WSL range, as setup-instances.sh writes it.
+    # Mirrored WSL networking (Windows 11): the routers send RADIUS straight to the
+    # laptop and FreeRADIUS sees Router A's WAN as the source, so accept the lab
+    # subnet (as setup-instances.sh writes it). On Windows-10 NAT this was
+    # 172.16.0.0/12 via lab/eduroam/udp-relay.py (see docs/eduroam-decisions.md, D4).
     with_sudo
     for i in $INSTANCES; do
         f="$RADIUS/$i/clients.conf"
         [ -f "$f" ] || continue
-        sed -i -E '/client wsl-relay/,/}/ s#^(\s*ipaddr = ).*#\1172.16.0.0/12#' "$f"
+        sed -i -E '/client wsl-relay/,/}/ s#^(\s*ipaddr = ).*#\1192.168.137.0/24#' "$f"
         echo "$i: $(grep -A1 'client wsl-relay' "$f" | grep ipaddr | xargs)"
         for pid in $(pgrep -x freeradius); do
             if tr '\0' ' ' < "/proc/$pid/cmdline" | grep -q "/gecko-radius/$i "; then

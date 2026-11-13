@@ -48,6 +48,11 @@ GEOPKI_DIR = "~/Thesis/geopki-typed"  # map version 2 (typed entries) since 2026
 GEOPKI_DB = "geopki_ext"
 RELAY_PORTS = (1812, 1814, 1816, 1818)
 RADIUS_PORT = {"legit": 1812, "attacker-b1": 1814, "attacker-b2": 1816, "attacker-b3": 1818}
+# In mirrored WSL networking (Windows 11) the routers send RADIUS straight to the
+# laptop and FreeRADIUS sees Router A's WAN as the source; the udp-relay and the
+# :1234 portproxy are both unnecessary (docs/eduroam-decisions.md, D4).
+RADIUS_SOURCE = ROUTER_A["wan"]            # 192.168.137.50, what FreeRADIUS sees in mirrored mode
+MIRRORED_CLIENT_RANGE = "192.168.137.0/24"  # the clients.conf range that covers it
 FIREWALL_RULES = ["GeoPKI 1234", "GECKO portal 80/443", "GECKO eduroam RADIUS relay", "GECKO eduroam realm server"]
 APP_ID = "com.thesis.geckowifi"
 # Last three octets of the BSSIDs (README: 94:.. GeckoTest, 96:.. eduroam-lab)
@@ -96,6 +101,19 @@ def run(args, timeout=10, input=None, cwd=None):
 def wsl_path(p):
     p = str(Path(p).resolve())
     return "/mnt/" + p[0].lower() + p[2:].replace("\\", "/")
+
+
+def wsl_networking_mode():
+    """'mirrored' or 'nat', read from %USERPROFILE%\\.wslconfig ([wsl2] networkingMode).
+    Mirrored (WSL 2 on Windows 11) gives WSL the host's own IPs, so the map-server
+    port forward and the RADIUS relay are both unnecessary; the dashboard checks the
+    direct paths instead (docs/eduroam-decisions.md, D4)."""
+    try:
+        text = (Path.home() / ".wslconfig").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return "nat"
+    m = re.search(r"(?mi)^[^\S\n]*networkingMode[^\S\n]*=[^\S\n]*(\w+)", text)
+    return "mirrored" if m and m.group(1).lower() == "mirrored" else "nat"
 
 
 def tcp_open(host, port, timeout=2.0):
@@ -232,7 +250,7 @@ def probe_firewall():
 
 
 def probe_wsl():
-    rc, out = run(["wsl", "python3", wsl_path(HERE / "probes" / "wsl_probe.py"), GEOPKI_DIR], timeout=15)
+    rc, out = run(["wsl", "python3", wsl_path(HERE / "probes" / "wsl_probe.py"), GEOPKI_DIR], timeout=30)
     if rc is None:
         return {"_error": "WSL did not answer: " + out}
     try:
@@ -351,6 +369,17 @@ def probe_realm_records():
 
 def collect():
     t0 = time.time()
+    # Cold-boot the WSL VM once, up front. After idle/sleep (and whenever the VM has
+    # auto-shut-down) the first `wsl` call has to start the VM and bring mirrored
+    # networking up, which on its own can take longer than a probe's timeout. Warming
+    # it here keeps probe_wsl from being read as "WSL did not answer" during that boot.
+    run(["wsl", "true"], timeout=90)
+    mode = wsl_networking_mode()
+    # The map server runs in WSL. In mirrored mode the laptop can't reach a WSL service
+    # on its own LAN IP (the host->WSL hairpin needs the experimental hostAddressLoopback),
+    # but localhost is shared, so probe liveness on 127.0.0.1. The LAN path (what the
+    # routers and tablet use, 192.168.137.1:1234) is covered by the router map checks.
+    map_probe_host = "127.0.0.1" if mode == "mirrored" else LAPTOP_IP
     jobs = {
         "laptop": probe_laptop, "netstat": probe_netstat, "portproxy": probe_portproxy, "firewall": probe_firewall,
         "wsl": probe_wsl, "routerA": lambda: probe_router(ROUTER_A["ssh"]), "routerB": lambda: probe_router(ROUTER_B["ssh"]),
@@ -358,7 +387,7 @@ def collect():
         "ping_a": lambda: ping(ROUTER_A["wan"]),
         "internet": lambda: tcp_open("1.1.1.1", 443, 3),
         "dns": lambda: bool(socket.getaddrinfo("example.com", 443)),
-        "http_map": lambda: http_status(f"http://{LAPTOP_IP}:1234/"),
+        "http_map": lambda: http_status(f"http://{map_probe_host}:1234/"),
         "http_realm": lambda: http_status(f"http://{LAPTOP_IP}:1235/v1/realm/eduroam-lab/uni-wipkingen.ch"),
         "portal_tcp": lambda: {f"{ip}:{p}": tcp_open(ip, p, 1.5) for ip in (GENUINE_IP, ATTACKER_IP) for p in (80, 443)},
     }
@@ -373,6 +402,7 @@ def collect():
                 raw[name] = {"_error": f"{type(e).__name__}: {e}"}
     wsl_ips = (raw.get("wsl") or {}).get("ips") or []
     raw["http_map_direct"] = http_status(f"http://{wsl_ips[0]}:1234/") if wsl_ips else None
+    raw["_wsl_mode"] = mode
     raw["_time"] = time.time()
     raw["_duration"] = round(time.time() - t0, 1)
     return raw
@@ -429,6 +459,7 @@ class Report:
 
 def evaluate(raw, state):
     r = Report(raw)
+    mirrored = raw.get("_wsl_mode") == "mirrored"
     lap = raw.get("laptop") or {}
     lab = lap.get("lab") or {}
     up = lap.get("uplink") or {}
@@ -515,15 +546,25 @@ def evaluate(raw, state):
     # ---------------- WSL
     if not wsl_ok:
         r.check("wsl", "WSL", "WSL responds", "fail",
-                (w.get("_error") or "No answer.") + " After sleep WSL sometimes hangs (Wsl/Service/WSAETIMEDOUT).",
+                (w.get("_error") or "No answer.") + " Usually the VM was cold (idle/after sleep) and the next "
+                "refresh recovers once it has booted; if it stays down, WSL is hung (Wsl/Service/WSAETIMEDOUT) "
+                "and needs a restart.",
                 actions=[act("wsl.shutdown", "Restart WSL", "destructive",
                              confirm="This stops everything in WSL (map server, RADIUS). Start them again afterwards.")])
     else:
-        r.check("wsl", "WSL", "WSL responds", "ok", f"Address {wsl_ip}, up {ago(w.get('uptime_s'))}.")
+        where = "shares the host IPs (mirrored)" if mirrored else f"address {wsl_ip}"
+        r.check("wsl", "WSL", "WSL responds", "ok", f"{where[0].upper()}{where[1:]}, up {ago(w.get('uptime_s'))}.")
     wsl_boot = r.now - w["uptime_s"] if wsl_ok else None
 
     rules = [p for p in raw.get("portproxy") or [] if p["listen_port"] == 1234]
-    if not rules:
+    if mirrored:
+        stale = [p for p in rules if p["connect"] not in (LAPTOP_IP, "127.0.0.1")]
+        r.check("portproxy", "Laptop", "Map server port :1234", "ok",
+                "Not needed in mirrored mode: WSL shares the host's IPs, so the map server on :1234 is reachable directly."
+                + (f" (A leftover portproxy to {stale[0]['connect']} is still set; harmless — remove it with "
+                   "`netsh interface portproxy delete v4tov4 listenport=1234` if you like.)" if stale else ""),
+                needs=["wsl"])
+    elif not rules:
         r.check("portproxy", "Laptop", "Port forward :1234 to WSL", "fail",
                 "No portproxy for port 1234: routers and tablet can't reach the map server.",
                 actions=[ADMIN("portproxy", "Point port forward at WSL")], needs=["wsl"])
@@ -578,7 +619,17 @@ def evaluate(raw, state):
                     f"pid {s['pid']}, up {ago(s['age_s'])}, tree {s['clog_id']}, database {s.get('database') or '?'}.", needs=["wsl"])
 
     hm = raw.get("http_map")
-    if hm in (200, 404):
+    if mirrored:
+        # Probed on 127.0.0.1 (the laptop can't reach a WSL service on its own LAN IP
+        # without hostAddressLoopback); the routers' path to 192.168.137.1 is the
+        # router map checks below.
+        if hm in (200, 404):
+            r.check("map_reach", "Laptop", "Map server answers (127.0.0.1:1234)", "ok",
+                    f"Up ({hm}). The routers and tablet reach it on {LAPTOP_IP}:1234 — see the Router map checks.", needs=["map_server"])
+        else:
+            r.check("map_reach", "Laptop", "Map server answers (127.0.0.1:1234)", "fail",
+                    "No answer on 127.0.0.1:1234: the map server is down.", needs=["map_server"])
+    elif hm in (200, 404):
         r.check("map_reach", "Laptop", f"Map server at {LAPTOP_IP}:1234", "ok", f"Answers ({hm}).")
     else:
         direct = raw.get("http_map_direct")
@@ -587,21 +638,38 @@ def evaluate(raw, state):
                 actions=[ADMIN("portproxy", "Point port forward at WSL")] if hint else [],
                 needs=["lab_ip", "map_server", "portproxy"])
 
-    # RADIUS (WSL)
+    # RADIUS (WSL). What FreeRADIUS sees as the source differs by networking mode:
+    # mirrored -> Router A's WAN directly; NAT -> the WSL gateway (the relay rewrites it).
     rad = w.get("radius") or {}
     gw = w.get("gateway")
-    bad_range = [i for i, d in rad.items() if d.get("installed") and d.get("gateway_in_range") is False]
+    radius_src = RADIUS_SOURCE if mirrored else gw
+    src_label = f"Router A ({RADIUS_SOURCE})" if mirrored else f"the WSL gateway {gw}"
+    clients_title = "FreeRADIUS accepts the routers" if mirrored else "FreeRADIUS accepts the relay"
+    fix_label = "Accept the router range" if mirrored else "Accept the WSL range"
+
+    def source_in_range(d):
+        if mirrored:
+            rng = d.get("client_range")
+            if not rng or not radius_src:
+                return None
+            try:
+                return ipaddress.ip_address(radius_src) in ipaddress.ip_network(rng, strict=False)
+            except ValueError:
+                return False
+        return d.get("gateway_in_range")
+
+    bad_range = [i for i, d in rad.items() if d.get("installed") and source_in_range(d) is False]
     unknown = [i for i, d in rad.items() if d.get("pids") and d.get("unknown_client") and d.get("log_age_s", 1e9) < 900]
     if bad_range or unknown:
-        r.check("radius_clients", "WSL", "FreeRADIUS accepts the relay", "fail",
-                f"Requests arrive from the WSL gateway {gw}, but " +
+        r.check("radius_clients", "WSL", clients_title, "fail",
+                f"Requests arrive from {src_label}, but " +
                 (f"{', '.join(bad_range)} only accept {rad[bad_range[0]]['client_range']}" if bad_range else
                  f"{', '.join(unknown)} logged 'unknown client'") + ": every login times out.",
                 detail=(rad.get((bad_range or unknown)[0]) or {}).get("last_unknown_client"),
-                actions=[act("radius.fixclients", "Accept the WSL range", "primary", sudo=True)], needs=["wsl"])
+                actions=[act("radius.fixclients", fix_label, "primary", sudo=True)], needs=["wsl"])
     else:
-        r.check("radius_clients", "WSL", "FreeRADIUS accepts the relay", "ok" if wsl_ok else "unknown",
-                f"Gateway {gw} is inside every instance's client range.", needs=["wsl"])
+        r.check("radius_clients", "WSL", clients_title, "ok" if wsl_ok else "unknown",
+                f"{src_label[0].upper()}{src_label[1:]} is inside every instance's client range.", needs=["wsl"])
 
     # B's mode decides which attacker instances are needed
     b_uci = B.get("uci") or {}
@@ -633,7 +701,16 @@ def evaluate(raw, state):
     relay = procs_where(lambda n, c: n.startswith("python") and "udp-relay.py" in c)
     relay_ports = {port: ns["udp"].get(f"{LAPTOP_IP}:{port}") for port in RELAY_PORTS}
     relay_target = state.relay_target(relay[0]["pid"]) if relay else None
-    if not relay:
+    if mirrored:
+        if relay:
+            r.check("relay", "Laptop", "RADIUS relay (unused in mirrored mode)", "warn",
+                    f"The udp-relay is running (pid {relay[0]['pid']}) but isn't needed in mirrored mode — and it holds "
+                    f"{LAPTOP_IP}:1812-1818, the ports FreeRADIUS now binds directly. Stop it so the routers reach FreeRADIUS.",
+                    actions=[act("relay.stop", "Stop relay", "destructive")])
+        else:
+            r.check("relay", "Laptop", "RADIUS relay (unused in mirrored mode)", "ok",
+                    f"Not needed in mirrored mode: the routers reach FreeRADIUS on {LAPTOP_IP}:1812 directly.")
+    elif not relay:
         r.check("relay", "Laptop", "RADIUS relay (UDP 1812/1814/1816)", "fail", "Not running: Router A's logins get no answer.",
                 actions=[act("relay.start", "Start relay", "primary")], needs=["lab_ip"])
     else:
@@ -832,6 +909,7 @@ def evaluate(raw, state):
 
 def build_status(raw, state):
     r, extra = evaluate(raw, state)
+    mirrored = raw.get("_wsl_mode") == "mirrored"
     lap = raw.get("laptop") or {}
     lab = lap.get("lab") or {}
     up = lap.get("uplink") or {}
@@ -849,11 +927,16 @@ def build_status(raw, state):
     r.addr(f"Laptop {UPLINK_ADAPTER}", "Address / network", "any", f"{', '.join(up.get('ipv4') or []) or 'none'} on {up.get('ssid') or '?'}",
            "ok" if up.get("status") == "Up" else "fail")
     wsl_ip = extra["wsl_ip"]
-    r.addr("WSL", "Address", "changes on every restart", wsl_ip, "ok" if wsl_ip else "unknown")
-    pp = [p for p in raw.get("portproxy") or [] if p["listen_port"] == 1234]
-    r.addr("Laptop port forward", "0.0.0.0:1234 forwards to", wsl_ip or "WSL address", pp[0]["connect"] if pp else None)
-    r.addr("WSL", "Gateway (source of relayed RADIUS)", "inside 172.16.0.0/12", w.get("gateway"),
-           "ok" if w.get("gateway") and ipaddress.ip_address(w["gateway"]) in ipaddress.ip_network("172.16.0.0/12") else "unknown")
+    if mirrored:
+        r.addr("WSL", "Addresses", "shares the host IPs (mirrored)", ", ".join((w.get("ips") or [])[:4]) or None,
+               "ok" if w.get("ips") else "unknown")
+        r.addr("FreeRADIUS", "RADIUS source (Router A WAN)", f"inside {MIRRORED_CLIENT_RANGE}", RADIUS_SOURCE, "ok")
+    else:
+        r.addr("WSL", "Address", "changes on every restart", wsl_ip, "ok" if wsl_ip else "unknown")
+        pp = [p for p in raw.get("portproxy") or [] if p["listen_port"] == 1234]
+        r.addr("Laptop port forward", "0.0.0.0:1234 forwards to", wsl_ip or "WSL address", pp[0]["connect"] if pp else None)
+        r.addr("WSL", "Gateway (source of relayed RADIUS)", "inside 172.16.0.0/12", w.get("gateway"),
+               "ok" if w.get("gateway") and ipaddress.ip_address(w["gateway"]) in ipaddress.ip_network("172.16.0.0/12") else "unknown")
     if w.get("map_servers"):
         s = w["map_servers"][0]
         r.addr("Map server", "Trillian tree (--clog-id)", w.get("envrc_clog_id") or "?", s.get("clog_id"))
@@ -889,7 +972,7 @@ def build_status(raw, state):
         link("l_b_inet", "Router B", "Internet", "through A", ["router_b_reach", "router_b_internet"]),
         link("l_b_map", "Router B", "Map server", f"{LAPTOP_IP}:1234", ["router_b_reach", "router_b_map"]),
         link("l_wsl", "Laptop", "WSL", "wsl.exe", ["wsl"]),
-        link("l_pp", "Laptop :1234", "Map server", "port forward", ["portproxy", "map_reach"]),
+        link("l_pp", "Laptop :1234", "Map server", "direct (mirrored)" if mirrored else "port forward", ["portproxy", "map_reach"]),
         link("l_trillian", "Map server", "Trillian", "Docker, :8090", ["trillian"]),
         link("l_pg", "Map server", "PostgreSQL", ":5432", ["postgres"]),
         link("l_tab", "Tablet", {"routerA": "Router A", "routerB": "Router B"}.get(T.get("ap"), "access point"),
@@ -920,7 +1003,7 @@ def build_status(raw, state):
         {"name": "PostgreSQL", "where": "WSL", "check": "postgres", "log": None},
         {"name": "Map server (geopki)", "where": "WSL", "check": "map_server", "log": "map",
          "extra": [act("map.restart", "Restart", "secondary"), act("map.stop", "Stop", "destructive")]},
-        {"name": "Port forward :1234", "where": "Windows", "check": "portproxy", "log": None},
+        {"name": "Map server :1234 (direct)" if mirrored else "Port forward :1234", "where": "Windows", "check": "portproxy", "log": None},
     ] + r.services
     for s in services:
         c = r.checks.get(s["check"]) or {"status": "unknown", "summary": "", "actions": []}
@@ -1383,7 +1466,7 @@ ACTIONS = {
     "map.restart": (lambda a: wsl_action("map-stop") + "\n" + wsl_action("map-start", timeout=150), False, None, "Restart map server"),
     "radius.start": (lambda a: wsl_action("radius-start", a, sudo=True), True, list(RADIUS_PORT), "Start FreeRADIUS"),
     "radius.stop": (lambda a: wsl_action("radius-stop", a, sudo=True), True, list(RADIUS_PORT), "Stop FreeRADIUS"),
-    "radius.fixclients": (lambda a: wsl_action("radius-fix-clients", sudo=True), True, None, "Accept the WSL range in FreeRADIUS"),
+    "radius.fixclients": (lambda a: wsl_action("radius-fix-clients", sudo=True), True, None, "Fix the FreeRADIUS client range"),
     "radius.test": (lambda a: wsl_action("radius-test", timeout=180), False, None, "RADIUS self-test (eapol_test)"),
     "postgres.start": (lambda a: wsl_action("postgres-start", sudo=True), True, None, "Start PostgreSQL"),
     "relay.start": (lambda a: start_relay(), False, None, "Start relay"),

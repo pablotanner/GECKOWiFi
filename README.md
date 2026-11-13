@@ -158,8 +158,12 @@ How the pieces fit together: [docs/eduroam-demo.md](docs/eduroam-demo.md). After
 laptop restart, in this order (Docker + map server as in docs/lab-setup.md first):
 ```powershell
 cd lab\realm; go run . serve -addr 192.168.137.1:1235 -dir ..\..\lab-secrets\realm\signed   # realm server (own window)
-python lab\eduroam\udp-relay.py                                                             # RADIUS relay to WSL (own window; restart after WSL restarts)
+python lab\eduroam\udp-relay.py                                                             # RADIUS relay to WSL -- Windows-10 NAT only; SKIP with mirrored WSL networking
 ```
+> With mirrored WSL networking (Windows 11, `networkingMode=Mirrored`) the relay
+> and the `:1234` portproxy are unnecessary -- the routers reach FreeRADIUS and the
+> map server on `192.168.137.1` directly (see docs/eduroam-decisions.md, D4). The
+> lab dashboard shows which mode it detected.
 ```bash
 # in WSL, from /mnt/c/Users/41763/AndroidStudioProjects/GECKOWiFi
 bash lab/eduroam/radius/run.sh legit          # legit RADIUS, live log in the terminal (Ctrl-C stops it)

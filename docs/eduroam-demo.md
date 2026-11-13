@@ -24,11 +24,15 @@ made while implementing it is in [eduroam-decisions.md](eduroam-decisions.md).
 
 ```
 Tablet ── eduroam-lab ── Router A (WAN 192.168.137.50) ── laptop 192.168.137.1
-                                                            ├─ udp-relay.py  UDP 1812/1814/1816 → WSL
+                                                            ├─ udp-relay.py  UDP 1812/1814/1816 → WSL  (Windows-10 NAT only)
                                                             ├─ WSL: FreeRADIUS legit :1812, B1 :1814, B2 :1816
-                                                            ├─ WSL: geopki map server :1234 (portproxy)
+                                                            ├─ WSL: geopki map server :1234 (portproxy on Win-10 NAT)
                                                             └─ realm server :1235 (lab/realm, Windows)
 ```
+> Mirrored WSL networking (Windows 11): WSL shares the host IPs, so the routers
+> reach FreeRADIUS on `192.168.137.1:1812` and the map server on `:1234` directly.
+> The `udp-relay.py` and the portproxy are then unused, and `clients.conf` allows
+> `192.168.137.0/24` (Router A's WAN) instead of the WSL gateway. See eduroam-decisions.md, D4.
 
 | Piece | Where |
 |---|---|
@@ -89,12 +93,14 @@ After a reboot, in this order:
    ```
    `setup-instances.sh` rebuilds the instances from the stock config (e.g.
    after changing it or regenerating secrets).
-4. **Relay** (Windows; restart it after WSL restarts, it looks up the WSL IP at start):
+4. **Relay** (Windows-10 NAT only -- **skip with mirrored WSL networking**, where
+   the routers reach FreeRADIUS on `192.168.137.1:1812` directly). Restart it after
+   WSL restarts; it looks up the WSL IP at start:
    ```powershell
    python lab\eduroam\udp-relay.py
    ```
    Check from the laptop: `python lab\eduroam\radius-ping.py 192.168.137.1 1812 <RADIUS_SECRET_A>`
-   (needs `--allow ... 192.168.137.1` on the relay for a local test).
+   (on NAT this needs `--allow ... 192.168.137.1` on the relay for a local test).
 5. **Realm server** (Windows):
    ```powershell
    cd lab\realm; go run . serve -addr 192.168.137.1:1235 -dir ..\..\lab-secrets\realm\signed

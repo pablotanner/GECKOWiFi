@@ -41,16 +41,17 @@ build() { # name, cert basename, ca basename, shared secret, authorize file cont
     cp "$SECRETS/pki/dh.pem" "$dir/gecko-certs/dh.pem"
     chmod 600 "$dir/gecko-certs/server.key"
 
-    # Clients: everything arrives through lab/eduroam/udp-relay.py, so the
-    # source is the WSL gateway (some 172.16/12 address that changes on
-    # reboot). The relay enforces who may send; the secret does the rest.
+    # Clients: with mirrored WSL networking (Windows 11) the routers send RADIUS
+    # straight to the laptop, so FreeRADIUS sees Router A's WAN as the source --
+    # accept the lab subnet. On Windows-10 NAT this was 172.16.0.0/12, the WSL
+    # gateway behind lab/eduroam/udp-relay.py (see docs/eduroam-decisions.md, D4).
     cat > "$dir/clients.conf" <<EOF
 client localhost {
 	ipaddr = 127.0.0.1
 	secret = testing123
 }
 client wsl-relay {
-	ipaddr = 172.16.0.0/12
+	ipaddr = 192.168.137.0/24
 	secret = $secret
 	require_message_authenticator = yes
 }

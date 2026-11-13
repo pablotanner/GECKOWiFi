@@ -55,6 +55,16 @@ traffic reaches FreeRADIUS from the WSL gateway address, so the relay enforces
 the source allowlist (Router A's WAN, through which B's traffic is NATed too)
 and the shared secrets tell the instances apart.
 
+**Changed on Windows 11 (mirrored WSL networking).** With
+`networkingMode=Mirrored` in `.wslconfig`, WSL shares the host's interfaces and
+IPs. The map server on `:1234` and FreeRADIUS on `:1812-1818` are then reachable
+on `192.168.137.1` directly, so **both the `netsh portproxy` and the UDP relay
+are dropped**. FreeRADIUS now sees Router A's WAN (`192.168.137.50`) as the
+source, so each instance's `clients.conf` allows `192.168.137.0/24` instead of
+`172.16.0.0/12`; the shared secrets still tell the instances apart. The relay
+(`udp-relay.py`) is kept only for the Windows-10 NAT fallback. The lab dashboard
+detects the mode from `.wslconfig` and checks whichever path is in use.
+
 ## D5. RealmRecord signatures: ECDSA P-256 (not Ed25519)
 Same scheme as the map head (`PinnedServerKey`): standard JCA on every Android
 version (minSdk 29), no new dependency. Ed25519 has no built-in support on

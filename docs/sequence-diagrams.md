@@ -27,7 +27,7 @@ When a flow changes in the code, change its diagram in the same commit.
 | Local store | Saved lookup (the "cached GeoCerts"), saved realm records, accounts (passwords encrypted with a Keystore key), verdicts | App storage | `RegistrationCache`, `AccountStore`, `VerdictStore` |
 | Access point | Broadcasts the SSID. Open networks: captive portal (openNDS). Enterprise: 802.1X authenticator in front of RADIUS | Router A genuine, Router B evil twin | |
 | Portal server | Login page of the captive portal (openNDS external FAS) | `192.168.137.10` genuine, `.20` attacker | `portal/` |
-| SP RADIUS | The visited network's RADIUS server. Handles the GECKO identity itself (walled garden) and proxies everyone else by realm | FreeRADIUS `legit` in WSL, through `udp-relay.py` | `lab/eduroam/radius/` |
+| SP RADIUS | The visited network's RADIUS server. Handles the GECKO identity itself (walled garden) and proxies everyone else by realm | FreeRADIUS `legit` in WSL (reached directly on `192.168.137.1:1812` with mirrored networking; through `udp-relay.py` on Windows-10 NAT) | `lab/eduroam/radius/` |
 | Home RADIUS | The user's home institution's server (realm `uni-wipkingen.ch`). Checks the password | Same FreeRADIUS as the SP (D7). In eduroam it sits behind federation proxies | |
 | Map server | GECKO map: answers "what is registered here" with inclusion proofs and a signed map head | geopki + Trillian, `192.168.137.1:1234` | `GeckoClient`, key in `PinnedServerKey` |
 | Realm-record server | Serves signed realm records: the login-server pins for a realm within a federation | `lab/realm`, `192.168.137.1:1235`, signed offline | `RealmRecordClient`, key in `PinnedRealmKey` |
