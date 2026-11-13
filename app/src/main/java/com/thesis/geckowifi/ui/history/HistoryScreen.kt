@@ -51,7 +51,7 @@ fun HistoryScreen(checks: List<CheckDetail>, onOpenCheck: (String) -> Unit) {
                 )
                 Text("No checks yet", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = Space.md))
                 Text(
-                    "Every network you join through GECKO WiFi shows up here, with what was checked.",
+                    "Every network you join through GECKOGuard shows up here, with what was checked.",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = Space.sm)

@@ -23,7 +23,7 @@ object Radius {
 }
 
 @Composable
-fun GeckoWifiTheme(
+fun GeckoGuardTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit
 ) {

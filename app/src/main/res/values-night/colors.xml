@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark variants (Green80, Night6, Night6). The launcher icon keeps its light colours. -->
+    <color name="brand_mark">#FF8AD5B1</color>
+    <color name="brand_on_mark">#FF121411</color>
+    <color name="brand_background">#FF121411</color>
+</resources>

@@ -1,6 +1,6 @@
-# GECKOWiFi
+# GECKOGuard
 
-Android prototype for verifying WiFi networks with GECKO, a geographic PKI.
+Android app (prototype) that verifies WiFi networks with GECKO, a geographic PKI.
 Part of a Master's thesis at ETH Zürich.
 
 Evil-twin access points are easy to set up: anyone can broadcast the same SSID

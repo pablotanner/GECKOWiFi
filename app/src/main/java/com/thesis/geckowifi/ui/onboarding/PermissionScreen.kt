@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.GppGood
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.Button
@@ -32,11 +31,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import com.thesis.geckowifi.ui.components.BrandLockup
 import com.thesis.geckowifi.ui.theme.Space
 
 /**
  * Shown before Android's permission dialog, never instead of it: says why
- * GECKO needs location in one sentence, so the system prompt isn't a
+ * GECKOGuard needs location in one sentence, so the system prompt isn't a
  * surprise. After a denial it offers the app settings page, because the
  * system dialog may not appear again.
  */
@@ -51,14 +51,14 @@ fun PermissionScreen(deniedBefore: Boolean, onAllow: () -> Unit) {
             .padding(horizontal = Space.xl)
     ) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = Space.xxl * 2)) {
-            Icon(Icons.Outlined.GppGood, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(56.dp))
+            BrandLockup(logoSize = 48.dp, style = MaterialTheme.typography.headlineSmall)
             Text(
                 "Know which WiFi is the real one",
                 style = MaterialTheme.typography.displaySmall,
                 modifier = Modifier.padding(top = Space.xl).semantics { heading() }
             )
             Text(
-                "GECKO checks networks against what their operators registered for this place, and warns you about imitations.",
+                "GECKOGuard checks networks against what their operators registered with GECKO for this place, and warns you about imitations.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = Space.lg)

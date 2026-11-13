@@ -17,7 +17,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import com.thesis.geckowifi.di.AppModule
-import com.thesis.geckowifi.ui.theme.GeckoWifiTheme
+import com.thesis.geckowifi.ui.theme.GeckoGuardTheme
 
 class MainActivity : ComponentActivity() {
 
@@ -54,9 +54,9 @@ class MainActivity : ComponentActivity() {
         hasLocationPermission = isGranted(Manifest.permission.ACCESS_FINE_LOCATION)
 
         setContent {
-            GeckoWifiTheme {
+            GeckoGuardTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    GeckoWifiApp(
+                    GeckoGuardApp(
                         hasLocationPermission = hasLocationPermission,
                         permissionDeniedBefore = permissionDeniedBefore,
                         onRequestLocationPermission = {

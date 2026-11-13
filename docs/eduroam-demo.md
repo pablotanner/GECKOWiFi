@@ -228,7 +228,7 @@ demo tolerates it, SSH sometimes needs a retry.
 
 **2026-10-20, Router B as the legit SP** (`lab/eduroam/openwrt/sp-legit.sh`, legit RADIUS :1812):
 
-Scene 1, GECKO app, pablo@uni-wipkingen.ch: all six steps, "connected". App outcome:
+Scene 1, GECKOGuard, pablo@uni-wipkingen.ch: all six steps, "connected". App outcome:
 site `REGISTERED` (`eduroam-lab-sp`, queried over the onboarding session), no site
 servers for `uni-wipkingen.ch` (visitor), realm record signature verified (pins
 PEAP/MSCHAPV2, `radius-service.uni-wipkingen.ch`), decision Proceed, suggestion installed,
@@ -260,7 +260,7 @@ Open UI point: reopening the setup screen loses the last result (the
 
 | Scene | Tablet | Attacker log (`count-inner.sh`) |
 |---|---|---|
-| 2: GECKO app | Step 1 fails, "Not set up: password not sent" | only `fetch@gecko.ch`; **0 inner-tunnel requests**; client sent TLS alert `unknown_ca` (4 attempts) |
+| 2: GECKOGuard | Step 1 fails, "Not set up: password not sent" | only `fetch@gecko.ch`; **0 inner-tunnel requests**; client sent TLS alert `unknown_ca` (4 attempts) |
 | 4: manual profile, CA "Trust on first use", user taps "Trust" | Connection fails silently | `pablo@uni-wipkingen.ch` in the **inner tunnel** (outer only `anonymous@uni-wipkingen.ch`), **2 MSCHAPv2 exchanges** captured |
 
 Evidence: `lab-secrets/evidence/scene2+4-attacker-b1-20261020.{log,summary.txt}`.

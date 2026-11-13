@@ -22,7 +22,7 @@ When a flow changes in the code, change its diagram in the same commit.
 | Participant | What it does | In the lab | In the code |
 |---|---|---|---|
 | User | Taps a network, approves Android's dialogs, enters accounts | | |
-| GECKO app | Looks up registrations, verifies answers, decides, installs profiles | Galaxy Tab A11| `ui/`, `verification/`, `eduroam/` |
+| GECKOGuard | Looks up registrations, verifies answers, decides, installs profiles | Galaxy Tab A11| `ui/`, `verification/`, `eduroam/` |
 | Android Wi-Fi | Joins networks for the app, runs EAP (wpa_supplicant), shows approval dialogs, picks networks from suggestions | One UI 8.5 | `NetworkObserver`, `SpecifierOnboardingSession`, `SuggestionProfileInstaller` |
 | Local store | Saved lookup (the "cached GeoCerts"), saved realm records, accounts (passwords encrypted with a Keystore key), verdicts | App storage | `RegistrationCache`, `AccountStore`, `VerdictStore` |
 | Access point | Broadcasts the SSID. Open networks: captive portal (openNDS). Enterprise: 802.1X authenticator in front of RADIUS | Router A genuine, Router B evil twin | |
@@ -39,7 +39,7 @@ It runs on its own, not when the user taps a network.
 ```mermaid
 sequenceDiagram
     autonumber
-    participant App as GECKO app
+    participant App as GECKOGuard
     participant Store as Local store
     participant Net as Current route<br/>(Wi-Fi AP or mobile data)
     participant Map as Map server
@@ -76,7 +76,7 @@ itself and checks the login page before the user logs in.
 sequenceDiagram
     autonumber
     actor U as User
-    participant App as GECKO app
+    participant App as GECKOGuard
     participant OS as Android Wi-Fi
     participant AP as Access point<br/>(openNDS)
     participant Portal as Portal server
@@ -139,7 +139,7 @@ account, pinned to the verified login server.
 sequenceDiagram
     autonumber
     actor U as User
-    participant App as GECKO app
+    participant App as GECKOGuard
     participant Store as Local store
     participant OS as Android Wi-Fi
     participant AP as Access point
@@ -215,7 +215,7 @@ real eduroam.
 sequenceDiagram
     autonumber
     actor U as User
-    participant App as GECKO app
+    participant App as GECKOGuard
     participant Store as Local store
     participant OS as Android Wi-Fi
     participant AP as Access point

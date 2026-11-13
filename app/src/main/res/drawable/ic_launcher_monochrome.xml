@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- LOGO PLACEHOLDER (themed icon): Android tints this to the user's wallpaper colours and reads only its shape, so the shield is an outline here and everything is one colour. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 48-unit mark scaled to 67dp, centred in the 66dp safe zone -->
+    <group android:scaleX="1.4" android:scaleY="1.4" android:translateX="20.4" android:translateY="21.1">
+        <path android:pathData="M24,3L8,9v12c0,10.5 6.8,20 16,23c9.2,-3 16,-12.5 16,-23V9zM24,6.2L11,11.1v9.9c0,8.9 5.6,17 13,19.8c7.4,-2.8 13,-10.9 13,-19.8v-9.9z" android:fillColor="#FFFFFF" android:fillType="evenOdd" />
+        <path android:pathData="M19.05,25.05A7,7 0 0,1 28.95,25.05" android:strokeColor="#FFFFFF" android:strokeWidth="3.2" android:strokeLineCap="round" />
+        <path android:pathData="M14.81,20.81A13,13 0 0,1 33.19,20.81" android:strokeColor="#FFFFFF" android:strokeWidth="3.2" android:strokeLineCap="round" />
+        <path android:pathData="M24,30m-2.6,0a2.6,2.6 0 1,0 5.2,0a2.6,2.6 0 1,0 -5.2,0" android:fillColor="#FFFFFF" />
+    </group>
+</vector>

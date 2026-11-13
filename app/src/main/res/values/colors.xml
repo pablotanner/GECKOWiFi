@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="black">#FF000000</color>
-    <color name="white">#FFFFFFFF</color>
+    <!-- Mirrors ui/theme/Color.kt (Green40, white, Warm99). Compose reads Color.kt; these
+         are only for what Android draws before Compose: launcher icon, window
+         background (cold start, splash screen) and the placeholder logo. -->
+    <color name="brand_mark">#FF1F6B4F</color>
+    <color name="brand_on_mark">#FFFFFFFF</color>
+    <color name="brand_background">#FFFBFAF7</color>
+    <color name="launcher_background">#FF1F6B4F</color>
 </resources>

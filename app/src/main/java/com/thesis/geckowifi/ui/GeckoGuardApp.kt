@@ -51,7 +51,7 @@ private val tabs = listOf(
 )
 
 @Composable
-fun GeckoWifiApp(
+fun GeckoGuardApp(
     hasLocationPermission: Boolean,
     permissionDeniedBefore: Boolean,
     onRequestLocationPermission: () -> Unit

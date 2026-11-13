@@ -107,7 +107,7 @@ class RedirectProbeSource(
     companion object {
         /** Same probe Android's own captive-portal detection uses. Needs DNS on the network (A forwards it). */
         const val DEFAULT_PROBE_URL = "http://connectivitycheck.gstatic.com/generate_204"
-        private const val USER_AGENT = "GeckoWiFi-PortalProbe/1.0"
+        private const val USER_AGENT = "GECKOGuard-PortalProbe/1.0"
         private const val MAX_HTML_BYTES = 16L * 1024
 
         /**

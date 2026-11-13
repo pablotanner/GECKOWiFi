@@ -22,6 +22,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "GECKOWiFi"
+rootProject.name = "GECKOGuard"
 include(":app")
  

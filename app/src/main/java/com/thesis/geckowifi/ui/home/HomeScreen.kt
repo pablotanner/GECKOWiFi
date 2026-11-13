@@ -1,6 +1,7 @@
 package com.thesis.geckowifi.ui.home
 
 import com.thesis.geckowifi.verification.isRecentVerdict
+import com.thesis.geckowifi.ui.components.BrandLockup
 import android.content.Intent
 import android.provider.Settings
 import android.widget.Toast
@@ -164,7 +165,7 @@ fun HomeScreen(
 
     Column(Modifier.fillMaxWidth()) {
         TopAppBar(
-            title = { Text("GECKO WiFi") },
+            title = { BrandLockup() },
             actions = {
                 if (viewModel.labMode) {
                     Icon(
