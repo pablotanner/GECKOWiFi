@@ -227,11 +227,36 @@ function actionSubmit(label) {
   return `<button class="btn btn-primary" type="submit"><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg><span>${esc(label)}</span></button>`;
 }
 
+// How long the AP should refuse the client back after disconnecting it. Must match
+// KICK_BAN_S in dashboard.py. A disconnect models one de-auth event; a hold-off models
+// a sustained attack, long enough for the app to notice the drop.
+const BANS = [[120, "hold 120 s"], [300, "hold 300 s"], [30, "hold 30 s"], [0, "no hold"]];
+
+// The clients on one AP, each with a disconnect control (eduroam APs only; the open
+// GeckoTest AP has no 802.11 client list worth kicking from here).
+function kickList(r, a) {
+  if (!a.iface || !a.radius_port) return "";
+  const rows = (a.clients || []).map((c) => {
+    const opts = BANS.map(([v, t]) => `<option value="${v}">${esc(t)}</option>`).join("");
+    const kick = `<button class="btn btn-destructive" data-action="router.kick" data-arg="${esc(`${r.key}:${a.iface}:${c.mac}`)}">
+      <svg class="icon" aria-hidden="true"><use href="#i-x"/></svg><span>Disconnect</span></button>`;
+    return `<li class="kick-row"><code>${esc(c.mac)}</code>${c.tablet ? '<span class="tag">tablet</span>' : ""}
+      <span class="muted">${esc(c.signal || "")}</span>
+      <span class="kick-ctl"><select class="kick-ban" aria-label="hold-off time">${opts}</select>${kick}</span></li>`;
+  }).join("");
+  return `<ul class="list kick-list">${rows || '<li class="muted">No clients associated</li>'}</ul>`;
+}
+
 function renderRouters(s) {
   $("#router-panels").innerHTML = s.routers.map((r) => {
     if (r.error) return `<div class="panel"><h3>${esc(r.name)}</h3>${status("fail", "Not reachable")}<p class="detail">${esc(r.error)}</p></div>`;
-    const aps = r.aps.map((a) => `<li>${status(a.enabled ? "ok" : "off", a.enabled ? "On" : "Off")}
-      <span><strong>${esc(a.ssid)}</strong> <span class="muted">${esc(a.section)}, ${esc(a.security || "?")}${a.pmf != null ? `, PMF ${esc(PMF[a.pmf] || a.pmf)}` : ""}${a.radius_port ? `, RADIUS :${esc(a.radius_port)}` : ""}</span></span></li>`).join("");
+    const aps = r.aps.map((a) => `<li class="ap">
+      <div class="ap-head">${status(a.enabled ? "ok" : "off", a.enabled ? "On" : "Off")}
+        <span><strong>${esc(a.ssid)}</strong> <span class="muted">${esc(a.section)}, ${esc(a.security || "?")}${a.pmf != null ? `, PMF ${esc(PMF[a.pmf] || a.pmf)}` : ""}${a.radius_port ? `, RADIUS :${esc(a.radius_port)}` : ""}</span></span>
+        ${a.toggle ? actionButton({ action: "router.ap", arg: `${r.key}:${a.section}:${a.enabled ? "off" : "on"}`,
+          label: a.enabled ? "Disable" : "Enable", kind: a.enabled ? "destructive" : "secondary",
+          confirm: a.enabled ? `Turn off ${a.ssid} on ${r.name}? Any device on it drops.` : null }) : ""}</div>
+      ${kickList(r, a)}</li>`).join("");
     const clients = (r.nds_clients || []).map((c) => `<li><code>${esc(c.ip)}</code> <span class="muted">${esc(c.mac)}</span> ${esc(c.state)}
       ${r.key === "a" ? actionButton({ action: c.state === "Authenticated" ? "router.deauth" : "router.auth", arg: c.mac,
         label: c.state === "Authenticated" ? "Log out" : "Let through", kind: "secondary" }) : ""}</li>`).join("") || "<li class=\"muted\">No clients</li>";
@@ -436,6 +461,13 @@ document.addEventListener("click", async (ev) => {
   const { action, arg, confirm } = btn.dataset;
   if (confirm && !(await confirmFirst(confirm))) return;
   if (btn.dataset.admin) toast("Windows will ask for administrator rights.");
+  // The disconnect button carries router:iface:mac; the hold-off time comes from the
+  // select in the same row, appended here so the backend gets router:iface:mac:ban.
+  if (action === "router.kick") {
+    const ban = btn.closest(".kick-row")?.querySelector(".kick-ban")?.value ?? "120";
+    runAction(action, `${arg}:${ban}`);
+    return;
+  }
   runAction(action, arg);
 });
 

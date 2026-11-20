@@ -23,6 +23,8 @@ uci show wireless 2>/dev/null | awk -F= '/=(wifi-device|wifi-iface)$/{print "uci
 iw dev 2>/dev/null | awk '/Interface/{i=$2} /ssid/{print "iface=" i "," $2}'
 for i in $(iw dev 2>/dev/null | awk '/Interface/{print $2}'); do
     echo "stations=$i,$(iw dev "$i" station dump 2>/dev/null | grep -c '^Station')"
+    # One line per associated client: iface,mac,signal (for the dashboard's deauth buttons)
+    iw dev "$i" station dump 2>/dev/null | awk -v i="$i" '/^Station/{m=$2} /^[ \t]*signal:/{print "station=" i "," m "," $2}'
 done
 
 # openNDS (the captive-portal gate)

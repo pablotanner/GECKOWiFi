@@ -285,7 +285,7 @@ def probe_router(host):
 
 
 def parse_router(out):
-    d = {"uci": {}, "ifaces": {}, "stations": {}, "nds_clients": [], "dns_overrides": [], "leases": [], "link_down": []}
+    d = {"uci": {}, "ifaces": {}, "stations": {}, "station_list": [], "nds_clients": [], "dns_overrides": [], "leases": [], "link_down": []}
     for line in out.splitlines():
         if line.startswith("uci:wireless."):
             m = re.match(r"uci:wireless\.([^.]+)\.([^=]+)='?(.*?)'?$", line)
@@ -299,6 +299,9 @@ def parse_router(out):
         elif k == "stations":
             name, _, n = v.partition(",")
             d["stations"][name] = int(n or 0)
+        elif k == "station":
+            iface, mac, sig = (v.split(",") + ["", "", ""])[:3]
+            d["station_list"].append({"iface": iface, "mac": mac.lower(), "signal": sig})
         elif k == "nds_client":
             mac, ip, state = (v.split(",") + ["", "", ""])[:3]
             d["nds_clients"].append({"mac": mac, "ip": ip, "state": state})
@@ -336,6 +339,8 @@ def probe_tablet():
     w = shell("dumpsys wifi | grep -m1 mWifiInfo")
     m = re.search(r'SSID: "?([^",]*)"?, BSSID: ([0-9a-fA-F:]+)', w)
     d["ssid"], d["bssid"] = (m.group(1), m.group(2).lower()) if m else (None, None)
+    m = re.search(r"\bMAC: ([0-9a-fA-F:]{17})", w)  # per-network (randomized) MAC: what the AP sees
+    d["mac"] = m.group(1).lower() if m else None
     m = re.search(r"IP: /?([\d.]+)", w)
     d["ip"] = m.group(1) if m else None
     m = re.search(r"Supplicant state: (\w+)", w)
@@ -1063,7 +1068,14 @@ def build_status(raw, state):
                             "security": u.get("encryption"), "pmf": u.get("ieee80211w"), "device": u.get("device"),
                             "radius_port": u.get("auth_port"), "network": u.get("network"),
                             # Only the enterprise (eduroam) APs get the SSID/encryption/PMF editor.
-                            "editable": u.get("encryption") in ("wpa2", "wpa3", "wpa3-mixed")})
+                            "editable": u.get("encryption") in ("wpa2", "wpa3", "wpa3-mixed"),
+                            "toggle": ap_toggle_allowed(key, sec, u)})
+        # Live interface of each enabled AP (iw reports iface -> SSID; on B only one
+        # eduroam-lab section is on at a time, so the SSID is unambiguous).
+        tablet_mac = T.get("mac")
+        for a in aps:
+            a["iface"] = next((i for i, ssid in (R.get("ifaces") or {}).items() if ssid == a["ssid"] and a["enabled"]), None)
+            a["clients"] = [dict(s, tablet=s["mac"] == tablet_mac) for s in R.get("station_list") or [] if a["iface"] and s["iface"] == a["iface"]]
         routers.append({
             "key": key, "name": label, "uptime": ago(R.get("uptime")), "aps": aps, "radios": radios,
             "nds_clients": R.get("nds_clients"), "dns_overrides": R.get("dns_overrides"), "leases": R.get("leases"),
@@ -1074,8 +1086,11 @@ def build_status(raw, state):
 
     tablet = None
     if T.get("serial"):
-        tablet = {k: T.get(k) for k in ("serial", "ssid", "bssid", "ip", "supplicant", "app_version", "app_updated", "shell_internet", "ap", "last_logs")}
+        tablet = {k: T.get(k) for k in ("serial", "ssid", "bssid", "ip", "supplicant", "app_version", "app_updated", "shell_internet", "ap", "last_logs", "mac")}
         tablet["saved"] = [s for s in T.get("saved") or [] if s["ssid"] in ("eduroam-lab", "GeckoTest", "eduroam")]
+        # Which router/AP the tablet is associated with, as the routers see it (for the kick buttons).
+        tablet["station"] = next(({"router": r_["key"], "router_name": r_["name"], "iface": a["iface"], "ssid": a["ssid"], "section": a["section"]}
+                                  for r_ in routers if not r_.get("error") for a in r_["aps"] for c in a["clients"] if c["tablet"]), None)
 
     counts = {s: sum(1 for c in checks if c["status"] == s) for s in ORDER}
     return {
@@ -1404,6 +1419,55 @@ def router_wifi(arg):
     return ssh(host, script, timeout=45)
 
 
+# Switch a Wi-Fi AP on or off (router.ap), and disconnect one associated client
+# (router.kick). Both run over SSH on the wired link, so neither can cut the
+# dashboard's own path to the routers. Router B's eduroam sections stay with the
+# routerb.mode buttons: that control guards that an attacker AP never comes up
+# without its FreeRADIUS instance, so plain on/off must not bypass it.
+def ap_toggle_allowed(router, section, u):
+    return u.get("_type") == "wifi-iface" and not (router == "b" and section.startswith("eduroam_"))
+
+
+def valid_ap_arg(arg):
+    return bool(re.fullmatch(r"[ab]:[A-Za-z0-9_]{1,32}:(on|off)", arg or ""))
+
+
+def router_ap(arg):
+    router, section, want = arg.split(":")
+    R = (STATE.raw or {}).get({"a": "routerA", "b": "routerB"}[router]) or {}
+    u = (R.get("uci") or {}).get(section)
+    if u is None:
+        raise RuntimeError(f"no wireless section '{section}' on Router {router.upper()} (re-check the routers first)")
+    if not ap_toggle_allowed(router, section, u):
+        raise RuntimeError(f"{section} on Router {router.upper()} is switched with the Router B eduroam-lab mode buttons")
+    return ssh({"a": ROUTER_A, "b": ROUTER_B}[router]["ssh"],
+               f"uci set wireless.{section}.disabled={'0' if want == 'on' else '1'}; uci commit wireless; wifi reload; sleep 3; "
+               "iw dev | grep -E 'Interface|ssid'", timeout=45)
+
+
+# How long the AP refuses the client to re-associate after being told to leave, in
+# seconds. 0 = let it come straight back; the others hold it off so the app has a
+# window to observe the drop before the client reconnects.
+KICK_BAN_S = (0, 30, 120, 300)
+
+
+def valid_kick_arg(arg):
+    m = re.fullmatch(r"([ab]):(phy\d+-ap\d+):([0-9a-f]{2}(?::[0-9a-f]{2}){5}):(\d+)", arg or "")
+    return bool(m) and int(m.group(4)) in KICK_BAN_S
+
+
+def router_kick(arg):
+    """Tell an AP to drop one client (hostapd del_client over ubus), optionally
+    holding it off for a few seconds. Used to see how the tablet's app reacts when
+    it loses the link mid-session."""
+    router, iface, mac, ban = arg.split(":")
+    host = {"a": ROUTER_A, "b": ROUTER_B}[router]["ssh"]
+    payload = json.dumps({"addr": mac, "reason": 1, "deauth": True, "ban_time": int(ban) * 1000})
+    held = f", held off for {ban} s" if int(ban) else ""
+    msg = f"told {iface} to drop {mac}{held}"
+    return ssh(host, f"ubus call hostapd.{iface} del_client '{payload}' && echo '{msg}'", timeout=20)
+
+
 def scenario_script(name, *args):
     rc, out = run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(REPO / "lab" / "scenarios" / name), *args],
                   timeout=120, cwd=str(REPO / "lab" / "scenarios"))
@@ -1530,6 +1594,8 @@ ACTIONS = {
     "router.auth": (lambda a: ssh(ROUTER_A["ssh"], f"ndsctl auth {a}"), False, "mac", "Let the client through (openNDS)"),
     "routerb.mode": (lambda a: routerb_mode(a), False, ["off", "legit", "b1", "b3"], "Router B eduroam-lab mode"),
     "router.wifi": (lambda a: router_wifi(a), False, "wifi", "Set Wi-Fi options"),
+    "router.ap": (lambda a: router_ap(a), False, "ap", "Switch an AP on/off"),
+    "router.kick": (lambda a: router_kick(a), False, "kick", "Disconnect a client"),
     "scenario.setup": (lambda a: setup_scenario(a), False, SCENARIOS, "Set up scenario"),
     "scenario.reset": (lambda a: reset_scenario(), False, None, "Back to the baseline"),
     "routers.snapshot": (lambda a: run([r"C:\Program Files\Git\bin\bash.exe", "lab/eduroam/pull-router-configs.sh"], timeout=300, cwd=str(REPO))[1],
@@ -1558,6 +1624,10 @@ def valid_arg(spec, arg):
         return bool(re.fullmatch(r"\d+", arg or ""))
     if spec == "wifi":
         return valid_wifi(arg)
+    if spec == "ap":
+        return valid_ap_arg(arg)
+    if spec == "kick":
+        return valid_kick_arg(arg)
     return arg in spec
 
 
