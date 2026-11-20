@@ -130,7 +130,7 @@ fun CheckDetail.verdict(): Verdict {
         )
         VerificationState.UNVERIFIED -> Verdict(
             Tone.NEUTRAL, "Not registered", "$name isn't registered here",
-            "Most networks aren't. GECKO has nothing to compare it with, so it can't vouch for it either way.",
+            "This network is not registered here, so GECKO has nothing to compare it with.",
             Icons.Outlined.Shield
         )
         VerificationState.UNRECOGNIZED -> Verdict(
