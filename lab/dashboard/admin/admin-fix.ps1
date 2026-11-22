@@ -68,10 +68,23 @@ function Set-FirewallRules {
   $rules = @(
     @{ n = 'GeoPKI 1234'; p = 'TCP'; port = '1234'; local = 'Any' },
     @{ n = 'GECKO portal 80/443'; p = 'TCP'; port = '80,443'; local = '192.168.137.10,192.168.137.20' },
-    @{ n = 'GECKO eduroam RADIUS relay'; p = 'UDP'; port = '1812,1814,1816'; local = 'Any' },
+    @{ n = 'GECKO eduroam RADIUS relay'; p = 'UDP'; port = '1812,1814,1816,1818'; local = 'Any' },
     @{ n = 'GECKO eduroam realm server'; p = 'TCP'; port = '1235'; local = 'Any' })
   foreach ($r in $rules) {
-    if (Get-NetFirewallRule -DisplayName $r.n -ErrorAction SilentlyContinue) { Write-Output "rule '$($r.n)' present"; continue }
+    $existing = Get-NetFirewallRule -DisplayName $r.n -ErrorAction SilentlyContinue
+    if ($existing) {
+      # Reconcile the ports so a rule from an older version (e.g. missing B3's
+      # UDP 1818) is repaired instead of left stale.
+      $want = $r.port -split ','
+      $have = ($existing | Get-NetFirewallPortFilter).LocalPort
+      if (@(Compare-Object $want $have).Count -gt 0) {
+        Set-NetFirewallRule -DisplayName $r.n -LocalPort $want | Out-Null
+        Write-Output "rule '$($r.n)' updated ports -> $($r.port)"
+      } else {
+        Write-Output "rule '$($r.n)' present"
+      }
+      continue
+    }
     New-NetFirewallRule -DisplayName $r.n -Direction Inbound -Action Allow -Protocol $r.p -LocalPort ($r.port -split ',') `
       -LocalAddress ($r.local -split ',') -RemoteAddress $subnet -Profile Any | Out-Null
     Write-Output "rule '$($r.n)' added"
