@@ -26,6 +26,7 @@ if [ ! -s "$f" ]; then
 fi
 
 echo "== cleartext captures in $f =="
+echo "   last written: $(date -r "$f" '+%Y-%m-%d %H:%M:%S')   ($(wc -l < "$f" | tr -d ' ') line(s))"
 sort -u "$f" | while IFS= read -r line; do
     [ -z "$line" ] && continue
     user=${line%%:*}
@@ -34,7 +35,7 @@ sort -u "$f" | while IFS= read -r line; do
     [ -z "$pass" ] && continue
     echo
     echo "  user:     $user"
-    echo "  password: $pass      (sent in cleartext via EAP-GTC - no cracking needed)"
+    echo "  password: $pass      (sent in cleartext via EAP-GTC)"
 done
 echo
 echo "Reset before a fresh run:  rm -f $f"

@@ -23,6 +23,7 @@ if [ ! -s "$f" ]; then
 fi
 
 echo "== captures in $f =="
+echo "   last written: $(date -r "$f" '+%Y-%m-%d %H:%M:%S')   ($(wc -l < "$f" | tr -d ' ') line(s))"
 sort -u "$f" | while IFS= read -r line; do
     [ -z "$line" ] && continue
     user=${line%%::::*}
