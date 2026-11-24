@@ -37,6 +37,14 @@ ndsctl json 2>/dev/null | awk -F'"' '/"mac":/{m=$4} /"ip":/{ip=$4} /"state":/{pr
 for a in $(uci -q get dhcp.@dnsmasq[0].address); do echo "dns_override=$a"; done
 nft list ruleset 2>/dev/null | grep -qi geckoblock && echo "s7_block=1" || echo "s7_block=0"
 
+# Attacker data-plane state (Router B; empty/0 on A). See lab/eduroam/attacker/.
+echo "atk_eduroam_net=$(uci -q get wireless.eduroam_b3.network)"
+echo "dns_noresolv=$(uci -q get dhcp.@dnsmasq[0].noresolv)"
+echo "dns_logqueries=$(uci -q get dhcp.@dnsmasq[0].logqueries)"
+nft list table inet fw4 2>/dev/null | grep -q attacker-http-intercept && echo "atk_http=1" || echo "atk_http=0"
+[ -f /www-attacker/cgi-bin/login ] && echo "atk_portal=1" || echo "atk_portal=0"
+echo "atk_creds=$(wc -l < /tmp/portal-creds.log 2>/dev/null || echo 0)"
+
 # DHCP leases: mac,ip,name (10.99.0.x = onboarding walled garden, 10.98.0.x = eduroam users)
 awk '{print "lease=" $2 "," $3 "," $4}' /tmp/dhcp.leases 2>/dev/null
 

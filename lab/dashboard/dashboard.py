@@ -907,6 +907,7 @@ def evaluate(raw, state):
             r.check("ab_link_stable", "Router B", "Cable A to B stays up", "warn",
                     f"Router A saw the cable to Router B drop {len(b_drops)} times in the last 15 min.")
 
+    attacker = None
     if "_error" in B:
         r.check("router_b_reach", "Router B", "Router B reachable (SSH through A)", "fail", B["_error"], needs=["router_a_reach"])
     elif B:
@@ -916,6 +917,25 @@ def evaluate(raw, state):
             r.check("router_b_guard", "Router B", "Attacker AP has its backend", "fail",
                     f"{b_mode.upper()} is broadcasting eduroam-lab while the relay is down.",
                     actions=[act("routerb.mode", f"Turn {b_mode.upper()} off", "destructive", arg="off")])
+
+        # ---- attacker data-plane (Tier 0-2.5) state for the Attacker panel ----
+        # Live state of the lab/eduroam/attacker/ toolkit. Rendered as its own
+        # always-visible control panel (renderAttacker in app.js), NOT as checks:
+        # an active attack is intentional, not a "problem to fix", and the panel
+        # needs on buttons visible even when everything is off. All toggles only
+        # touch the edu path / Router B; the GeckoTest+openNDS demo is untouched.
+        if "eduroam_b3" in (B.get("uci") or {}):
+            victims = [l for l in B.get("leases", []) if l["ip"].startswith("10.98.0.")]
+            attacker = {
+                "reachable": True,
+                "edu_on": B.get("atk_eduroam_net") == "edu",
+                "iso": B.get("dns_noresolv") == "1",
+                "logq": B.get("dns_logqueries") == "1",
+                "http_on": B.get("atk_http") == "1",
+                "portal_on": B.get("atk_portal") == "1",
+                "creds": B.get("atk_creds") or "0",
+                "victims": len(victims),
+            }
 
     # ---------------- tablet
     if "_error" in T:
@@ -944,7 +964,7 @@ def evaluate(raw, state):
         T["ap"] = ap
 
     r.resolve_dependencies()
-    return r, {"b_mode": b_mode, "portals": portals, "scenario": scenario, "wsl_ip": wsl_ip, "lab_ips": lab_ips}
+    return r, {"b_mode": b_mode, "portals": portals, "scenario": scenario, "wsl_ip": wsl_ip, "lab_ips": lab_ips, "attacker": attacker}
 
 
 def build_status(raw, state):
@@ -1098,6 +1118,7 @@ def build_status(raw, state):
         "checks": sorted(checks, key=lambda c: (AREA_ORDER.get(c["area"], 9), ORDER[c["status"]])),
         "links": links, "nodes": nodes, "edges": edges, "services": services, "addresses": r.addresses,
         "routers": routers, "tablet": tablet, "b_mode": extra["b_mode"], "portals": extra["portals"], "scenario": extra["scenario"],
+        "attacker": extra.get("attacker"),
         "errors": {k: v["_error"] for k, v in raw.items() if isinstance(v, dict) and "_error" in v},
     }
 
@@ -1468,6 +1489,18 @@ def router_kick(arg):
     return ssh(host, f"ubus call hostapd.{iface} del_client '{payload}' && echo '{msg}'", timeout=20)
 
 
+GIT_BASH = r"C:\Program Files\Git\bin\bash.exe"
+
+
+def attacker_script(script, arg):
+    """Run one lab/eduroam/attacker/*.sh toolkit script (over SSH to Router B).
+    Same scripts the CLI uses, so the dashboard and command line never drift."""
+    rc, out = run([GIT_BASH, str(REPO / "lab" / "eduroam" / "attacker" / script), arg], timeout=90, cwd=str(REPO))
+    if rc != 0:
+        raise RuntimeError(out.strip() or f"{script} {arg} exited {rc}")
+    return out.strip()
+
+
 def scenario_script(name, *args):
     rc, out = run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(REPO / "lab" / "scenarios" / name), *args],
                   timeout=120, cwd=str(REPO / "lab" / "scenarios"))
@@ -1593,6 +1626,11 @@ ACTIONS = {
     "router.deauth": (lambda a: ssh(ROUTER_A["ssh"], f"ndsctl deauth {a}"), False, "mac", "Log the client out (openNDS)"),
     "router.auth": (lambda a: ssh(ROUTER_A["ssh"], f"ndsctl auth {a}"), False, "mac", "Let the client through (openNDS)"),
     "routerb.mode": (lambda a: routerb_mode(a), False, ["off", "legit", "b1", "b3"], "Router B eduroam-lab mode"),
+    "attacker.edupath": (lambda a: attacker_script("edu-path.sh", a), False, ["on", "off"], "Attacker victim connectivity"),
+    "attacker.http": (lambda a: attacker_script("http-intercept.sh", a), False, ["on", "off"], "Attacker HTTP intercept"),
+    "attacker.portal": (lambda a: attacker_script("portal.sh", a), False, ["on", "off"], "Attacker credential portal"),
+    "attacker.creds": (lambda a: attacker_script("portal.sh", "creds"), False, None, "Show captured credentials"),
+    "attacker.resetcreds": (lambda a: ssh(ROUTER_B["ssh"], ": > /tmp/portal-creds.log && echo 'portal-creds.log cleared'"), False, None, "Clear captured credentials"),
     "router.wifi": (lambda a: router_wifi(a), False, "wifi", "Set Wi-Fi options"),
     "router.ap": (lambda a: router_ap(a), False, "ap", "Switch an AP on/off"),
     "router.kick": (lambda a: router_kick(a), False, "kick", "Disconnect a client"),

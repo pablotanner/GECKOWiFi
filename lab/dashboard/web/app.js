@@ -286,6 +286,38 @@ function renderRouters(s) {
   });
 }
 
+function renderAttacker(s) {
+  const el = $("#attacker-panel");
+  if (!el) return;
+  const a = s.attacker;
+  if (!a || !a.reachable) {
+    el.innerHTML = `<p class="muted">${esc(a === null ? "Router B not reachable." : "No eduroam_b3 attacker SSID on Router B yet (set Router B to Attacker B3).")}</p>`;
+    return;
+  }
+  const row = (name, on, where, detail, buttons) =>
+    `<div class="row"><div class="row-head">${status(on ? "warn" : "off")}<span class="row-name">${esc(name)}</span><span class="row-where">${esc(where)}</span></div>
+      <p class="muted">${esc(detail)}</p><div class="button-row">${buttons}</div></div>`;
+  el.innerHTML =
+    row("Tier 0 — victim connectivity", a.edu_on, a.edu_on ? "ON" : "off",
+        a.edu_on ? `${a.victims} victim(s) on the edu bridge; DNS ${a.iso ? "isolated from Router A" : "still via Router A"}. Also enables DNS sniffing.`
+                 : "Victims withheld on lan under openNDS (captive-portal demo). Turning on also isolates DNS and logs queries.",
+        a.edu_on ? actionButton({ action: "attacker.edupath", arg: "off", label: "Back to withholding", kind: "secondary" })
+                 : actionButton({ action: "attacker.edupath", arg: "on", label: "Give victims internet", kind: "destructive", confirm: "Give attacker victims real internet through Router B (edu bridge)?" }))
+    + row("Tier 1 — DNS sniffing", a.logq, a.logq ? "ON" : "off",
+        (a.logq ? "Every domain victims look up is logged. " : "") + "Live view / full pcap from the CLI: lab/eduroam/attacker/sniff.sh dns|pcap. Follows the connectivity toggle.", "")
+    + row("Tier 2 — plain-HTTP intercept", a.http_on, a.http_on ? "ON" : "off",
+        a.http_on ? "Victims' http:// requests are redirected to the attacker page. HTTPS is untouched." : "HTTP flows normally (edu :80 only; lan path untouched).",
+        a.http_on ? actionButton({ action: "attacker.http", arg: "off", label: "Stop intercept", kind: "secondary" })
+                  : actionButton({ action: "attacker.http", arg: "on", label: "Intercept HTTP", kind: "destructive", confirm: "Redirect victims' plain-HTTP to the attacker page?" }))
+    + row("Tier 2.5 — credential portal", a.portal_on, a.portal_on ? `ON · ${a.creds} captured` : "off",
+        a.portal_on ? "Fake uni-wipkingen eduroam sign-in; typed credentials are captured directly." : "No login form served.",
+        a.portal_on
+          ? actionButton({ action: "attacker.portal", arg: "off", label: "Take portal down", kind: "secondary" })
+            + actionButton({ action: "attacker.creds", label: "Show captured creds", kind: "primary" })
+            + actionButton({ action: "attacker.resetcreds", label: "Clear captures", kind: "destructive", confirm: "Delete all captured portal credentials?" })
+          : actionButton({ action: "attacker.portal", arg: "on", label: "Deploy phishing portal", kind: "destructive", confirm: "Deploy a credential-capturing eduroam sign-in page on Router B? (lab only)" }));
+}
+
 function renderTablet(s) {
   const t = s.tablet;
   const el = $("#tablet-panel");
@@ -346,6 +378,7 @@ function render() {
   renderPortals(current.status);
   renderAddresses(current.status);
   renderRouters(current.status);
+  renderAttacker(current.status);
   renderTablet(current.status);
   renderActivity(current.status);
   renderAll(current.status);

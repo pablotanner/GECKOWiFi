@@ -419,3 +419,30 @@ replaced upstream's generic certificate with the flat schema v3.
   server runs with the same signing key, so the app's pin didn't change. It has
   its own database and Trillian tree; the old server, database and tree stay as
   the way back (lab-setup.md, *Map server*).
+
+## D29. Attacker data-plane: a separate `edu` bridge for connectivity/MITM
+The attacker-B3 keep-online fix (`lab/eduroam/radius/setup-instances.sh`) lets a
+victim fully associate to the rogue `eduroam-lab`. To test attacks that need
+connectivity (sniffing, plain-HTTP redirection, later MITM) the victim must also
+reach the internet *through Router B* without contaminating the genuine path.
+
+- **Two bridges on B.** `GeckoTest` (open SSID) stays on `br-lan` under openNDS
+  (the withholding / captive-portal demos, unchanged). The attacker eduroam SSID
+  (`eduroam_b3`) moves to the purpose-built `br-edu` zone (`10.98.0.0/24`), which
+  already had a DHCP pool, an `edu`->`wan` forwarding and WAN masquerade. On
+  `br-edu` openNDS never sees the client, so it gets real NAT'd internet.
+- **B resolves its own DNS** (`noresolv=1`, upstream `1.1.1.1/1.0.0.1`) instead
+  of forwarding to Router A, so A is out of the attacker's resolver path. This
+  closes the main false-positive vector: a DNS answer on B is B's, not A's.
+- **Only Router B is reconfigured**; Router A is never touched, so the paths stay
+  independent. Residual caveat: B's *upstream* is still daisy-chained A -> laptop
+  -> home line (lab-setup.md), so the victim's egress IP is the home line's. That
+  doesn't change B's power over the victim (gateway/DNS/DHCP are B's); it only
+  matters if A and B are online simultaneously and you need to tell the egress
+  paths apart. A phone tether on B's WAN is the fix if that case ever arises.
+- **HTTPS is intentionally not intercepted.** Transparent HTTPS needs a MITM CA
+  the victim trusts - exactly the trust GECKO denies - so it is a deliberate,
+  separate step, not part of this data-plane work.
+- **Tooling** lives in `lab/eduroam/attacker/` (`edu-path.sh`, `sniff.sh`,
+  `http-intercept.sh`), all driving B over SSH and all reversible; a pre-change
+  snapshot is in `lab-secrets/router-backups/`.
