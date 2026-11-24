@@ -1481,7 +1481,10 @@ def router_kick(arg):
     """Tell an AP to drop one client (hostapd del_client over ubus), optionally
     holding it off for a few seconds. Used to see how the tablet's app reacts when
     it loses the link mid-session."""
-    router, iface, mac, ban = arg.split(":")
+    # The MAC itself contains colons, so split off router/iface from the front
+    # and the ban time from the back; the rest is the MAC.
+    router, iface, rest = arg.split(":", 2)
+    mac, ban = rest.rsplit(":", 1)
     host = {"a": ROUTER_A, "b": ROUTER_B}[router]["ssh"]
     payload = json.dumps({"addr": mac, "reason": 1, "deauth": True, "ban_time": int(ban) * 1000})
     held = f", held off for {ban} s" if int(ban) else ""

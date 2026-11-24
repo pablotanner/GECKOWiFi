@@ -135,6 +135,38 @@ var (
 <p class="foot">{{.Host}}</p>
 </div></body></html>`))
 
+	// attackerCredsPage is the evil twin's eduroam credential phish: a fake
+	// university Wi-Fi sign-in that asks for the identity and password, posts to
+	// /accept, and is logged as "captured_credentials" (server.go). Used by the
+	// credential_phish scenario; it only steals - the client is never logged in.
+	// Lab demo only. uni-wipkingen is a fictional institution.
+	attackerCredsPage = template.Must(template.New("attackercreds").Parse(`<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Venue}} · Wi-Fi sign-in</title>` + attackerStyle + `</head>
+<body><div class="wrap">
+<div class="brand">` + wifiSVG + `<b>{{.Venue}}</b></div>
+<div class="card">
+<div class="head">
+<h1>Sign in to continue</h1>
+<p>Your session on <b>eduroam</b> needs re-authentication. Enter your university account to reconnect.</p>
+</div>
+<form method="post" action="/accept">
+<input type="hidden" name="tok" value="{{.Session.Tok}}">
+<input type="hidden" name="authaction" value="{{.Session.AuthAction}}">
+<input type="hidden" name="redir" value="{{.Session.Redir}}">
+<input type="hidden" name="clientip" value="{{.Session.ClientIP}}">
+<input type="hidden" name="clientmac" value="{{.Session.ClientMAC}}">
+<label>Username</label>
+<input name="identity" placeholder="user@uni-wipkingen.ch" autocapitalize="none" autocomplete="username" autocorrect="off">
+<label>Password</label>
+<input name="password" type="password" autocomplete="current-password">
+<div class="secure"><svg viewBox="0 0 24 24"><path d="M12 1 3 5v6c0 5 3.8 9.4 9 11 5.2-1.6 9-6 9-11V5zm-1 14-4-4 1.4-1.4L11 12.2l4.6-4.6L17 9z"/></svg> Secure connection · your details are encrypted</div>
+<button type="submit">Sign in</button>
+<p class="note">By connecting you agree to the terms of use.</p>
+</form>
+</div>
+<p class="foot">{{.Host}}</p>
+</div></body></html>`))
+
 	// capturedPage is shown after the phishing form is submitted when there is
 	// no openNDS session to hand back to (e.g. the page opened directly for a
 	// demo). With a session, the client is logged in instead and never sees it.

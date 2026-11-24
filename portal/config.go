@@ -82,6 +82,13 @@ type Scenario struct {
 	// S6: serve the login page on port 80 without upgrading to HTTPS.
 	HTTPOnly bool `json:"http_only"`
 
+	// --- credential phish (attacker) --------------------------------------
+	// Serve a username/password sign-in page (attackerCredsPage) instead of the
+	// card-details page, and log what the client types as "captured_credentials".
+	// This only phishes: the client is never logged in and never released to the
+	// internet (the captured "You're connected" page is shown). Lab demo only.
+	CredentialPhish bool `json:"credential_phish"`
+
 	// --- genuine-side options (A) -----------------------------------------
 	// The genuine login page sends the client to the payment delegate with a
 	// 302 instead of a button, so the detection probe (which follows only

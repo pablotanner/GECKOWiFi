@@ -265,8 +265,14 @@ func (s *server) servePortal(w http.ResponseWriter, r *http.Request, st *site) {
 			http.Redirect(w, r, sc.SwitchTo, http.StatusFound)
 			return
 		}
-		// The evil twin harvests the phished card details, then logs the
-		// client in as if nothing happened.
+		// The evil twin harvests the phished eduroam credentials and stops
+		// there (credential_phish: just steal, never release to the internet).
+		if s.cfg.Role == "attacker" && s.cfg.Scenario != nil && s.cfg.Scenario.CredentialPhish {
+			s.captureCredentials(w, r)
+			return
+		}
+		// Otherwise the evil twin harvests the phished card details, then logs
+		// the client in as if nothing happened.
 		if s.cfg.Role == "attacker" {
 			s.capturePayment(w, r)
 			return
@@ -285,15 +291,33 @@ func (s *server) servePortal(w http.ResponseWriter, r *http.Request, st *site) {
 func (s *server) servePortalPage(w http.ResponseWriter, r *http.Request, st *site, scheme string) {
 	sess := sessionFrom(r.URL.Query())
 	s.events.record(r, scheme, "login_page", nil)
-	// The evil twin serves a card-phishing page; the genuine portal does not.
+	// The evil twin serves a phishing page; the genuine portal does not. The
+	// credential_phish scenario asks for the eduroam username/password; the
+	// default attacker page phishes card details.
 	page := loginPage
 	if s.cfg.Role == "attacker" {
 		page = attackerPortalPage
+		if s.cfg.Scenario != nil && s.cfg.Scenario.CredentialPhish {
+			page = attackerCredsPage
+		}
 	}
 	render(w, http.StatusOK, page, map[string]any{
 		"Venue": s.cfg.VenueName, "Host": st.Host, "Session": sess,
 		"HasSession": sess.Tok != "", "Checkout": s.checkoutURL(r, st),
 	})
+}
+
+// captureCredentials is the eduroam theft: the attacker role logs the username
+// and password typed into the fake university sign-in ("captured_credentials"
+// in the attacker log), then shows the "connected" page. It never logs the
+// client in - the credential_phish scenario only harvests. Lab demo only; the
+// point is that GECKO flags this portal before anything is sent.
+func (s *server) captureCredentials(w http.ResponseWriter, r *http.Request) {
+	s.events.record(r, "https", "captured_credentials", map[string]string{
+		"identity": r.PostForm.Get("identity"),
+		"password": r.PostForm.Get("password"),
+	})
+	render(w, http.StatusOK, capturedPage, map[string]any{"Venue": s.cfg.VenueName, "Host": s.portal.Host})
 }
 
 // capturePayment is the theft: the attacker role logs the card details the
