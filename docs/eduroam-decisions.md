@@ -446,3 +446,39 @@ reach the internet *through Router B* without contaminating the genuine path.
 - **Tooling** lives in `lab/eduroam/attacker/` (`edu-path.sh`, `sniff.sh`,
   `http-intercept.sh`), all driving B over SSH and all reversible; a pre-change
   snapshot is in `lab-secrets/router-backups/`.
+
+## D30. Captive-portal that keeps the victim connected (release-after-capture)
+Goal: on the rogue `eduroam-lab`, pop the phone's *native* captive sheet (not just
+a page when the victim happens to open http://), harvest the typed credentials,
+and still keep the device connected afterwards. The naive version (blanket :80
+intercept, never released) made iOS drop the network and eventually disable
+Auto-Join.
+
+- **Why it dropped.** iOS/Android decide a network is usable by fetching a plain
+  `:80` probe (`captive.apple.com/hotspot-detect.html`, `generate_204`,
+  `ncsi.txt`) and checking for the exact success response. The blanket DNAT
+  (`http-intercept.sh`) hijacked that probe too, so the sheet popped (good) but
+  every *re-probe* after the victim "signed in" was still hijacked -> the OS never
+  saw success -> it declared "no internet", dropped the net, and after a few tries
+  turned Auto-Join off. The link-layer was fine (B3 keep-online, D29); this is
+  purely the captive-portal connectivity check.
+- **Fix: release-after-capture**, exactly like a real commercial portal. An
+  `edu_released` nft set is inserted at the TOP of `dstnat_edu` with a `return`,
+  so any IP in it bypasses the :80 redirect. The login CGI adds the victim's IP
+  the moment they submit, then meta-refreshes the OS back at its probe URL, which
+  now reaches the real internet -> success -> the sheet closes and the net stays.
+  The credentials are already captured before release, so releasing costs nothing.
+- **Sheet shows the form, not a 404.** uhttpd `error_page=/index.html` serves the
+  splash on every path, including the probe's own URL, so the captive sheet
+  renders the "session expired" sign-in instead of a 404.
+- **Hard dependency on upstream.** Release only keeps the device online if the
+  re-probe can actually reach the internet, i.e. `edu-path.sh on` (D29). With
+  edu-path off the portal still pops but the OS still drops it; `portal.sh on`
+  warns in that case.
+- **"Capture-only, never release" and "stay connected" are mutually exclusive:**
+  an OS only keeps a Wi-Fi network it believes grants internet, and it re-checks
+  *after* the portal. Holding an iOS client captive without granting egress is
+  not possible - itself a demonstrable point.
+- **Scope.** Set/rule are applied live via `nft` after fw4's reload (UCI can't
+  express a set-exclusion on a redirect cleanly); a full `firewall reload` clears
+  them, so re-run `http-intercept.sh on`. Only the `edu` path is touched.

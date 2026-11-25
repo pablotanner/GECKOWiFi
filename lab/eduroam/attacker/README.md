@@ -19,7 +19,7 @@ pre-change snapshot is in `lab-secrets/router-backups/`.
 | 0 | **DNS isolation** from Router A | (part of `edu-path.sh on`) | B resolves via public DNS, A out of the path |
 | 1 | **Sniffing** (DNS log + pcap) | `sniff.sh dns\|pcap\|http` | live domains / full pcap to `evidence/` |
 | 2 | **Plain-HTTP interception** | `http-intercept.sh on\|off` | edu `:80` → attacker page (HTTPS untouched) |
-| 2.5 | **Portal credential capture** | `portal.sh on\|off\|creds` | fake `uni-wipkingen` sign-in; typed creds logged |
+| 2.5 | **Portal credential capture** | `portal.sh on\|off\|creds` | OS captive sheet pops a fake `uni-wipkingen` "session expired" sign-in; typed creds logged, then victim released so they stay online (needs Tier 0 on) |
 | — | RADIUS keep-online + GTC plaintext | `../radius/` (laptop side) | see `../radius/extract-plain.sh attacker-b3` |
 
 `status.sh` prints all of the above (ON/off), the associated victims, and capture

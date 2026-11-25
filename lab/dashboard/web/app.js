@@ -310,7 +310,7 @@ function renderAttacker(s) {
         a.http_on ? actionButton({ action: "attacker.http", arg: "off", label: "Stop intercept", kind: "secondary" })
                   : actionButton({ action: "attacker.http", arg: "on", label: "Intercept HTTP", kind: "destructive", confirm: "Redirect victims' plain-HTTP to the attacker page?" }))
     + row("Tier 2.5 — credential portal", a.portal_on, a.portal_on ? `ON · ${a.creds} captured` : "off",
-        a.portal_on ? "Fake uni-wipkingen eduroam sign-in; typed credentials are captured directly." : "No login form served.",
+        a.portal_on ? "Fake uni-wipkingen 'session expired' sign-in; pops as the OS captive sheet, captures typed credentials, then releases the victim so they stay online (needs victim connectivity on)." : "No login form served.",
         a.portal_on
           ? actionButton({ action: "attacker.portal", arg: "off", label: "Take portal down", kind: "secondary" })
             + actionButton({ action: "attacker.creds", label: "Show captured creds", kind: "primary" })
