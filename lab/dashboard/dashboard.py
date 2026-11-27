@@ -55,7 +55,7 @@ RADIUS_SOURCE = ROUTER_A["wan"]            # 192.168.137.50, what FreeRADIUS see
 MIRRORED_CLIENT_RANGE = "192.168.137.0/24"  # the clients.conf range that covers it
 FIREWALL_RULES = ["GeoPKI 1234", "GECKO portal 80/443", "GECKO eduroam RADIUS relay", "GECKO eduroam realm server"]
 APP_ID = "com.thesis.geckowifi"
-# Last three octets of the BSSIDs (README: 94:.. GeckoTest, 96:.. eduroam-lab)
+# Last three octets of the BSSIDs (README: 94:.. Wipkingen Airport Free, 96:.. eduroam-lab)
 AP_BY_SUFFIX = {"97:c2:3a": "routerA", "97:c2:47": "routerB"}
 LAB_LOCATION = "47.37643,8.54674"
 # Portal experiments (docs/experiments.md): the portal pair each scenario runs, as
@@ -789,7 +789,7 @@ def evaluate(raw, state):
             r.check(f"realm_rec_{rec['federation']}", "Laptop", f"Realm record {rec['federation']}/{rec['realm']}",
                     "fail" if left < 0 else "warn", ("Expired" if left < 0 else f"Expires in {ago(left)}") + ": re-sign it (docs/eduroam-demo.md, step 5).")
 
-    # portals: one slot per address. The genuine slot (.10) is Router A's GeckoTest portal,
+    # portals: one slot per address. The genuine slot (.10) is Router A's Wipkingen Airport Free portal,
     # genuine.json or one of its scenario variants; the attacker slot (.20) is Router B's.
     configs = portal_configs()
     running_by_ip = {}
@@ -809,7 +809,7 @@ def evaluate(raw, state):
         elif running:
             st, summ = "ok", f"Serving {names[0].removeprefix('scenarios/')} (pid {running[0]['pid']})."
         elif slot == "genuine":
-            st, summ = "warn", "Not running: Router A's GeckoTest portal can't log anyone in."
+            st, summ = "warn", "Not running: Router A's Wipkingen Airport Free portal can't log anyone in."
         else:
             st, summ = "off", "Not running: Router B's evil twin has no portal."
         if running:
@@ -825,7 +825,7 @@ def evaluate(raw, state):
     b_ssid = ((B.get("uci") or {}).get("wifi2g") or {}).get("ssid")
     matches = [n for n, (g, a, _) in SCENARIO_SETUP.items() if g and g == gen and a == atk
                and (n == "S7") == (B.get("s7_block") == "1")]
-    if b_ssid and b_ssid != "GeckoTest":
+    if b_ssid and b_ssid != "Wipkingen Airport Free":
         matches = ["N6"]
     scenario = {"list": [{"id": n, "desc": d, "genuine": g, "attacker": a} for n, (g, a, d) in SCENARIO_SETUP.items()],
                 "matches": matches, "baseline": gen == "genuine" and atk == "attacker" and B.get("s7_block") != "1",
@@ -871,7 +871,7 @@ def evaluate(raw, state):
         r.check(f"router_{key}_opennds", label, f"{label} openNDS (portal gate)", "ok" if nds else "fail",
                 (f"Running, sends clients to {R.get('fas_fqdn')} at {R.get('fas_ip')}. "
                  + (f"Clients: " + ", ".join(f"{c['ip']} {c['state']}" for c in R.get('nds_clients')) if R.get("nds_clients") else "No clients."))
-                if nds else "Not running: GeckoTest has no captive portal.",
+                if nds else "Not running: Wipkingen Airport Free has no captive portal.",
                 actions=[act("router.opennds", "Restart openNDS", "secondary", arg=key)], needs=[reach])
 
     router_checks("a", A, ROUTER_A, "Router A")
@@ -923,7 +923,7 @@ def evaluate(raw, state):
         # always-visible control panel (renderAttacker in app.js), NOT as checks:
         # an active attack is intentional, not a "problem to fix", and the panel
         # needs on buttons visible even when everything is off. All toggles only
-        # touch the edu path / Router B; the GeckoTest+openNDS demo is untouched.
+        # touch the edu path / Router B; the Wipkingen Airport Free+openNDS demo is untouched.
         if "eduroam_b3" in (B.get("uci") or {}):
             victims = [l for l in B.get("leases", []) if l["ip"].startswith("10.98.0.")]
             attacker = {
@@ -1107,7 +1107,7 @@ def build_status(raw, state):
     tablet = None
     if T.get("serial"):
         tablet = {k: T.get(k) for k in ("serial", "ssid", "bssid", "ip", "supplicant", "app_version", "app_updated", "shell_internet", "ap", "last_logs", "mac")}
-        tablet["saved"] = [s for s in T.get("saved") or [] if s["ssid"] in ("eduroam-lab", "GeckoTest", "eduroam")]
+        tablet["saved"] = [s for s in T.get("saved") or [] if s["ssid"] in ("eduroam-lab", "Wipkingen Airport Free", "eduroam")]
         # Which router/AP the tablet is associated with, as the routers see it (for the kick buttons).
         tablet["station"] = next(({"router": r_["key"], "router_name": r_["name"], "iface": a["iface"], "ssid": a["ssid"], "section": a["section"]}
                                   for r_ in routers if not r_.get("error") for a in r_["aps"] for c in a["clients"] if c["tablet"]), None)

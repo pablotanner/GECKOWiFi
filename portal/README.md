@@ -18,7 +18,7 @@ into the GeoCertificate, and the server prints it on startup.
 ```powershell
 go build -o portal.exe .
 .\portal.exe ca-init                         # once: lab CA
-.\portal.exe keygen -host portal.gecko-a.lab # once per domain
+.\portal.exe keygen -host login.airport-wipkingen.com # once per domain
 ```
 
 RUN BOTH (in ...\GECKOWiFi\portal):

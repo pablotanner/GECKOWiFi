@@ -121,7 +121,7 @@ func (s *server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	host := hostOnly(r.Host)
 	// Keep the requested host when we either serve it locally or relay it to
 	// the genuine portal; only an unknown name falls back to the login host.
-	// A relay host (e.g. portal.gecko-a.lab in S3) is not a local site, but
+	// A relay host (e.g. login.airport-wipkingen.com in S3) is not a local site, but
 	// its http->https upgrade must still point back at itself so the HTTPS
 	// hop is relayed and the probe sees the genuine key before any switch.
 	if _, ok := s.sites[host]; !ok && !sc.relays(host) {

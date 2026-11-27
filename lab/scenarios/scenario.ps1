@@ -66,31 +66,31 @@ function Atk([string]$f) { ".\portal.exe serve -config .\config\scenarios\$f" }
 Write-Host "=== Scenario $Name ===" -ForegroundColor Green
 
 switch ($Name) {
-  'S0'  { Set-BDns @('portal.gecko-a.lab','pay.gecko-pay.lab'); Set-BFas 'portal.gecko-a.lab'
+  'S0'  { Set-BDns @('login.airport-wipkingen.com','pay.airport-wipkingen.com'); Set-BFas 'login.airport-wipkingen.com'
           Show-Laptop @($genuine, (Atk 's0-relay.json')) }
-  'S1'  { Set-BDns @('portal.gecko-a.lab'); Set-BFas 'portal.gecko-a.lab'
+  'S1'  { Set-BDns @('login.airport-wipkingen.com'); Set-BFas 'login.airport-wipkingen.com'
           Show-Laptop @((Atk 's1-clone.json')) }
-  'S2'  { Set-BDns @('portal.gecko-a-login.lab'); Set-BFas 'portal.gecko-a-login.lab'
+  'S2'  { Set-BDns @('login.wipkingen-airport.com'); Set-BFas 'login.wipkingen-airport.com'
           Show-Laptop @((Atk 's2-lookalike.json')) }
-  'S3'  { Set-BDns @('portal.gecko-a.lab','login.evil.lab'); Set-BFas 'portal.gecko-a.lab'
+  'S3'  { Set-BDns @('login.airport-wipkingen.com','login.evil.lab'); Set-BFas 'login.airport-wipkingen.com'
           Show-Laptop @("$bounce   # A must emit the plain-HTTP /continue hop", (Atk 's3-redirect.json')) }
-  'S3m' { Set-BDns @('portal.gecko-a.lab','login.evil.lab'); Set-BFas 'portal.gecko-a.lab'
+  'S3m' { Set-BDns @('login.airport-wipkingen.com','login.evil.lab'); Set-BFas 'login.airport-wipkingen.com'
           Show-Laptop @($bounce, (Atk 's3m-meta.json')) }
-  'S3h' { Set-BDns @('portal.gecko-a.lab','login.evil.lab'); Set-BFas 'portal.gecko-a.lab'
+  'S3h' { Set-BDns @('login.airport-wipkingen.com','login.evil.lab'); Set-BFas 'login.airport-wipkingen.com'
           Show-Laptop @($bounce, (Atk 's3h-header.json')) }
-  'S3j' { Set-BDns @('portal.gecko-a.lab','login.evil.lab'); Set-BFas 'portal.gecko-a.lab'
+  'S3j' { Set-BDns @('login.airport-wipkingen.com','login.evil.lab'); Set-BFas 'login.airport-wipkingen.com'
           Show-Laptop @($bounce, (Atk 's3j-js.json')) }
-  'S4a' { Set-BDns @('portal.gecko-a.lab','pay.gecko-pay.lab'); Set-BFas 'portal.gecko-a.lab'
+  'S4a' { Set-BDns @('login.airport-wipkingen.com','pay.airport-wipkingen.com'); Set-BFas 'login.airport-wipkingen.com'
           Show-Laptop @("$payRedir   # A redirects the login page to the payment delegate", (Atk 's4a-payment.json')) }
-  'S5a' { Set-BDns @('portal.gecko-a.lab'); Set-BFas 'portal.gecko-a.lab'
+  'S5a' { Set-BDns @('login.airport-wipkingen.com'); Set-BFas 'login.airport-wipkingen.com'
           Show-Laptop @($genuine, (Atk 's5a-timer.json')) }
-  'S5b' { Set-BDns @('portal.gecko-a.lab','login.evil.lab'); Set-BFas 'portal.gecko-a.lab'
+  'S5b' { Set-BDns @('login.airport-wipkingen.com','login.evil.lab'); Set-BFas 'login.airport-wipkingen.com'
           Show-Laptop @($genuine, (Atk 's5b-ua.json')) }
-  'S5c' { Set-BDns @('portal.gecko-a.lab','login.evil.lab'); Set-BFas 'portal.gecko-a.lab'
+  'S5c' { Set-BDns @('login.airport-wipkingen.com','login.evil.lab'); Set-BFas 'login.airport-wipkingen.com'
           Show-Laptop @((Atk 's5c-after-accept.json')) }
-  'S6'  { Set-BDns @('portal.gecko-a.lab'); Set-BFas 'portal.gecko-a.lab'
+  'S6'  { Set-BDns @('login.airport-wipkingen.com'); Set-BFas 'login.airport-wipkingen.com'
           Show-Laptop @((Atk 's6-http-only.json')) }
-  'S7'  { Set-BDns @('portal.gecko-a.lab'); Set-BFas 'portal.gecko-a.lab'
+  'S7'  { Set-BDns @('login.airport-wipkingen.com'); Set-BFas 'login.airport-wipkingen.com'
           Invoke-B (@(
             'uci set firewall.geckoblock=rule',
             "uci set firewall.geckoblock.name='GeckoBlockMap'",

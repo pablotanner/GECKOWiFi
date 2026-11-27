@@ -1,13 +1,13 @@
 {
   "role": "attacker",
   "listen_ip": "192.168.137.20",
-  "portal_host": "portal.gecko-a-login.lab",
+  "portal_host": "login.wipkingen-airport.com",
   "auth_prefixes": ["http://192.168.247.1:2050/"],
   "log_dir": "logs",
   "venue_name": "University of Wipkingen",
   "sites": [
-    { "host": "portal.gecko-a-login.lab", "kind": "portal",
-      "cert": "keys-attacker/portal.gecko-a-login.lab.crt", "key": "keys-attacker/portal.gecko-a-login.lab.key" }
+    { "host": "login.wipkingen-airport.com", "kind": "portal",
+      "cert": "keys/login.wipkingen-airport.com.crt", "key": "keys/login.wipkingen-airport.com.key" }
   ],
   "scenario": { "name": "S8-eduroam-phish", "credential_phish": true }
 }

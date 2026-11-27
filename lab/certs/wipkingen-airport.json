@@ -1,0 +1,59 @@
+[
+  {
+    "version": 1,
+    "certificate_id": "wipkingen-airport-free-2026a",
+    "domain": "airport-wipkingen.com",
+    "areas": [
+      {
+        "type": "MultiPolygon",
+        "coordinates": [
+          [
+            [
+              [8.515, 47.36],
+              [8.565, 47.36],
+              [8.565, 47.39],
+              [8.515, 47.39],
+              [8.515, 47.36]
+            ]
+          ],
+          []
+        ]
+      }
+    ],
+    "areas_altitude": [
+      [200, 700]
+    ],
+    "not_valid_after": "2031-09-26T15:28:00Z",
+    "critical": [
+      "wifi"
+    ],
+    "extensions": {
+      "wifi": {
+        "version": 1,
+        "operator": "Airport Wipkingen",
+        "ssid": "Wipkingen Airport Free",
+        "auth_modes": [
+          "open"
+        ],
+        "portal": {
+          "domains": [
+            {
+              "name": "login.airport-wipkingen.com",
+              "role": "primary",
+              "pinned_spki_sha256": [
+                "gqrC/GBesSup6PcHUPHL8cSI65xvAvSIYJsdEExGbcM="
+              ]
+            },
+            {
+              "name": "pay.airport-wipkingen.com",
+              "role": "delegate",
+              "pinned_spki_sha256": [
+                "s6RWzG2yYqPdUzZ8f3DKYxbcfkpQxzP/kJxTLYqXS9Y="
+              ]
+            }
+          ]
+        }
+      }
+    }
+  }
+]

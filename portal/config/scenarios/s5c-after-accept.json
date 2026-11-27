@@ -1,13 +1,13 @@
 {
   "role": "attacker",
   "listen_ip": "192.168.137.20",
-  "portal_host": "portal.gecko-a.lab",
+  "portal_host": "login.airport-wipkingen.com",
   "auth_prefixes": ["http://192.168.247.1:2050/"],
   "log_dir": "logs",
-  "venue_name": "GeckoTest WiFi",
+  "venue_name": "Wipkingen Airport Free",
   "sites": [
-    { "host": "portal.gecko-a.lab", "kind": "portal",
-      "cert": "keys-attacker/portal.gecko-a.lab.crt", "key": "keys-attacker/portal.gecko-a.lab.key" }
+    { "host": "login.airport-wipkingen.com", "kind": "portal",
+      "cert": "keys-attacker/login.airport-wipkingen.com.crt", "key": "keys-attacker/login.airport-wipkingen.com.key" }
   ],
   "scenario": {
     "name": "S5c-switch-after-accept",

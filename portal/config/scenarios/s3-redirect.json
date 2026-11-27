@@ -4,14 +4,14 @@
   "portal_host": "login.evil.lab",
   "auth_prefixes": ["http://192.168.247.1:2050/"],
   "log_dir": "logs",
-  "venue_name": "GeckoTest WiFi",
+  "venue_name": "Wipkingen Airport Free",
   "sites": [
     { "host": "login.evil.lab", "kind": "portal",
       "cert": "keys-attacker/login.evil.lab.crt", "key": "keys-attacker/login.evil.lab.key" }
   ],
   "scenario": {
     "name": "S3-redirect",
-    "relay_hosts": ["portal.gecko-a.lab"],
+    "relay_hosts": ["login.airport-wipkingen.com"],
     "upstream": "192.168.137.10",
     "switch": "redirect",
     "switch_to": "https://login.evil.lab/",

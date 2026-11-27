@@ -10,10 +10,10 @@
 // Usage:
 //
 //	portal serve  -config config/genuine.json
-//	portal keygen -host portal.gecko-a.lab [-out keys] [-force]
-//	portal spki   -cert keys/portal.gecko-a.lab.crt
+//	portal keygen -host login.airport-wipkingen.com [-out keys] [-force]
+//	portal spki   -cert keys/login.airport-wipkingen.com.crt
 //	portal ca-init                           (once: lab CA to install on test devices)
-//	portal sign   -host portal.gecko-a.lab   (new CA-signed cert for the same key = same pin)
+//	portal sign   -host login.airport-wipkingen.com   (new CA-signed cert for the same key = same pin)
 package main
 
 import (

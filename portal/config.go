@@ -118,7 +118,7 @@ func loadConfig(path string) (*Config, error) {
 		cfg.LogDir = "logs"
 	}
 	if cfg.VenueName == "" {
-		cfg.VenueName = "GeckoTest WiFi"
+		cfg.VenueName = "Wipkingen Airport Free"
 	}
 	hasPortal := false
 	for _, s := range cfg.Sites {

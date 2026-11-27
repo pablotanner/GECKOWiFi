@@ -20,7 +20,7 @@ config dnsmasq
 	option ednspacket_max '1232'
 	option filter_aaaa '0'
 	option filter_a '0'
-	list address '/portal.gecko-a.lab/192.168.137.20'
+	list address '/login.airport-wipkingen.com/192.168.137.20'
 	list address '/status.client/192.168.247.1'
 
 config dhcp 'lan'

@@ -233,7 +233,7 @@ function actionSubmit(label) {
 const BANS = [[120, "hold 120 s"], [300, "hold 300 s"], [30, "hold 30 s"], [0, "no hold"]];
 
 // The clients on one AP, each with a disconnect control (eduroam APs only; the open
-// GeckoTest AP has no 802.11 client list worth kicking from here).
+// Wipkingen Airport Free AP has no 802.11 client list worth kicking from here).
 function kickList(r, a) {
   if (!a.iface || !a.radius_port) return "";
   const rows = (a.clients || []).map((c) => {

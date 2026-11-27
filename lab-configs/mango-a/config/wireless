@@ -13,7 +13,7 @@ config wifi-iface 'wifi2g'
 	option device 'radio0'
 	option network 'lan'
 	option mode 'ap'
-	option ssid 'GeckoTest'
+	option ssid 'Wipkingen Airport Free'
 	option encryption 'none'
 	option disabled '0'
 
